@@ -1,0 +1,61 @@
+instance,configuration,status,iterations,seconds,objective
+afiro,everything,optimal,360,0.0002,-464.7532636823821
+afiro,no restarts,optimal,480,0.0002,-464.752881533182
+afiro,no adaptive step,optimal,360,0.0002,-464.75216727802007
+afiro,no primal weight,optimal,4600,0.0015,-464.75314271380626
+afiro,no scaling,optimal,560,0.0002,-464.7531666671754
+afiro,plain PDHG,optimal,19800,0.0050,-464.7531477177521
+sc50a,everything,optimal,1000,0.0006,-64.57488605501001
+sc50a,no restarts,optimal,6800,0.0032,-64.57483759594092
+sc50a,no adaptive step,optimal,1120,0.0005,-64.57491848819151
+sc50a,no primal weight,optimal,38600,0.0196,-64.57507716127964
+sc50a,no scaling,optimal,1880,0.0010,-64.57508832051684
+sc50a,plain PDHG,optimal,73720,0.0259,-64.5751046516185
+blend,everything,optimal,2320,0.0031,-30.8121468381994
+blend,no restarts,optimal,33360,0.0387,-30.8119733768216
+blend,no adaptive step,optimal,2600,0.0030,-30.81220181264017
+blend,no primal weight,optimal,5280,0.0069,-30.812150644335187
+blend,no scaling,optimal,195440,0.2541,-30.812086446989355
+blend,plain PDHG,time limit,60120,210.0406,-31.342988837733248
+stocfor1,everything,optimal,13120,0.0400,-41131.935451046156
+stocfor1,no restarts,optimal,288480,0.4017,-41132.08915343253
+stocfor1,no adaptive step,optimal,27440,0.0299,-41131.91336568279
+stocfor1,no primal weight,optimal,12960,0.0189,-41132.064302948624
+stocfor1,no scaling,iteration limit,2000000,3.3408,-913121.3914420714
+stocfor1,plain PDHG,iteration limit,2000000,2.2030,-26827.19410024106
+sctap1,everything,optimal,2520,0.0235,1412.248465429131
+sctap1,no restarts,optimal,95880,0.5449,1412.2526607456284
+sctap1,no adaptive step,optimal,2880,0.0119,1412.2498062079087
+sctap1,no primal weight,optimal,16680,0.0920,1412.2528134510735
+sctap1,no scaling,optimal,98520,0.6662,1412.245768291289
+sctap1,plain PDHG,iteration limit,2000000,8.9007,1410.0719095625348
+degen2,everything,optimal,3920,0.0440,-1435.1778380653839
+degen2,no restarts,optimal,16800,0.1694,-1435.1779016626408
+degen2,no adaptive step,optimal,4880,0.0450,-1435.1783620302194
+degen2,no primal weight,optimal,6000,0.0643,-1435.1779708551553
+degen2,no scaling,optimal,4840,0.0527,-1435.1771674752458
+degen2,plain PDHG,optimal,122040,1.0606,-1435.1782943674498
+scfxm1,everything,optimal,15440,0.1225,18416.786161064145
+scfxm1,no restarts,optimal,885640,6.0696,18416.79468726439
+scfxm1,no adaptive step,optimal,22600,0.1307,18416.757616981933
+scfxm1,no primal weight,optimal,444360,3.2745,18416.785459751904
+scfxm1,no scaling,iteration limit,2000000,14.1225,17746.62171830374
+scfxm1,plain PDHG,iteration limit,2000000,30.9563,20194.511606281765
+bandm,everything,optimal,32160,0.4131,-158.62794430100595
+bandm,no restarts,optimal,622880,5.1062,-158.62837728372526
+bandm,no adaptive step,optimal,72600,0.4218,-158.62839920230087
+bandm,no primal weight,optimal,734400,5.0032,-158.6280124426108
+bandm,no scaling,iteration limit,2000000,13.7368,-158.42179950543667
+bandm,plain PDHG,iteration limit,2000000,10.2399,-153.8724423043216
+share1b,everything,optimal,60560,0.1661,-76589.33764514767
+share1b,no restarts,time limit,1008640,152.2561,-76584.86683114628
+share1b,no adaptive step,optimal,57840,0.2814,-76589.3217922904
+share1b,no primal weight,iteration limit,2000000,8.1838,-70020.11059875441
+share1b,no scaling,iteration limit,2000000,5.6984,-12343.72885705701
+share1b,plain PDHG,iteration limit,2000000,4.6354,-8027.259128188597
+25fv47,everything,optimal,73560,2.2165,5501.856902297546
+25fv47,no restarts,optimal,448800,11.7828,5501.863515543135
+25fv47,no adaptive step,optimal,155280,3.6001,5501.856408720987
+25fv47,no primal weight,iteration limit,2000000,57.4966,5501.904647207795
+25fv47,no scaling,iteration limit,2000000,57.2314,5507.391396375104
+25fv47,plain PDHG,iteration limit,2000000,44.6393,5594.272869524426
