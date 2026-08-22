@@ -9,3 +9,4 @@ endfunction()
 
 sankhya_test(test_sparse)
 sankhya_test(test_mps)
+sankhya_test(test_standard_form)

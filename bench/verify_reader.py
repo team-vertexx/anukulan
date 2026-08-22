@@ -54,6 +54,8 @@ def main() -> int:
 
     checked = 0
     highs_checked = 0
+    std_failures = []
+    range_expansions = []
     highs_mismatch = []
     table_mismatch = []
     unreadable = []
@@ -90,6 +92,21 @@ def main() -> int:
                 if mine != dims:
                     highs_mismatch.append((name, mine, dims))
 
+        std = subprocess.run(
+            [args.binary, "standard", str(path), "--format=json", "--quiet"],
+            capture_output=True,
+            text=True,
+        )
+        if std.returncode != 0:
+            tail = std.stderr.strip().splitlines()
+            std_failures.append((name, tail[-1] if tail else ""))
+        else:
+            sf = json.loads(std.stdout)
+            if sf["from_ranges"]:
+                range_expansions.append(
+                    (name, sf["model_rows"], sf["std_rows"], sf["from_ranges"])
+                )
+
         problems = []
         for key, column in (
             ("netlib_rows", "table_rows"),
@@ -117,6 +134,10 @@ def main() -> int:
           f"({len(INDEX_EXCEPTIONS)} known index errors excluded)")
     print(f"  unreadable    {len(unreadable)}")
     print(f"  with warnings {len(warned)}")
+    print(f"  standard form {checked - len(std_failures)} built, "
+          f"{len(std_failures)} failed")
+    print(f"  two-sided rows {len(range_expansions)} instances expanded: "
+          + ", ".join(f"{n} {a}->{b} (+{c})" for n, a, b, c in range_expansions))
     print(f"  fixed format  {len(fixed_format)}"
           + (f" ({', '.join(fixed_format)})" if fixed_format else ""))
 
@@ -131,7 +152,10 @@ def main() -> int:
     for name, why in INDEX_EXCEPTIONS.items():
         print(f"  known index error: {name} - {why}")
 
-    return 1 if (highs_mismatch or table_mismatch or unreadable) else 0
+    for name, err in std_failures:
+        print(f"  STANDARD FORM FAILED {name}: {err}")
+
+    return 1 if (highs_mismatch or table_mismatch or unreadable or std_failures) else 0
 
 
 if __name__ == "__main__":

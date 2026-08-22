@@ -6,6 +6,7 @@
 
 #include "sankhya/model.hpp"
 #include "sankhya/mps_reader.hpp"
+#include "sankhya/standard_form.hpp"
 
 namespace {
 
@@ -15,6 +16,8 @@ void print_usage() {
       "\n"
       "usage:\n"
       "  sankhya read <file.mps> [options]     read a model and print its statistics\n"
+      "  sankhya standard <file.mps> [options] read a model and build the solver's\n"
+      "                                        standard form, printing its shape\n"
       "\n"
       "options:\n"
       "  --neg-up-bound=keep|minus-inf   how to read a negative UP bound with no\n"
@@ -123,6 +126,75 @@ int command_read(const std::vector<std::string>& args) {
   return 0;
 }
 
+int command_standard(const std::vector<std::string>& args) {
+  if (args.empty()) {
+    std::fprintf(stderr, "standard: expected a file name\n");
+    return 2;
+  }
+  bool as_json = false;
+  bool quiet = false;
+  for (std::size_t i = 1; i < args.size(); ++i) {
+    if (args[i] == "--format=json") {
+      as_json = true;
+    } else if (args[i] == "--quiet") {
+      quiet = true;
+    } else if (args[i] != "--format=human") {
+      std::fprintf(stderr, "standard: unknown option \"%s\"\n", args[i].c_str());
+      return 2;
+    }
+  }
+
+  const sankhya::MpsReadResult read_result = sankhya::read_mps(args[0]);
+  if (!read_result.ok) {
+    std::fprintf(stderr, "error: %s\n", read_result.error.c_str());
+    return 1;
+  }
+  const sankhya::StandardFormResult sf = sankhya::to_standard_form(read_result.model);
+  if (!quiet) {
+    for (const std::string& w : sf.warnings)
+      std::fprintf(stderr, "warning: %s\n", w.c_str());
+  }
+  if (!sf.ok) {
+    std::fprintf(stderr, "error: %s\n", sf.error.c_str());
+    return 1;
+  }
+
+  const sankhya::StandardLp& lp = sf.lp;
+  if (as_json) {
+    std::ostringstream out;
+    out.setf(std::ios::boolalpha);
+    out.precision(17);
+    out << "{\"name\":\"" << read_result.model.name << "\","
+        << "\"model_rows\":" << read_result.model.num_rows() << ","
+        << "\"model_nnz\":" << read_result.model.constraints.nnz() << ","
+        << "\"std_rows\":" << lp.num_rows() << ","
+        << "\"std_cols\":" << lp.num_cols() << ","
+        << "\"std_nnz\":" << lp.k.nnz() << ","
+        << "\"equalities\":" << lp.num_equalities << ","
+        << "\"inequalities\":" << lp.num_inequalities() << ","
+        << "\"from_ranges\":" << sf.rows_from_ranges << ","
+        << "\"free_rows_dropped\":" << sf.free_rows_dropped << ","
+        << "\"maximize\":" << (lp.objective_scale < 0.0) << "}\n";
+    std::fputs(out.str().c_str(), stdout);
+    return 0;
+  }
+
+  std::printf(
+      "model         %d rows, %d cols, %d nonzeros\n"
+      "standard form %d rows, %d cols, %d nonzeros\n"
+      "  equalities  %d\n"
+      "  >= rows     %d  (%d of them from %d two-sided rows)\n"
+      "  dropped     %d free rows\n"
+      "objective     %s, offset %.10e\n",
+      read_result.model.num_rows(), read_result.model.num_cols(),
+      read_result.model.constraints.nnz(), lp.num_rows(), lp.num_cols(), lp.k.nnz(),
+      lp.num_equalities, lp.num_inequalities(), 2 * sf.rows_from_ranges,
+      sf.rows_from_ranges, sf.free_rows_dropped,
+      lp.objective_scale < 0.0 ? "maximize (negated)" : "minimize",
+      lp.objective_offset);
+  return 0;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -134,6 +206,7 @@ int main(int argc, char** argv) {
   const std::string command = argv_all[0];
   const std::vector<std::string> rest(argv_all.begin() + 1, argv_all.end());
   if (command == "read") return command_read(rest);
+  if (command == "standard") return command_standard(rest);
 
   std::fprintf(stderr, "unknown command \"%s\"\n", command.c_str());
   print_usage();
