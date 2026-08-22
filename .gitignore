@@ -5,3 +5,4 @@ data/lptestset/
 data/miplib/
 data/maros/
 *.o
+data/reference/_scratch/

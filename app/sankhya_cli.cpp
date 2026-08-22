@@ -1,4 +1,5 @@
 #include <cstdio>
+#include <cstdlib>
 #include <ios>
 #include <sstream>
 #include <string>
@@ -6,6 +7,7 @@
 
 #include "sankhya/model.hpp"
 #include "sankhya/mps_reader.hpp"
+#include "sankhya/pdhg.hpp"
 #include "sankhya/standard_form.hpp"
 
 namespace {
@@ -18,12 +20,23 @@ void print_usage() {
       "  sankhya read <file.mps> [options]     read a model and print its statistics\n"
       "  sankhya standard <file.mps> [options] read a model and build the solver's\n"
       "                                        standard form, printing its shape\n"
+      "  sankhya solve <file.mps> [options]    solve an LP with the first-order method\n"
       "\n"
       "options:\n"
       "  --neg-up-bound=keep|minus-inf   how to read a negative UP bound with no\n"
       "                                  lower bound. keep (default) matches HiGHS,\n"
       "                                  minus-inf matches CPLEX.\n"
-      "  --quiet                         do not print reader warnings\n");
+      "  --quiet                         do not print reader warnings\n"
+      "\n"
+      "solve options:\n"
+      "  --tol=<x>            relative tolerance, default 1e-6\n"
+      "  --max-iter=<n>       iteration limit\n"
+      "  --time-limit=<s>     wall clock limit in seconds\n"
+      "  --no-scaling         turn off Ruiz and Pock-Chambolle preconditioning\n"
+      "  --no-adaptive        fixed step size\n"
+      "  --no-restarts        no restarting\n"
+      "  --no-primal-weight   keep the primal weight at one\n"
+      "  --verbose            print progress\n");
 }
 
 int command_read(const std::vector<std::string>& args) {
@@ -195,6 +208,108 @@ int command_standard(const std::vector<std::string>& args) {
   return 0;
 }
 
+int command_solve(const std::vector<std::string>& args) {
+  if (args.empty()) {
+    std::fprintf(stderr, "solve: expected a file name\n");
+    return 2;
+  }
+  sankhya::PdhgOptions options;
+  bool as_json = false;
+  bool quiet = false;
+
+  auto value_of = [](const std::string& arg, const std::string& prefix, double* out) {
+    if (arg.rfind(prefix, 0) != 0) return false;
+    *out = std::strtod(arg.c_str() + prefix.size(), nullptr);
+    return true;
+  };
+
+  for (std::size_t i = 1; i < args.size(); ++i) {
+    const std::string& a = args[i];
+    double v = 0.0;
+    if (value_of(a, "--tol=", &v)) {
+      options.tolerance = v;
+    } else if (value_of(a, "--max-iter=", &v)) {
+      options.max_iterations = static_cast<sankhya::Int>(v);
+    } else if (value_of(a, "--time-limit=", &v)) {
+      options.time_limit_seconds = v;
+    } else if (value_of(a, "--check-every=", &v)) {
+      options.termination_check_frequency = static_cast<sankhya::Int>(v);
+    } else if (a == "--no-scaling") {
+      options.scaling.ruiz_iterations = 0;
+      options.scaling.pock_chambolle = false;
+    } else if (a == "--no-adaptive") {
+      options.adaptive_step_size = false;
+    } else if (a == "--no-restarts") {
+      options.restarts = false;
+    } else if (a == "--no-primal-weight") {
+      options.primal_weight_updates = false;
+    } else if (a == "--verbose") {
+      options.verbose = true;
+    } else if (a == "--format=json") {
+      as_json = true;
+    } else if (a == "--quiet") {
+      quiet = true;
+    } else if (a != "--format=human") {
+      std::fprintf(stderr, "solve: unknown option \"%s\"\n", a.c_str());
+      return 2;
+    }
+  }
+
+  const sankhya::MpsReadResult read_result = sankhya::read_mps(args[0]);
+  if (!read_result.ok) {
+    std::fprintf(stderr, "error: %s\n", read_result.error.c_str());
+    return 1;
+  }
+  if (read_result.model.has_integers() && !quiet) {
+    std::fprintf(stderr,
+                 "warning: model has integer variables; solving the continuous "
+                 "relaxation\n");
+  }
+  const sankhya::StandardFormResult sf = sankhya::to_standard_form(read_result.model);
+  if (!sf.ok) {
+    std::fprintf(stderr, "error: %s\n", sf.error.c_str());
+    return 1;
+  }
+
+  const sankhya::PdhgResult r = sankhya::solve_pdhg(sf.lp, options);
+
+  if (as_json) {
+    std::ostringstream out;
+    out.setf(std::ios::boolalpha);
+    out.precision(17);
+    out << "{\"name\":\"" << read_result.model.name << "\","
+        << "\"status\":\"" << sankhya::to_string(r.status) << "\","
+        << "\"objective\":" << r.objective << ","
+        << "\"iterations\":" << r.iterations << ","
+        << "\"restarts\":" << r.restarts << ","
+        << "\"seconds\":" << r.solve_seconds << ","
+        << "\"rel_primal\":" << r.residual.relative_primal << ","
+        << "\"rel_dual\":" << r.residual.relative_dual << ","
+        << "\"rel_gap\":" << r.residual.relative_gap << ","
+        << "\"matrix_norm\":" << r.matrix_norm_estimate << ","
+        << "\"row_spread_before\":" << r.scaling.row_spread_before << ","
+        << "\"row_spread_after\":" << r.scaling.row_spread_after << ","
+        << "\"std_rows\":" << sf.lp.num_rows() << ","
+        << "\"std_cols\":" << sf.lp.num_cols() << "}\n";
+    std::fputs(out.str().c_str(), stdout);
+    return r.status == sankhya::PdhgStatus::kOptimal ? 0 : 1;
+  }
+
+  std::printf(
+      "status        %s%s%s\n"
+      "objective     %.12e\n"
+      "iterations    %d  (%d restarts)\n"
+      "time          %.3f s\n"
+      "relative      primal %.3e  dual %.3e  gap %.3e\n"
+      "||K||         %.6e\n"
+      "row spread    %.3e -> %.3e\n",
+      sankhya::to_string(r.status).c_str(), r.message.empty() ? "" : ": ",
+      r.message.c_str(), r.objective, r.iterations, r.restarts, r.solve_seconds,
+      r.residual.relative_primal, r.residual.relative_dual, r.residual.relative_gap,
+      r.matrix_norm_estimate, r.scaling.row_spread_before, r.scaling.row_spread_after);
+  return r.status == sankhya::PdhgStatus::kOptimal ? 0 : 1;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -207,6 +322,7 @@ int main(int argc, char** argv) {
   const std::vector<std::string> rest(argv_all.begin() + 1, argv_all.end());
   if (command == "read") return command_read(rest);
   if (command == "standard") return command_standard(rest);
+  if (command == "solve") return command_solve(rest);
 
   std::fprintf(stderr, "unknown command \"%s\"\n", command.c_str());
   print_usage();
