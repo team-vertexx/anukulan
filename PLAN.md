@@ -1,0 +1,462 @@
+# SIH26119 — build plan
+
+Written 22 Aug 2026, after [RESEARCH.md](RESEARCH.md).
+
+Confirmed with myself before writing this:
+- refinery model is **in** (LP first, piecewise-linear MILP version later);
+- no interior-point method — roadmap slide, stated openly;
+- Maros–Meszaros for QP, not QPLIB — stated openly, with the one-line reason;
+- GPU box decision deferred, but with a hard date on it (section 6);
+- **I am doing all of the technical work alone.** That is the assumption this whole
+  plan is built on, and it changes almost everything about the sequencing.
+
+---
+
+## 0. Read this first: the thing that is not code
+
+I am solo on the build. SIH is not solo. The rules, verified today:
+
+- **exactly 6 student members**, all from the same institution, no inter-college teams;
+- **minimum 1 female member, mandatory**;
+- 1–2 faculty or industry mentors;
+- your college's **SPOC** registers on sih.gov.in — the SPOC registration deadline was
+  **31 July 2026** and has already passed;
+- you must **win your college's internal hackathon (September 2026)** to be nominated;
+- the SPOC then uploads the idea PPT to the national portal;
+- national idea submission for SIH26119 closes **20 September 2026**;
+- online evaluation Oct–Nov; **36-hour Grand Finale, December 2026**, at a nodal centre.
+
+Sources: [Reskilll SIH 2026 guide](https://reskilll.com/blogs/smart-india-hackathon-2026-complete-guide-registration-themes-winning/),
+[Where U Elevate rules writeup](https://whereuelevate.com/blogs/smart-india-hackathon-2026).
+Everything here must still be confirmed against my own SPOC — editions change rules.
+
+**So the single highest-risk item in this entire project is not the solver. It is that
+I cannot enter at all without five more people and an internal-hackathon win, and the
+internal round is inside the next four weeks.**
+
+Nothing in phases 1–3 matters if Phase A fails. Phase A therefore runs first and in
+parallel with everything, and it gets checked every week.
+
+The honest framing for recruiting: I am not looking for co-developers. I am looking for
+five people who will own the deck, the video, the documentation, the presentation and
+the logistics, and who will show up for 36 hours in December. That is a real and useful
+job, it is a legitimate way onto an SIH team, and it is much easier to fill than
+"help me write a sparse LU factorization."
+
+---
+
+## Phase A — get eligible to compete (22 Aug → 12 Sep, runs alongside the code)
+
+| # | Action | By |
+|---|---|---|
+| A1 | Confirm my institute has a registered SIH 2026 SPOC, and get the name and contact. Start with the dean's office / student technical body / the SIH notice on the institute site. | 26 Aug |
+| A2 | Get the **internal hackathon date, format and nomination quota** in writing from the SPOC. Everything downstream is scheduled off this date, not off 20 Sep. | 29 Aug |
+| A3 | Recruit 5 members including at least 1 female. Pitch = the deck/video/docs/presentation roles above, not "come write a solver". | 5 Sep |
+| A4 | Line up 1 faculty mentor. Anyone in optimization / numerical methods / OR / chemical engineering. A ChemE mentor is a genuine asset here — they will know refinery planning models better than I do. | 5 Sep |
+| A5 | Register the team on sih.gov.in against SIH26119 via the SPOC. | per SPOC date |
+| A6 | Confirm whether the institute allows a team to submit to more than one PS, and whether the SPOC quota is per-PS or overall. | 5 Sep |
+
+**Definition of done:** a 6-member team registered against SIH26119, internal hackathon
+date known and on my calendar, mentor named.
+
+**If A3 fails by 5 Sep:** escalate — post in institute groups, ask the SPOC directly to
+place me with a team that needs a technical lead. A team that has five presenters and no
+builder is exactly as stuck as I am, and they exist. Do not let this drift to mid-Sep.
+
+---
+
+## 1. Scope, ruthlessly tiered
+
+Six people could build the full LP + MILP + QP + GPU scope. I cannot, not while also
+carrying everything else on my plate. So I am fixing the priority order **now**, in
+writing, so that when time runs short in November I cut from the bottom instead of
+panicking and half-finishing four things.
+
+| Tier | What | Why it is at this level |
+|---|---|---|
+| **T0** | MPS/QPS reader, sparse types, benchmark harness with HiGHS baseline and reference-value checking | Nothing is demonstrable without it |
+| **T0** | **PDHG LP solver on CPU** | The headline algorithm, and the best value-per-line in the whole project. ~600 lines gets a working from-scratch LP solver |
+| **T0** | Refinery crude-blending + production-planning LP | MRPL is the jury. Without this the deck is a student exercise |
+| **T0** | Robustness demos: degeneracy, ill-conditioning, scaling ablation | Directly named in the Expected Solution paragraph |
+| **T1** | **CUDA port of PDHG** | GPU is in the PS title. One week once the CPU version is correct |
+| **T2** | Bounded-variable dual simplex (Markowitz LU + PFI + Devex + Harris/BFRT) | Exact vertex solutions, 1e-9 objectives, and the warm starts that make B&B possible |
+| **T3** | QP by ADMM, **indirect variant** | See 5.3 — the indirect solve reuses the SpMV I already have and saves me writing a sparse LDL^T with AMD ordering. That is a week of solo time saved |
+| **T4** | MILP: branch and bound + root GMI cuts + light presolve | Needs T2. First thing to be cut if the schedule slips |
+
+Cut rule: **if T2 slips past 20 Nov, T4 is dropped** and MILP goes on the roadmap slide
+with a clear statement of why. Three things that work beat five things that half-work,
+and a jury of engineers will read it the same way.
+
+The thing I will *not* cut, no matter what: honest, tolerance-labelled benchmark numbers
+with the losses shown. That is the credibility of the whole submission.
+
+---
+
+## 2. Timeline overview
+
+```
+22 Aug ─────────────────────────────────────────────────► 20 Sep  (idea submission)
+        Phase A: team + SPOC  ══════════════════════
+        P1 skeleton   P2 PDHG CPU        P3 refinery + demos + PPT
+        ▔▔▔▔▔▔▔▔▔▔▔   ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔   ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+        22-28 Aug     29 Aug - 8 Sep     9-19 Sep
+                                    ▲ internal hackathon lands somewhere in here
+
+21 Sep ──────────────────────────────────────────────────► Dec  (36h finale)
+        P4 GPU port + simplex start   P5 simplex     P6 QP + MILP   P7 freeze
+        ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔   ▔▔▔▔▔▔▔▔▔▔▔    ▔▔▔▔▔▔▔▔▔▔▔▔   ▔▔▔▔▔▔▔
+        21 Sep - 31 Oct              1-23 Nov       24 Nov-10 Dec  pre-finale
+```
+
+The internal hackathon date (A2) is the real near-term deadline and it may be earlier
+than 20 Sep. If it lands before 15 Sep, Phase 3 compresses and the PPT gets built
+against whatever Phase 2 has produced by then. Phase 2's output is what makes the PPT
+credible, so Phase 2 is the one that must not slip.
+
+---
+
+## 3. Phase 1 — skeleton, reader, harness (22–28 Aug)
+
+**Goal:** I can read any benchmark instance, and I can already produce a comparison
+table — before I have written a single line of solver.
+
+Building the harness *first* is deliberate. It means every later phase is measured from
+day one, and it means that even in the worst case I turn up with real data about the
+benchmark sets.
+
+1. CMake C++20 project. `SOLVER_ENABLE_CUDA=OFF` by default; **no CUDA in any header
+   the CPU build sees.**
+2. Sparse matrix types: CSR and CSC, with a transpose that is just a view swap where
+   possible. Triplet builder → compressed.
+3. **MPS reader** — fixed and free format, `ROWS` / `COLUMNS` / `RHS` / `RANGES` /
+   `BOUNDS`, all bound types (`UP` `LO` `FX` `FR` `MI` `PL` `BV` `LI` `UI`), negative RHS
+   on the objective row as the objective constant, `OBJSENSE` where present.
+   QPS extension (`QUADOBJ` / `QMATRIX`) for the QP set.
+4. Standard-form builder producing the `(c, A, b, G, h, l, u)` form from RESEARCH 1.1,
+   plus the logical-variable form from RESEARCH 2.1 for the simplex later.
+5. **Instance fetcher**: script that compiles `emps.c` and pulls the Netlib set, pulls
+   `lptestset` instances, MIPLIB instances, and the Maros–Meszaros zips. The emps
+   pipeline is already verified working on this machine.
+6. **Reference-value oracle**: parse the Netlib README table, the MIPLIB `.solu` file
+   and the Maros–Meszaros table into one lookup. Every solve is checked against a
+   published optimum, never against my own residual.
+7. **Benchmark harness**: run instance → objective, iterations, wall time, residuals →
+   CSV. Invoke `highs` as an external process for the baseline. Emit a markdown table
+   and a matplotlib performance-profile plot.
+8. `brew install highs` (1.15.1 is bottled — and it is the same 1.15.x line Mittelmann
+   benchmarked, which is convenient for cross-checking).
+
+**Definition of done:** `bench --set netlib20 --solver highs` produces a CSV where all
+20 objectives match the Netlib README to 8 significant figures. That is the harness
+validating itself before I trust it with my own solver.
+
+---
+
+## 4. Phase 2 — PDHG LP on CPU (29 Aug – 8 Sep)
+
+**Goal:** a from-scratch LP solver that actually solves things. This is the phase that
+makes the submission real.
+
+Build order, each step verifiable on its own:
+
+1. **Scaling**: Ruiz (10 sweeps, inf-norm) then Pock–Chambolle (alpha=1, 1-norm).
+   Verify by checking row/column norm spread before and after.
+2. **Plain PDHG loop** with a fixed step `eta = 0.9 / ||K||_2` (power iteration), no
+   restarts, no adaptivity. Verify on AFIRO — it will be slow and that is fine.
+3. **Unscaling and termination** on the true problem, relative criteria at 1e-6.
+   Verify: AFIRO objective = -4.6475314286E+02.
+4. **Adaptive step size** (RESEARCH 1.3). Verify: iteration count drops on 25FV47.
+5. **Primal weight** update (1.4). Verify on a badly balanced instance like FIT1P.
+6. **Restarts** on the weighted KKT error with cuPDLP's 0.2 / 0.8 / 0.36 constants
+   (1.5). This is the step that turns it from "converges eventually" into a solver.
+   Verify: large iteration-count drop across the whole set.
+7. Infeasibility certificates (1.8) — only if the above is done early.
+
+**Definition of done:** at least 15 of the 20 Netlib instances in RESEARCH 5.1 solved to
+1e-6 relative, with objectives matching the README table to 6 significant figures, and
+AFIRO / SC50A / ADLITTLE / BLEND / SHARE1B / DEGEN2 / 25FV47 all correct.
+
+**Ablation to record while building, because it is a slide:** run the whole set with
+scaling off. It will mostly fail or crawl. "Here is the same solver without Ruiz +
+Pock–Chambolle" is a far better answer to *"how do you handle ill-conditioning?"* than
+any paragraph I could write.
+
+---
+
+## 5. Phase 3 — refinery model, robustness, PPT (9–19 Sep)
+
+This phase is doing double duty: it has to win the **internal** hackathon and pass the
+national screening.
+
+### 5.1 Refinery model (9–12 Sep)
+
+A multi-period crude blending + production planning LP, written as a generator that
+emits MPS so it scales from toy to a few thousand variables:
+
+- crudes with assay properties (sulphur, density, yields), purchase costs and
+  availability;
+- CDU cuts and downstream unit capacities;
+- product blends with quality specs as linear bounds on blended properties;
+- multi-period inventory balances;
+- objective: maximise margin.
+
+True blending is bilinear — the pooling problem, and nonconvex. The industry-standard
+answer is a linear or piecewise-linear approximation, and the piecewise-linear version
+is a MILP, which lands squarely in scope for the T4 work later. Both facts go in the
+deck; knowing *why* the linear model is an approximation is exactly the kind of thing
+an MRPL engineer will probe. References in RESEARCH 5.5.
+
+Sanity check: solve it with HiGHS first, then with mine, and confirm they agree. A model
+I wrote myself has no published optimum, so HiGHS **is** the oracle here.
+
+### 5.2 Robustness runs (13–14 Sep)
+
+- **Degeneracy**: DEGEN2, DEGEN3, CYCLE — quoting the Netlib README's own MINOS
+  statistics (56.7% / 52.5% / 47.1% degenerate steps) as third-party evidence that these
+  instances are what I claim they are.
+- **Ill-conditioning**: PILOT87, SHARE1B, GREENBEA — with the Netlib README's own note
+  that PILOT87 is harder than PILOT "because of the bad scaling in the numerics".
+- **Scaling ablation** from Phase 2.
+- Convergence plots: KKT error against iteration, restarts marked.
+
+### 5.3 Benchmark table vs HiGHS (15 Sep)
+
+Netlib set, both solvers, tolerance labelled on every column. I will lose on most small
+Netlib instances — simplex is simply better there — and I am going to show that,
+because the large-instance story in Phase 4 is what carries the argument, and a table
+where I win everything is a table nobody believes.
+
+### 5.4 Deck and video (16–19 Sep)
+
+SIH's idea-submission template is normally: Proposed Solution / Technical Approach /
+Feasibility and Viability / Impact and Benefits / Research and References. **Get the
+actual template from the SPOC — do not rebuild it from memory.**
+
+What goes in each, for this PS:
+
+- **Proposed solution** — sovereign solver core, from scratch, GPU-accelerated LP path.
+  Lead with the working demo, not the ambition. One screenshot of a real solve with the
+  reference objective next to it beats a page of architecture.
+- **Technical approach** — the four algorithm families, the from-scratch boundary
+  (RESEARCH 7) stated explicitly, the CPU/GPU backend split.
+- **Feasibility and viability** — this is where the honest scoping lives: what is built,
+  what is planned, what is out of reach and why. Including "no interior-point method"
+  and "hard MILP is a roadmap item". State the limits before the jury finds them.
+- **Impact and benefits** — licence-cost sovereignty, the refinery model, the fact that
+  the GPU path is where the field is actually moving (cite the Aug 2026 Mittelmann
+  LPfeas results).
+- **Research and references** — PDLP, cuPDLP, cuPDLPx, OSQP, Huangfu & Hall, Koberstein,
+  MIPLIB 2017. A real bibliography signals that this is not a wrapper project.
+
+Video: screen capture of an actual run. Reading a reference optimum out of the Netlib
+README and then watching my solver print the same number is the most persuasive 30
+seconds available.
+
+**Definition of done:** deck + video submitted through the SPOC before the portal
+deadline, containing at least one benchmark table and one screenshot from a real run.
+
+---
+
+## 6. Phase 4 — GPU port and simplex start (21 Sep – 31 Oct)
+
+### 6.1 The GPU decision, with a date on it
+
+Deferred for now, but not indefinitely. **Decision by 30 Sep**, because the port needs
+October.
+
+Default until then, costing nothing and requiring no commitment: **Kaggle Notebooks**.
+Published ~30 GPU-hours/week, P100 or 2x T4, `nvcc` available, no card needed. That is
+more than enough for kernel development — the runs are seconds, the time goes on
+compiles and uploads.
+
+The decision that actually matters is **which box the December demo runs on**, and the
+answer is not Kaggle. Options in RESEARCH 6.1. My recommendation stands: RunPod Secure
+Cloud RTX 4090, roughly ₹2,500 for the whole finale window, ~99% uptime. Not Vast.ai —
+a spot instance reclaimed on 15 seconds notice during a live demo is not a risk worth
+the ₹1,000 saved. If the institute has an NVIDIA cluster, that beats both, and finding
+out is an A-phase question for the mentor.
+
+**Recorded fallback is mandatory regardless.** Terminal capture of the GPU run plus
+committed logs and CSVs. Venue networks fail; this is the single most likely thing to
+go wrong on the day.
+
+### 6.2 The port (Oct)
+
+1. Introduce `LinAlgBackend`: `spmv`, `spmv_transpose`, `axpy`, `dot`, `nrm2`,
+   `clamp_project`, `max_zero_project`. CPU implementation first, and **the CPU results
+   must not change** — that is the regression test for the whole refactor.
+2. CUDA implementation. Five kernels: CSR SpMV, transposed SpMV, fused axpy+clamp for
+   the primal update, fused axpy+project for the dual update, and reductions.
+   Written by hand, not cuSPARSE (RESEARCH 7).
+3. Move the whole loop to device: adaptive step, restart checks, primal weight. Host
+   keeps I/O, scaling, unscaling. Two transfers total, per cuPDLP.jl's design.
+4. **Correctness gate:** GPU and CPU must agree to solver tolerance on every Netlib
+   instance before any timing number is recorded.
+5. Timing runs on the Mittelmann `lptestset` instances from RESEARCH 5.2, against HiGHS
+   on CPU. Include `cont1` or `cont11`, where first-order methods lose badly, and report
+   the loss.
+6. Sanity-benchmark my SpMV against cuSPARSE once. If mine is 3x slower that is a bug I
+   want to know about. Report the comparison; using it as a yardstick is not depending
+   on it.
+
+**Definition of done:** a table of large sparse LPs where the GPU build beats HiGHS at
+1e-6, with at least one instance where it does not, and CPU/GPU agreement demonstrated
+across the Netlib set.
+
+This table is the headline of the finale. Everything else supports it.
+
+### 6.3 Simplex, started in parallel (late Oct)
+
+Begin the bounded-variable simplex while the GPU work is fresh, because it is the long
+pole and it must not start in November.
+
+---
+
+## 7. Phase 5 — revised simplex (1–23 Nov)
+
+Order, each step independently testable (RESEARCH section 2):
+
+1. Logical-variable standard form; basis bookkeeping; `b_hat` and reduced costs from a
+   dense LU. Correct before fast.
+2. **Primal simplex**, Dantzig pricing, textbook ratio test. Gate: AFIRO, SC50A,
+   ADLITTLE, BLEND exact.
+3. Sparse **LU with Markowitz pivoting** and threshold stability (`u ~ 0.1`), with
+   triangular peeling first. Gate: 25FV47 factorizes with sane fill.
+4. **PFI update** + refactorization every 50–100 iterations and on residual failure.
+5. **Dual simplex** with a composite-objective phase 1. Gate: DEGEN2, DEGEN3 solved.
+6. **Harris two-pass ratio test** + **bound flipping**. Gate: DEGEN2/DEGEN3 iteration
+   counts drop and no accuracy warnings fire.
+7. **Devex pricing**. (DSE and Forrest–Tomlin are explicitly stretch — they make it
+   fast, they do not make it correct.)
+
+**Definition of done:** all 20 Netlib instances from RESEARCH 5.1 solved to 1e-9,
+objectives matching the README table, and a warm-started re-solve after a bound change
+taking on the order of tens of iterations rather than a fresh solve. That last property
+is the one T4 depends on.
+
+---
+
+## 8. Phase 6 — QP and MILP (24 Nov – 10 Dec)
+
+### 8.1 QP by ADMM, indirect (24 Nov – 1 Dec)
+
+Using the **indirect** variant deliberately (RESEARCH 3.7): instead of factorizing the
+quasi-definite KKT matrix, solve
+
+```
+(P + sigma*I + rho*A^T A) x = rhs
+```
+
+by conjugate gradient. That is SpMV-only, so it reuses the exact kernels the PDHG path
+already has — CPU and CUDA both — and it saves me writing a sparse LDL^T with a
+fill-reducing ordering, which is easily a week of solo work I do not have.
+
+Then: modified Ruiz scaling with cost step, over-relaxation `alpha = 1.6`, per-constraint
+`rho` with the `1e3` multiplier on equalities, the adaptive `rho` rule, unscaled
+termination, and polishing (RESEARCH 3.5) to get from 1e-3 ADMM accuracy to something
+worth quoting.
+
+**Definition of done:** the 16 Maros–Meszaros instances in RESEARCH 5.4 solved, matching
+the reference optima, with polishing on/off reported. The QPTEST/HS21/HS76/QAFIRO end of
+the list should be exact; CVXQP1_M is the honest hard case.
+
+### 8.2 MILP (2–10 Dec) — first thing cut if the schedule slips
+
+1. B&B on the warm-started dual simplex. Most-fractional branching, depth-first, to get
+   the tree provably correct against MIPLIB `.solu` values on tiny instances.
+2. Light presolve with a postsolve undo stack (RESEARCH 4.3).
+3. Pseudocost branching; hybrid depth-first-then-best-bound node selection.
+4. Root-only **GMI cuts**, with the validation discipline from RESEARCH 4.2: every cut
+   must be violated by the current LP point and must not cut off the known optimal
+   integer solution on instances where I have the reference value. Reject cuts with
+   dynamic range above ~1e6.
+5. Simple rounding + diving heuristics for an early incumbent.
+
+**Instance selection** by the method in RESEARCH 5.3: run HiGHS over the MIPLIB
+collection with a 10-second limit, keep what it closes in under ~5 seconds, pick 8–12
+spanning different structures. Publish the selection script so the set reads as curated,
+not cherry-picked.
+
+**Definition of done:** 8+ MIPLIB instances solved to proven optimality with objectives
+matching `.solu`, plus a table of where I time out. Timeouts shown, not hidden.
+
+---
+
+## 9. Phase 7 — freeze and rehearse (11 Dec → finale)
+
+- **Code freeze one week before the finale.** No new features. Only bug fixes.
+- Regenerate every benchmark table and plot from scratch, from a clean clone, with a
+  single command. If a number in the deck cannot be reproduced by one script, it does
+  not go in the deck.
+- Record the GPU demo. Commit the logs and CSVs.
+- Rehearse the live demo end to end at least five times, including the failure paths:
+  no network, GPU box unreachable, laptop only.
+- Write the README so someone can build and run it in under five minutes. "Transparent
+  and extensible" is in the PS text; a build that only I can do fails that.
+
+### The finale demo, in order
+
+1. `solve refinery_blend.mps` — the MRPL-shaped model. Objective, time, done. Open with
+   *their* problem.
+2. `solve degen3.mps` alongside the Netlib reference value. Correct on a
+   52%-degenerate instance.
+3. Same instance, scaling disabled. It struggles. Turn scaling back on. That is the
+   numerical-robustness answer, demonstrated rather than asserted.
+4. The GPU run on a large `lptestset` instance next to HiGHS on CPU. The headline number.
+5. The full benchmark table, including the instances where I lose.
+6. One file open on screen — the CUDA SpMV kernel, or the Markowitz pivot selection —
+   as the answer to "did you actually write this?"
+
+### Power-round pitch, roughly
+
+> Every refinery in India runs its planning on CPLEX or Xpress. We wrote an optimization
+> core from scratch — no solver library underneath it, our own LU factorization, our own
+> CUDA kernels. It solves the standard Netlib and MIPLIB benchmarks to published optimal
+> values, it beats HiGHS by [N]x on large sparse LPs on a GPU, and it solves a refinery
+> crude-blending model. It is not CPLEX yet. Hard mixed-integer problems are still ahead
+> of us and we will tell you exactly where the line is. But the foundation is Indian,
+> it is open, and every line of it can be inspected.
+
+Bounded claims, backed by numbers anyone can reproduce. With an engineering audience
+that beats a big claim every time.
+
+---
+
+## 10. Risk register
+
+| # | Risk | Likelihood | Impact | Mitigation |
+|---|---|---|---|---|
+| R1 | **No team of 6 / no internal-hackathon win** — cannot enter at all | High | Fatal | Phase A starts today and is checked weekly. Escalation path at 5 Sep: ask the SPOC to place me with a team that has presenters and no builder |
+| R2 | **Solo capacity** — this is a 6-person scope | High | Severe | The T0–T4 tiering in section 1, with the cut rule written down *before* the pressure arrives. T0 alone is a defensible submission |
+| R3 | **PDHG does not converge on the harder Netlib instances** | Medium | High | Scaling is non-optional and comes first; restarts are the known fix. Fallback: report moderate-accuracy results honestly and let the simplex carry high accuracy |
+| R4 | **GPU box unavailable at the finale** | Medium | High | Kaggle for dev costs nothing; RunPod Secure Cloud (not spot) for the demo; **recorded fallback is mandatory** |
+| R5 | **Simplex slips past 20 Nov** | Medium | Medium | Pre-agreed: drop T4 (MILP), ship LP + QP + GPU solidly, put MILP on the roadmap with an honest explanation |
+| R6 | **GMI cuts silently invalid** (nonbasic-at-upper-bound and slack bookkeeping) | Medium | Medium | Validate every cut against known optimal integer solutions from `.solu` before trusting any of it. Never ship a cut generator that has not been checked this way |
+| R7 | **Jury reads "from scratch" more strictly than I do** | Low | High | RESEARCH 7 is an explicit slide. Own kernels, own factorizations, HiGHS only as an external baseline process |
+| R8 | **"No winner declared"** — happened on several SIH 2025 problem statements | Medium | Fatal-ish | Exactly why T0 is scoped to be genuinely finishable. A working solver clears a bar that eliminates most entrants |
+| R9 | Benchmark numbers not reproducible under questioning | Low | High | One script regenerates every table and plot from a clean clone. Nothing in the deck that the script cannot produce |
+| R10 | My other commitments eat September | High | High | Phase 2 is the only thing that truly cannot slip before 20 Sep. Phase 3 can compress to four days if it has to |
+
+---
+
+## 11. Weekly check-in
+
+Every Sunday, three lines, committed to the repo:
+
+1. Phase A status — team count, SPOC contact, internal hackathon date.
+2. What passed its definition-of-done this week.
+3. What is at risk, and which tier gets cut if it does not recover.
+
+If Phase A is still red on 5 Sep, that week's work is Phase A and nothing else.
+
+---
+
+## 12. Immediate next actions
+
+1. Find out who my institute's SIH 2026 SPOC is. Today or tomorrow. Everything else is
+   downstream of this.
+2. Start the recruiting ask — five people, deck/video/docs/presentation roles, at least
+   one female member.
+3. Start Phase 1: CMake skeleton, sparse types, MPS reader.
+
+Phase 1 is ready to start as soon as this plan is approved.
