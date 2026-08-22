@@ -17,6 +17,7 @@ add_library(sankhya
   src/sankhya/model.cpp
   src/sankhya/mps_reader.cpp
   src/sankhya/standard_form.cpp
+  src/sankhya/scaling.cpp
 )
 target_include_directories(sankhya PUBLIC src)
 
