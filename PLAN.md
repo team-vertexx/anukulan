@@ -173,14 +173,23 @@ benchmark sets.
    and the Maros–Meszaros table into one lookup. Every solve is checked against a
    published optimum, never against my own residual.
 7. **Benchmark harness**: run instance → objective, iterations, wall time, residuals →
-   CSV. Invoke `highs` as an external process for the baseline. Emit a markdown table
-   and a matplotlib performance-profile plot.
-8. `brew install highs` (1.15.1 is bottled — and it is the same 1.15.x line Mittelmann
+   CSV. Invoke `highs` as an external process. **Three baselines, not one** (RESEARCH
+   5.6): HiGHS dual simplex, HiGHS PDLP, and mine. The PDLP column is my same-algorithm
+   debugging oracle from Phase 2 onward, and reporting it is what keeps the final table
+   honest. Emit a markdown table and a matplotlib performance-profile plot.
+8. `brew install highs` (1.15.1 is bottled — the same 1.15.x line Mittelmann
    benchmarked, which is convenient for cross-checking).
+
+Reader correctness is where silent wrong answers come from, so two conventions get
+explicit treatment (RESEARCH 5.7): RANGES sign handling on E rows, and the negative-UP
+bound case where HiGHS and CPLEX genuinely disagree. Default to HiGHS behaviour since
+HiGHS is the oracle, with a switch for the other and a warning naming affected columns.
 
 **Definition of done:** `bench --set netlib20 --solver highs` produces a CSV where all
 20 objectives match the Netlib README to 8 significant figures. That is the harness
-validating itself before I trust it with my own solver.
+validating itself before I trust it with my own solver. Plus: the reader round-trips
+every instance in the Netlib set without warnings I have not explained, checked against
+the README's BOUND-TYPE TABLE for coverage of FR / FX / LO / MI / BV.
 
 ---
 

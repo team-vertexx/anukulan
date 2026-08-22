@@ -899,6 +899,43 @@ that solves *your* problem".
 `cvxqp1_s.qps` appears as `cvxqp1s.qps`, `qship08l.qps`, `aug2dc.qps`, and so on. The
 files are DOS line-ended — unzip with `unzip -aa`.)
 
+### 5.6 HiGHS already ships a PDLP — I need to handle this head on
+
+Found while checking HiGHS's MPS reader: HiGHS has a `highs/pdlp/` directory containing
+a **vendored copy of cuPDLP-C** (including a `cuda/` subdirectory) plus its own `hipdlp`
+implementation. So HiGHS 1.15 can solve LPs with the same first-order algorithm I am
+planning to write.
+
+This cuts two ways and I would rather deal with it now than be surprised by it in a
+Q&A.
+
+**The good half — it hands me a debugging oracle I did not expect.** `highs` with the
+PDLP solver selected runs the *same algorithm* on the *same instance*. If my iteration
+counts are wildly different from theirs, I have a bug, and I will know which phase
+introduced it. Nothing else I have gives me that. The harness will therefore run
+**three** baselines, not one:
+
+1. `highs` default (dual simplex) — the "established solver" the PS asks for;
+2. `highs` with PDLP — same-algorithm reference, for correctness and iteration counts;
+3. mine.
+
+**The awkward half — "HiGHS already does this."** The honest answers, in order:
+
+- The PS does not ask for a novel algorithm. It asks for a **sovereign core built from
+  scratch from mathematical foundation**, explicitly not built on an existing solver
+  library. HiGHS's PDLP is vendored third-party C code sitting inside a solver library —
+  which is exactly the dependency the PS exists to remove.
+- Benchmarking honesty: against HiGHS's **default** (dual simplex) on large sparse LPs I
+  expect to win, and that is the comparison the PS asks for. Against HiGHS's **PDLP** I
+  am competing with a mature implementation of my own algorithm and I will probably
+  lose. **I am going to report both columns.** A table that quietly compares only
+  against the baseline I beat is the kind of thing an engineering jury spots, and once
+  they spot it nothing else in the deck is trusted.
+- The differentiators that survive that comparison: the full stack is ours end to end
+  (reader, scaling, kernels, simplex, QP, MILP), our GPU kernels are hand-written rather
+  than cuSPARSE, and the refinery model is ours. "We wrote all of it" is the claim, not
+  "we invented it".
+
 ---
 
 ## 6. GPU environment
@@ -970,6 +1007,37 @@ Kernels I have to write: CSR SpMV, CSC (or transposed-CSR) SpMV, fused axpy+clam
 the primal update, fused axpy+project for the dual update, and reductions for dot/norm.
 That is a small, tractable kernel set — five kernels, all textbook — which is exactly
 why this is the right GPU target for a hackathon.
+
+### 5.7 Two MPS conventions that silently produce wrong answers
+
+Checked against the HiGHS free-format reader source (`highs/io/HMpsFF.cpp`) rather than
+against documentation, because my numbers have to match HiGHS's numbers.
+
+**RANGES.** With `b` from the RHS section and `r` from RANGES, HiGHS applies:
+
+```
+row type L, or type E with r < 0:   lower = upper - |r|
+row type G, or type E with r > 0:   upper = lower + |r|
+row type E with r == 0:             unchanged (stays an equality)
+```
+
+The sign of `r` matters **only** for E rows; for L and G rows it is ignored. This
+matches the CPLEX/OSL documented convention.
+
+**Negative UP bound.** This one genuinely differs between solvers. CPLEX documents that
+an upper bound below zero with no lower bound given sets the lower bound to minus
+infinity. **HiGHS does not do this** — I read `parseBounds` and there is no such case;
+it simply assigns `col_upper = value` and leaves the lower bound at its default of zero.
+
+Since HiGHS is my correctness oracle, my reader defaults to **HiGHS behaviour**, with a
+`--mps-neg-up-bound=minus-inf` switch for the CPLEX convention, and a warning naming any
+column that hits the case. Silently picking either convention is how you end up with an
+objective that differs from the reference by a mysterious amount on one instance.
+
+Also worth knowing for reader tests: the Netlib README contains a **BOUND-TYPE TABLE**
+listing which bound types each instance uses. That tells me exactly which instances
+exercise `FR` (CAPRI, CYCLE, GREENBEB), `FX` (CZPROB, BORE3D), `LO` (D6CUBE) and so on —
+so reader coverage can be targeted instead of hoped for.
 
 ---
 
