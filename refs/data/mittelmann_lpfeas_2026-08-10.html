@@ -1,0 +1,228 @@
+<!doctype HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
+<HTML>
+<HEAD>
+<TITLE></TITLE>
+<META NAME="generator" CONTENT="HTML::TextToHTML v2.25">
+</HEAD>
+<BODY>
+<PRE>
+<P>10 Aug 2026   ======================================================
+               LPfeas Benchmark (find PD feasible point) + ADDENDUM 
+              ======================================================
+                   H. Mittelmann (<A HREF="mailto:mittelmann@asu.edu">mittelmann@asu.edu</A>)
+
+Logfiles of these runs at: <A HREF="https://plato.asu.edu/ftp/lpfeas_logs/">plato.asu.edu/ftp/lpfeas_logs/</A>
+
+This benchmark was run on a Linux-PC (i7-11700K, 3.6GHz, 64GB).
+The MPS-datafiles for most testcases are in one of (see column "s")
+
+ <A HREF="https://miplib2010.zib.de/">miplib2010.zib.de/</A> [1]
+ <A HREF="https://plato.asu.edu/ftp/lptestset/">plato.asu.edu/ftp/lptestset/</A> [2]
+ <a href="https://www.netlib.org/lp/data/">www.netlib.org/lp/data/</a> [3,7]
+ <A HREF="https://old.sztaki.hu/~meszaros/public_ftp/lptestset/">www.sztaki.hu/~meszaros/public_ftp/lptestset/</A>
+(MISC[4], PROBLEMATIC[5], STOCHLP[6], INFEAS[8], NEW[9])
+
+NOTE: some files in [2-9] need to be expanded with emps in same directory!
+Last 16 instances are undisclosed. 
+
+The following codes were tested:  
+
+ COPT-8.0.0/3    <a href="https://www.shanshu.ai/copt/">COPT</a>
+ MOSEK-11.1.11   <A HREF="https://www.mosek.com">www.mosek.com</A>
+ HiGHS-1.15.0    <a href="https://github.com/ERGO-Code/HiGHS">HiGHS</a> 
+ KNITRO-16.0.0   <A HREF="https://www.artelys.com/knitro/">www.artelys.com/knitro/</A>
+ ORTOOLS-9.10    <a href="https://developers.google.com/optimization/lp/lp_advanced">PDLP</a>
+ XOPT-0.0.8      <a href="http://sribd.cn/en/article/813">XOPT</a>
+ cuOpt-26.08     <a href="https://github.com/NVIDIA/cuopt">cuOpt</a>
+ cuPDLPx-0.3.0   <a href="https://github.com/MIT-Lu-Lab/cuPDLPx">cuPDLPx</a>
+ HPR-LP-C-0.1.2  <a href="https://github.com/PolyU-IOR/HPR-LP-C">HPR-LP-C</a>
+    MATLAB has HiGHS as default dual-simplex solver starting with 2024a.
+
+++++++++++++++++++++  cuOpt runs in concurrent mode; the tolerance level
+for all codes used is 1e-6; COPTG has barrier accuracy (1e-8)
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+Scaled shifted (by 10 sec) geometric mean of runtimes
+
+unscaled   25.3 79.8   256   372  421   146  13.7  28.5  16.2  20.6           
+scaled     1.67 5.28  16.9  23.0 27.8  9.63     1  2.08  1.11  1.51    
+solved       65   57    55    48   50    59    62    57    64    58  
+====================================================================
+65 probs   COPT MOSEK HiGHS KNTRO PDLP XOPT CUOPT CUPDX COPTG HPRLP
+====================================================================
+L1_sixm       2    1    98     m   88     8    2     2     6     2
+Linf_520c     3    6  1063  4858  233    15    2     2     2     7
+a2864         1    1   202   301   10     1    1     1     1     2
+bdry2         6   15     t    68    t   146    8     t     6     t
+cont1         1    1     6     3  256     6    1    22     1     8
+cont11        1    1    14     4 1988    23    1    60     1    64
+datt256       1    2     7     3    2     5    1     1     1     1
+dlr1         28  126   218   413    t   279   14    16    15     6
+ex10          1    1    34    36    1     1    1     1     1     1
+fhnw-bin1    19   46   529   444 3827    86   59    28    14    20
+fome13        1    1    22    15   10     1    1     1     1     1
+graph40-40    1    1    13     3    2     1    1     1     1     1
+irish-e       9    3    18     4    t    12    2    24     5     8
+neos          5    9   115    60  257    16    9    11     2     9
+neos3         1    1    38     8    3     1    1     1     1     1
+neos3025225   8    6    68    30   94    45    2     2     6     3
+neos5052403   4    4    13    28   13     9    1     1     2     1
+neos5251015   2    5    85     3    3    14    1     1     2     1
+ns1687037     3    f   411    10    t    53   25     t     2     2
+ns1688926     2    1   460     t    t    47    4     t     4     t 
+nug08-3rd     1    1    41   163    1     1    1     1     1     1
+pds-100      13   18    63  1356   37    34    1     1     5     1
+psched3-3     5   17    67    55 5165    15   10    25     2     2
+qap15         1    1     7     6    3     1    1     1     1     1
+rail02       17   30    69    50  117    24    9    12     5    11
+rail4284     12    9    96   214   46    57    4    27     5    18
+rmine15      11   25   116   584   10    36    2     1     4     2
+s82          30   34   261  6668    t   133   53   611    10    16
+s100          4    3    20    48 2192    12    3    54     2     3
+s250r10       2    3    14    19   74    11    2     3     1     2
+savsched1     5    9    34    23    6    15    1     1     4     1
+scpm1         4   15    72    23   12    22    2     6     3     7
+shs1023       6   12    51    60  588    46   22    13     3     4
+square41      2    2    17    35  176    11    4    27     2    25
+stat96v2      5   23   198     6  348    96    8     8     7     8
+storm_1000   10   19   270   142  524   134    3     3     5     2
+stp3d         5    4    32    56   20    24    4     3     2     2
+support10     2    3    19    44    8     4    1     1     1     1
+tpl-tub-ws   18   21   202   117   80    79    7     7     7     4
+woodlands09   3    3    19    15   28     7    1     1     2     1
+Dual2_5000  325    f     t     t 1885  4091   22    17   143    26
+Primal2_1000 24   24   104   105  944  1813    4     3     9     4
+thk_48     4313 5600     t     t  937    t    37    38   700    37
+thk_63      162  131  1592     t 1265  1101   10     8    74    11
+L1_six1000    9    f     m     m  853    45   12    15    11     8
+L2CTA3D     371 2186     m     m   28  1416    4     3    87     6
+degme        15  363   118    64  204   143    7     5    13    10
+dlr2        251 3596  4475     t    t  8518   39    42    87    46
+set-cover    61  131   397   222  134   156   10   102    16   102
+energy1      61   62   321   297    t   424    t     t    61    14
+gamora       65    f   243     t  151  1042   31    31    28    41
+groot       101    f  1827     f    t     f    f     f    94     t
+heimdall     37   60   181     t 4707   939  237   309    22    17
+hulk        230    f     t     t    t     t    t     t   226     t
+loki       1060    f  2278     t    t  9366  172   137     t   498
+mars        149  312   689  1506 1333  1052   36   200    64   216
+nebula       75   98   123     t    t  1264   90   109    29     t
+test03      111  111   628  8454  158   391   12    11    32    12
+test13       11   18     t  1120    t     t   20     t     5     t
+test43      832 1330     t     t  532     t    8     5   165     8
+test53       79   15   123  1040  670   387    2     2    35     1
+test63        3    f     t    65    t     t    8     t     2     t
+test83     1458 2192     t     t  620 11268    8     5   269     7
+test93      139  145   853   796 1106  1066   12     9    85    14
+thor        119 4161   346     t    t  1536  207   175    43    96
+==============================================================================
+"t": 15000 (resp 1000 for GPU) secds exceeded; "t,f,m" counted as max-time 
+GPU codes on NVIDIA B200 (192GiB),1 GPUx31 CPUs (184 GiB) on AMD EPYC 9575F
+
+			    ========
+                            ADDENDUM
+			    ========
+
+In addition problems from Oliver Hinder's homepage and github page were solved
+time limit 4800s. Logfiles at: <a href="https://plato.asu.edu/ftp/lpfeas_logs/addendum/">addendum</a>
+
+scaled                         1.17          1       1.70       1.15
+solved                            6          8          5          9
+==========================================================================
+    prob                      CUOPT       CUPX      COPTG      HPRLP 
+==========================================================================
+heat-source-easy                501        462          m        292
+mcf_2500_100_500               2142       2681        395       1436
+mcf_5000_100_400                  f          t        748          t
+mcf_5000_50_500                   t          t        376          t
+mediterranean-shipping            f          t          m          t
+prod_100_300_02                1446        893          m       2850
+production-inventory            144         92        826        627
+qap-tho-150                       f          m          m       2094
+qap-wil-100                    1094        494          m        421
+supply-chain                      f       4603        694       2782
+synthetic-design-match          111        108          m        207
+tsp-gaia-10m                    585        425          m        799
+=============================================================================
+
+
+==========================
+dimensions of the problems
+==========================
+
+s problem           rows    columns     nonzeros
+================================================
+2 L1_sixm250obs   986069     428032      4280320
+2 Linf_520c        93326      69004       566193
+2 a2864            22117     200787     20078717
+2 bdry2           376500     250998      1500003
+2 cont1           160793      40398       399991
+2 cont11          160793      80396       439989
+2 datt256          11077     262144      1503732
+2 dlr1           1735470    9121907     18365107
+2 ex10             69609      17680      1179680
+2 fhnw-bin1       772872    1141653      8611326
+2 fome13           48569      97840       334984
+2 graph40-40      360900     102600      1260900
+2 irish-e         104260      61728       538809
+2 neos            479120      36786      1084461
+2 neos3           512209       6624      1542816
+2 neos-3025225     91572      69846      9357951
+2 neos5052403      38269      32868      4898304
+2 neos-5251015    486531     136971      1955388
+2 ns1687037        50622      43749      1406739
+2 ns1688926        32768      16587      1712128
+2 nug08-3rd        19728      20448       139008
+2 pds-100         156244     505360      1390539
+2 psched3-3       266228      79555      1062480
+2 qap15             6331      22275       110700
+1 rail02           95791     270869       756228
+2 rail4284          4284    1092610     12372358
+2 rmine15         358395      42438       879732
+2 s82              87878    1690631      7022608
+2 s100             14734     364417      2127672
+2 s250r10          10963     273142      1572104
+2 savsched1       295990     328575      1846351
+2 scpm1             5000     500000      6250000
+1 shs1023         133944     444625      1044725
+2 square41         40161      62234     13628623
+4 stat96v2         29089     957432      2852184
+2 stormG2_1000    528186    1259121      4228817
+1 stp3d           159488     204880       662128
+2 support10       165685      14770       551152
+2 tpl-tub-ws16   1154615     747691      4720567
+2 woodlands09     194599     382147      2646003
+2 Dual2_5000    30000600   33050602     93001800
+2 Primal2_1000   1299380    2559380      5498140
+2 thk_48         6366377    8609262     27802878
+2 thk_63         5694387    7701112     21592414
+2 L1_sixm1000obs 3082940    1426256     14262560
+2 L2CTA3D         210000   10000000     30000000
+9 degme           185501     659415      8127528
+2 dlr2           7132926   38868107     78091589
+2 set-cover        10000    1102008     20442268
+
+for sizes of undisclosed problems see logfiles
+================================================
+
+==========================================================================
+    prob                      constraints      variables      nonzeros
+==========================================================================
+heat-source-easy               15625000         31628008     125000000
+mcf_2500_100_500                1512600        126250100     253750100
+mcf_5000_100_400                2525100        202500100     407500100
+mcf_5000_50_500                 2775050        126250050     253750050
+mediterranean-shipping          7490593        208479461     628927462
+prod_100_300_02                 4650850         18270600     500049700
+production-inventory            1610550          6110200      66809900
+qap-tho-150                     6705300        249783750    1005795000
+qap-wil-100                     1980200         49015000     198020000
+supply-chain                    2210100        201000100     403000100
+synthetic-design-match          5500135         10000000     690000000
+tsp-gaia-10m                    1701668         60601996     475701996
+==========================================================================
+</PRE>
+
+</BODY>
+</HTML>
+
