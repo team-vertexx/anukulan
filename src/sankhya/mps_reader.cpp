@@ -1,7 +1,9 @@
 #include "sankhya/mps_reader.hpp"
 
 #include <cctype>
+#include <algorithm>
 #include <cmath>
+#include <limits>
 #include <cstdlib>
 #include <fstream>
 #include <istream>
@@ -43,6 +45,32 @@ std::vector<std::string> tokenize(const std::string& line) {
     const std::size_t start = i;
     while (i < line.size() && !std::isspace(static_cast<unsigned char>(line[i]))) ++i;
     out.push_back(line.substr(start, i - start));
+  }
+  return out;
+}
+
+// Fixed-format MPS puts each field in a fixed column range, which is how a name
+// is allowed to contain spaces. The classic layout, in 1-based columns:
+//
+//   field 1: 2-3    field 2: 5-12   field 3: 15-22
+//   field 4: 25-36  field 5: 40-47  field 6: 50-61
+//
+// The last field is taken to the end of the line, because writers routinely let
+// a value spill a character or two past column 61.
+std::vector<std::string> tokenize_fixed(const std::string& line) {
+  static constexpr std::size_t kBegin[6] = {1, 4, 14, 24, 39, 49};
+  static constexpr std::size_t kEnd[6] = {3, 12, 22, 36, 47,
+                                          std::numeric_limits<std::size_t>::max()};
+  std::vector<std::string> out;
+  for (int f = 0; f < 6; ++f) {
+    if (kBegin[f] >= line.size()) break;
+    const std::size_t stop = std::min(kEnd[f], line.size());
+    if (stop <= kBegin[f]) continue;
+    std::string field = line.substr(kBegin[f], stop - kBegin[f]);
+    const std::size_t first = field.find_first_not_of(" \t");
+    if (first == std::string::npos) continue;
+    const std::size_t last = field.find_last_not_of(" \t");
+    out.push_back(field.substr(first, last - first + 1));
   }
   return out;
 }
@@ -125,6 +153,11 @@ class Reader {
     return false;
   }
 
+  std::vector<std::string> tokens_for(const std::string& line) const {
+    return fixed_format_ ? tokenize_fixed(line) : tokenize(line);
+  }
+
+  bool flush_rows();
   bool handle_rows(const std::vector<std::string>& t);
   bool handle_columns(const std::vector<std::string>& t);
   bool handle_rhs(const std::vector<std::string>& t);
@@ -143,6 +176,13 @@ class Reader {
 
   bool seen_objective_ = false;
   bool in_integer_marker_ = false;
+  bool fixed_format_ = false;
+
+  // ROWS lines are buffered so the format can be decided from the section as a
+  // whole before any of them is interpreted. ROWS always precedes the sections
+  // that depend on the chosen format, so one buffered section is enough.
+  std::vector<std::string> pending_row_lines_;
+  std::vector<int> pending_row_line_numbers_;
 
   std::unordered_map<std::string, Int> row_index_;
   std::unordered_map<std::string, Int> col_index_;
@@ -192,6 +232,35 @@ Int Reader::column_index(const std::string& name, bool create) {
   has_lower_.push_back(false);
   has_upper_.push_back(false);
   return idx;
+}
+
+bool Reader::flush_rows() {
+  if (pending_row_lines_.empty()) return true;
+
+  if (options_.format == MpsOptions::Format::kFixed) {
+    fixed_format_ = true;
+  } else if (options_.format == MpsOptions::Format::kFree) {
+    fixed_format_ = false;
+  } else {
+    // A free format ROWS line is exactly `type name`. Anything else means the
+    // names carry spaces, which only fixed format allows.
+    fixed_format_ = false;
+    for (const std::string& line : pending_row_lines_) {
+      if (tokenize(line).size() != 2) {
+        fixed_format_ = true;
+        break;
+      }
+    }
+  }
+  result_.fixed_format = fixed_format_;
+
+  for (std::size_t i = 0; i < pending_row_lines_.size(); ++i) {
+    line_no_ = pending_row_line_numbers_[i];
+    if (!handle_rows(tokens_for(pending_row_lines_[i]))) return false;
+  }
+  pending_row_lines_.clear();
+  pending_row_line_numbers_.clear();
+  return true;
 }
 
 bool Reader::handle_rows(const std::vector<std::string>& t) {
@@ -519,13 +588,24 @@ MpsReadResult Reader::run(std::istream& in) {
     if (line[0] == '*') continue;
 
     const bool is_header = !std::isspace(static_cast<unsigned char>(line[0]));
-    const std::vector<std::string> t = tokenize(line);
+
+    if (!is_header && section == Section::kRows) {
+      // Buffered until the section ends and the format has been decided.
+      pending_row_lines_.push_back(line);
+      pending_row_line_numbers_.push_back(line_no_);
+      continue;
+    }
+
+    const std::vector<std::string> t = is_header ? tokenize(line) : tokens_for(line);
     if (t.empty()) continue;
 
     if (is_header) {
       const Section next = section_from(t[0]);
       if (next == Section::kNone)
         return (fail("unknown section \"" + t[0] + "\""), result_);
+      const int header_line = line_no_;
+      if (section == Section::kRows && !flush_rows()) return result_;
+      line_no_ = header_line;
       section = next;
       if (section == Section::kName && t.size() >= 2) result_.model.name = t[1];
       if (section == Section::kObjSense && t.size() >= 2) {
@@ -546,7 +626,7 @@ MpsReadResult Reader::run(std::istream& in) {
         break;
       }
       case Section::kRows:
-        ok = handle_rows(t);
+        ok = fail("internal: ROWS data line reached the dispatcher");
         break;
       case Section::kColumns:
         ok = handle_columns(t);
@@ -577,6 +657,7 @@ MpsReadResult Reader::run(std::istream& in) {
     if (!ok) return result_;
   }
 
+  if (!flush_rows()) return result_;
   if (!seen_objective_) {
     warn("no N row found: the objective is taken to be zero");
   }

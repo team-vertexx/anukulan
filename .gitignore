@@ -1,0 +1,7 @@
+build/
+data/netlib/
+data/_work/
+data/lptestset/
+data/miplib/
+data/maros/
+*.o

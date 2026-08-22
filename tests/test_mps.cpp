@@ -513,6 +513,54 @@ void test_large_bound_is_infinite() {
   if (r.ok) CHECK_NEAR(r.model.col_upper[0], kInf, 0.0);
 }
 
+void test_fixed_format_names_with_spaces() {
+  // FORPLAN in the Netlib set is a real fixed-format file whose row and column
+  // names contain spaces. Free-format tokenising silently truncates those names,
+  // so the reader has to detect the format from the ROWS section and switch.
+  //
+  // Fixed field columns, 1-based: 2-3, 5-12, 15-22, 25-36, 40-47, 50-61.
+  // These lines are laid out on exactly those columns; getting that wrong is how
+  // the first version of this test failed, so do not reflow them.
+  const std::string text =
+      "NAME          FIXED\n"
+      "ROWS\n"
+      " N  COST\n"
+      " L  AZ  90\n"
+      " G  AZ 100\n"
+      "COLUMNS\n"
+      "    DEDO3 11  COST      1.0            AZ  90    2.0\n"
+      "    DEDO3 11  AZ 100    3.0\n"
+      "    PLAIN     AZ  90    4.0\n"
+      "RHS\n"
+      "    RHS       AZ  90    5.0            AZ 100    6.0\n"
+      "ENDATA\n";
+  const MpsReadResult r = read(text);
+  CHECK(r.ok);
+  if (!r.ok) {
+    std::fprintf(stderr, "error: %s\n", r.error.c_str());
+    return;
+  }
+  CHECK(r.fixed_format);
+  const Model& m = r.model;
+  CHECK_EQ(m.num_rows(), 2);
+  CHECK_EQ(m.num_cols(), 2);
+  CHECK_EQ(m.constraints.nnz(), 3);
+  CHECK(row_of(m, "AZ  90") >= 0);   // two internal spaces preserved
+  CHECK(row_of(m, "AZ 100") >= 0);
+  CHECK(col_of(m, "DEDO3 11") >= 0);
+  CHECK(col_of(m, "PLAIN") >= 0);
+  CHECK_NEAR(m.row_upper[static_cast<std::size_t>(row_of(m, "AZ  90"))], 5.0, 0.0);
+  CHECK_NEAR(m.row_lower[static_cast<std::size_t>(row_of(m, "AZ 100"))], 6.0, 0.0);
+  CHECK_NEAR(m.objective[static_cast<std::size_t>(col_of(m, "DEDO3 11"))], 1.0, 0.0);
+}
+
+void test_free_format_is_not_misdetected() {
+  // The detector must not push an ordinary free-format file into fixed parsing.
+  const MpsReadResult r = read(kBasic);
+  CHECK(r.ok);
+  CHECK(!r.fixed_format);
+}
+
 }  // namespace
 
 int main() {
@@ -530,5 +578,7 @@ int main() {
   test_dos_line_endings_and_comments();
   test_fortran_exponent();
   test_large_bound_is_infinite();
+  test_fixed_format_names_with_spaces();
+  test_free_format_is_not_misdetected();
   return sankhya_test::finish("test_mps");
 }
