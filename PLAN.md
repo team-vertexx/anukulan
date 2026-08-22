@@ -7,8 +7,10 @@ Confirmed with myself before writing this:
 - no interior-point method — roadmap slide, stated openly;
 - Maros–Meszaros for QP, not QPLIB — stated openly, with the one-line reason;
 - GPU box decision deferred, but with a hard date on it (section 6);
-- **I am doing all of the technical work alone.** That is the assumption this whole
-  plan is built on, and it changes almost everything about the sequencing.
+- **I am the only confirmed builder.** I have a team of 6 (see Phase A), but until I
+  know what the other five can actually do, this plan assumes I write all of the code
+  myself. That assumption drives the sequencing, and section 1.1 says exactly what gets
+  handed off the moment I know otherwise.
 
 ---
 
@@ -30,18 +32,19 @@ Sources: [Reskilll SIH 2026 guide](https://reskilll.com/blogs/smart-india-hackat
 [Where U Elevate rules writeup](https://whereuelevate.com/blogs/smart-india-hackathon-2026).
 Everything here must still be confirmed against my own SPOC — editions change rules.
 
-**So the single highest-risk item in this entire project is not the solver. It is that
-I cannot enter at all without five more people and an internal-hackathon win, and the
-internal round is inside the next four weeks.**
+**Status, 22 Aug 2026: team found.** Six members including me, at least one female
+member, all from the same institution — I have confirmed both. That takes the worst
+risk in this project off the critical path.
 
-Nothing in phases 1–3 matters if Phase A fails. Phase A therefore runs first and in
-parallel with everything, and it gets checked every week.
+What is left in Phase A is mechanical but still gating: SPOC contact, internal
+hackathon date, registration, a mentor, and — the one that changes this plan — finding
+out what the other five can actually build.
 
-The honest framing for recruiting: I am not looking for co-developers. I am looking for
-five people who will own the deck, the video, the documentation, the presentation and
-the logistics, and who will show up for 36 hours in December. That is a real and useful
-job, it is a legitimate way onto an SIH team, and it is much easier to fill than
-"help me write a sparse LU factorization."
+Their default job is the deck, the video, the documentation, the presentation and
+showing up for 36 hours in December. That is a real and useful job and it is worth
+saying out loud so nobody feels like a passenger. But if any of them can write C++ or
+Python, that changes my schedule materially, so section 1.1 pre-scopes the work
+packages I can hand over on day one.
 
 ---
 
@@ -51,17 +54,21 @@ job, it is a legitimate way onto an SIH team, and it is much easier to fill than
 |---|---|---|
 | A1 | Confirm my institute has a registered SIH 2026 SPOC, and get the name and contact. Start with the dean's office / student technical body / the SIH notice on the institute site. | 26 Aug |
 | A2 | Get the **internal hackathon date, format and nomination quota** in writing from the SPOC. Everything downstream is scheduled off this date, not off 20 Sep. | 29 Aug |
-| A3 | Recruit 5 members including at least 1 female. Pitch = the deck/video/docs/presentation roles above, not "come write a solver". | 5 Sep |
+| A3 | ~~Recruit 5 members including at least 1 female.~~ **Done 22 Aug.** Six members, at least one female, same institution. | done |
 | A4 | Line up 1 faculty mentor. Anyone in optimization / numerical methods / OR / chemical engineering. A ChemE mentor is a genuine asset here — they will know refinery planning models better than I do. | 5 Sep |
+| A7 | **Skills audit of the other five.** Who can write C++? Python? Has anyone touched CUDA? Who is the strongest presenter — that person owns the power round, not me. Ask directly, do not assume. | 26 Aug |
+| A8 | Assign owners for deck, video, documentation, and logistics. Named person per artefact, not "the team". | 29 Aug |
 | A5 | Register the team on sih.gov.in against SIH26119 via the SPOC. | per SPOC date |
 | A6 | Confirm whether the institute allows a team to submit to more than one PS, and whether the SPOC quota is per-PS or overall. | 5 Sep |
 
 **Definition of done:** a 6-member team registered against SIH26119, internal hackathon
-date known and on my calendar, mentor named.
+date known and on my calendar, mentor named, and every deliverable in Phase 3 with a
+named owner.
 
-**If A3 fails by 5 Sep:** escalate — post in institute groups, ask the SPOC directly to
-place me with a team that needs a technical lead. A team that has five presenters and no
-builder is exactly as stuck as I am, and they exist. Do not let this drift to mid-Sep.
+**Watch item:** a team that exists on a registration form and a team that turns up are
+different things. The check for that is A8 — if the deck has a named owner by 29 Aug and
+a draft outline by 12 Sep, the team is real. If those slip, I plan Phase 3 as if I am
+building the deck myself too, and I would rather find that out on 29 Aug than on 18 Sep.
 
 ---
 
@@ -82,6 +89,31 @@ panicking and half-finishing four things.
 | **T2** | Bounded-variable dual simplex (Markowitz LU + PFI + Devex + Harris/BFRT) | Exact vertex solutions, 1e-9 objectives, and the warm starts that make B&B possible |
 | **T3** | QP by ADMM, **indirect variant** | See 5.3 — the indirect solve reuses the SpMV I already have and saves me writing a sparse LDL^T with AMD ordering. That is a week of solo time saved |
 | **T4** | MILP: branch and bound + root GMI cuts + light presolve | Needs T2. First thing to be cut if the schedule slips |
+
+### 1.1 What I hand off the moment I know who can code (A7)
+
+I am keeping the plan solo-safe, but I am not going to waste a capable teammate by
+having nothing ready for them. These packages are genuinely separable — clean input,
+clean output, testable on their own, and none of them need to understand PDHG:
+
+| Package | Needs | Frees me | Hand to |
+|---|---|---|---|
+| **MPS/QPS reader** | careful C++, no numerics | ~4 days | anyone comfortable in C++ |
+| **Instance fetcher + reference-value oracle** | Python, shell | ~2 days | any Python person |
+| **Benchmark harness + plots** | Python, matplotlib | ~3 days | any Python person |
+| **Refinery model generator** | Python + reading two papers | ~3 days | ideally the ChemE-adjacent member or the mentor's student |
+| **Presolve + postsolve stack** | C++, self-contained, well-specified | ~5 days | the strongest C++ person |
+| **CUDA kernels** (5 kernels, spec in Phase 4) | CUDA | ~1 week | anyone who has written CUDA |
+
+If one person takes the reader and another takes the harness and the fetcher, I get
+roughly **two weeks back before 20 Sep** — which is the difference between "PDHG works"
+and "PDHG works and the GPU port has already started." If someone can do CUDA, the port
+comes off my critical path entirely and can run parallel with the simplex through
+October, which is what makes T4 (MILP) survivable.
+
+Rule for delegation: every package gets a written spec with its definition-of-done and
+a test they can run themselves. If I have to review it line by line it has not saved me
+anything.
 
 Cut rule: **if T2 slips past 20 Nov, T4 is dropped** and MILP goes on the roadmap slide
 with a clear statement of why. Three things that work beat five things that half-work,
@@ -426,8 +458,9 @@ that beats a big claim every time.
 
 | # | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|---|
-| R1 | **No team of 6 / no internal-hackathon win** — cannot enter at all | High | Fatal | Phase A starts today and is checked weekly. Escalation path at 5 Sep: ask the SPOC to place me with a team that has presenters and no builder |
-| R2 | **Solo capacity** — this is a 6-person scope | High | Severe | The T0–T4 tiering in section 1, with the cut rule written down *before* the pressure arrives. T0 alone is a defensible submission |
+| R1 | ~~No team of 6~~ — **resolved 22 Aug.** Remaining: no internal-hackathon win | Medium | Fatal | Team confirmed (6 members, ≥1 female, same institution). Internal round is now the gate — Phase 3's deliverable has to win it, which is why Phase 2 cannot slip |
+| R2 | **Solo build capacity** — this is a 6-person scope and I am the only confirmed builder | High | Severe | T0–T4 tiering in section 1 with the cut rule written down *before* the pressure arrives. T0 alone is a defensible submission. Section 1.1 lists what gets handed off if A7 turns up anyone who can code |
+| R11 | **Teammates registered but not delivering** — deck and video land back on me in mid-Sep | Medium | High | A8 assigns named owners by 29 Aug; draft deck outline due 12 Sep. If either slips I re-plan Phase 3 assuming I build the deck too, while there is still time to do it |
 | R3 | **PDHG does not converge on the harder Netlib instances** | Medium | High | Scaling is non-optional and comes first; restarts are the known fix. Fallback: report moderate-accuracy results honestly and let the simplex carry high accuracy |
 | R4 | **GPU box unavailable at the finale** | Medium | High | Kaggle for dev costs nothing; RunPod Secure Cloud (not spot) for the demo; **recorded fallback is mandatory** |
 | R5 | **Simplex slips past 20 Nov** | Medium | Medium | Pre-agreed: drop T4 (MILP), ship LP + QP + GPU solidly, put MILP on the roadmap with an honest explanation |
