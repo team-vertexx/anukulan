@@ -102,6 +102,18 @@ class CpuBackend final : public LinAlgBackend {
 
 }  // namespace
 
+void LinAlgBackend::step_size_terms(Int n, Int m, const double* dx,
+                                    const double* dy, const double* k_dx,
+                                    double omega, double* interaction,
+                                    double* movement) const {
+  // The absolute value belongs here, not at the call site: the step is safe
+  // while eta * |dy' K dx| stays under half the weighted movement, and a
+  // backend that returned the signed value would let a negative interaction
+  // grow eta without bound.
+  *interaction = std::fabs(dot(dy, k_dx, m));
+  *movement = weighted_norm_squared(n, m, dx, dy, omega);
+}
+
 const LinAlgBackend& cpu_backend() {
   static const CpuBackend backend;
   return backend;

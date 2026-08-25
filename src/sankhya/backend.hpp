@@ -103,6 +103,24 @@ class LinAlgBackend {
   // omega * ||dx||^2 + ||dy||^2 / omega, the weighted norm PDLP works in.
   virtual double weighted_norm_squared(Int n, Int m, const double* dx,
                                        const double* dy, double omega) const = 0;
+
+  // The three inner products the adaptive step size needs every iteration:
+  //
+  //     interaction = |dy' K dx|
+  //     movement    = omega ||dx||^2 + ||dy||^2 / omega
+  //
+  // They are asked for together rather than one at a time because of what that
+  // costs on a GPU. Each reduction ends in a device-to-host copy, and a copy is
+  // a synchronisation: the pipeline drains, and the cost is latency rather than
+  // bytes. Three of them per iteration is three stalls per iteration, which on
+  // qap15 - 24,720 iterations - is around a second of doing nothing, roughly a
+  // sixth of the whole solve. Fused, it is one stall.
+  //
+  // The default implementation below is the obvious one, and is what the CPU
+  // uses; a backend only overrides this if fusing actually buys it something.
+  virtual void step_size_terms(Int n, Int m, const double* dx, const double* dy,
+                               const double* k_dx, double omega,
+                               double* interaction, double* movement) const;
 };
 
 // Plain scalar C++. The reference against which any other backend is checked.

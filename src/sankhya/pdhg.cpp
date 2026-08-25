@@ -416,10 +416,10 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
       // eta * |dy' K dx| stays under half the weighted movement. Dropping the
       // absolute value here lets eta grow without bound whenever the
       // interaction happens to be negative, and the iterates blow up.
-      const double interaction =
-          std::fabs(backend.dot(dy.data(), k_dx.data(), m));
-      const double movement =
-          backend.weighted_norm_squared(n, m, dx.data(), dy.data(), omega);
+      double interaction = 0.0;
+      double movement = 0.0;
+      backend.step_size_terms(n, m, dx.data(), dy.data(), k_dx.data(), omega,
+                              &interaction, &movement);
       double eta_bar = kInf;
       if (interaction > 0.0) eta_bar = movement / (2.0 * interaction);
 

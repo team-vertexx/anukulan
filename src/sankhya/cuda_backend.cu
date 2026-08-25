@@ -141,6 +141,78 @@ __global__ void reduce_kernel(Int n, const double* __restrict__ a,
   if (threadIdx.x == 0) partial[blockIdx.x] = shared[0];
 }
 
+
+// The three inner products the adaptive step size needs, in one launch.
+//
+// Separately these are three reduce() calls, and each ends in a device-to-host
+// copy that synchronises the whole pipeline. The bytes are trivial - a few
+// kilobytes of block partials - but the stall is not, and it happens on every
+// iteration. Fused, the block partials for all three land in one array, a second
+// kernel finishes them on the device, and exactly three doubles cross the bus.
+//
+// The block partials are summed in a different order than three separate
+// reductions would sum them, because the grid is now sized from max(n, m)
+// rather than from each length on its own. Floating point addition is not
+// associative, so the last bits move. That is the same class of difference the
+// build already sees from FMA contraction, and it is why iteration counts are
+// never used as a correctness gate here - objectives against published optima
+// are.
+__global__ void step_terms_kernel(Int n, Int m, const double* __restrict__ dx,
+                                  const double* __restrict__ dy,
+                                  const double* __restrict__ k_dx,
+                                  double* __restrict__ partial, int grid) {
+  __shared__ double shared[3][kBlock];
+  const Int stride = blockDim.x * gridDim.x;
+  const Int start = blockIdx.x * blockDim.x + threadIdx.x;
+
+  double interaction = 0.0, dy_dy = 0.0, dx_dx = 0.0;
+  for (Int i = start; i < m; i += stride) {
+    const double v = dy[i];
+    interaction += v * k_dx[i];
+    dy_dy += v * v;
+  }
+  for (Int i = start; i < n; i += stride) {
+    const double v = dx[i];
+    dx_dx += v * v;
+  }
+
+  shared[0][threadIdx.x] = interaction;
+  shared[1][threadIdx.x] = dx_dx;
+  shared[2][threadIdx.x] = dy_dy;
+  __syncthreads();
+  for (int s = blockDim.x / 2; s > 0; s >>= 1) {
+    if (threadIdx.x < s) {
+      shared[0][threadIdx.x] += shared[0][threadIdx.x + s];
+      shared[1][threadIdx.x] += shared[1][threadIdx.x + s];
+      shared[2][threadIdx.x] += shared[2][threadIdx.x + s];
+    }
+    __syncthreads();
+  }
+  if (threadIdx.x == 0) {
+    partial[blockIdx.x] = shared[0][0];
+    partial[grid + blockIdx.x] = shared[1][0];
+    partial[2 * grid + blockIdx.x] = shared[2][0];
+  }
+}
+
+// One block per quantity, so the whole finish is a single launch of three
+// blocks and the result never leaves the device until it is three doubles.
+__global__ void finish_terms_kernel(int grid, const double* __restrict__ partial,
+                                    double* __restrict__ out) {
+  __shared__ double shared[kBlock];
+  const int which = blockIdx.x;
+  double acc = 0.0;
+  for (int i = threadIdx.x; i < grid; i += blockDim.x)
+    acc += partial[which * grid + i];
+  shared[threadIdx.x] = acc;
+  __syncthreads();
+  for (int s = blockDim.x / 2; s > 0; s >>= 1) {
+    if (threadIdx.x < s) shared[threadIdx.x] += shared[threadIdx.x + s];
+    __syncthreads();
+  }
+  if (threadIdx.x == 0) out[which] = shared[0];
+}
+
 struct DeviceMatrix {
   Int rows = 0;
   Int* start = nullptr;
@@ -161,11 +233,16 @@ class CudaBackend final : public LinAlgBackend {
     if (count == 0) throw std::runtime_error("cuda: no device");
     cuda_check(cudaMalloc(&partial_, sizeof(double) * kMaxBlocks), "partial");
     host_partial_.resize(kMaxBlocks);
+    cuda_check(cudaMalloc(&terms_partial_, sizeof(double) * 3 * kMaxBlocks),
+               "step term partials");
+    cuda_check(cudaMalloc(&terms_, sizeof(double) * 3), "step terms");
   }
 
   ~CudaBackend() override {
     release();
     if (partial_) cudaFree(partial_);
+    if (terms_partial_) cudaFree(terms_partial_);
+    if (terms_) cudaFree(terms_);
   }
 
   std::string name() const override { return "cuda"; }
@@ -293,6 +370,27 @@ class CudaBackend final : public LinAlgBackend {
     return omega * dot(dx, dx, n) + dot(dy, dy, m) / omega;
   }
 
+  void step_size_terms(Int n, Int m, const double* dx, const double* dy,
+                       const double* k_dx, double omega, double* interaction,
+                       double* movement) const override {
+    const Int longest = n > m ? n : m;
+    if (longest <= 0) {
+      *interaction = 0.0;
+      *movement = 0.0;
+      return;
+    }
+    const int grid = static_cast<int>(std::min<Int>(kMaxBlocks, blocks(longest)));
+    step_terms_kernel<<<grid, kBlock>>>(n, m, dx, dy, k_dx, terms_partial_, grid);
+    finish_terms_kernel<<<3, kBlock>>>(grid, terms_partial_, terms_);
+    double host[3] = {0.0, 0.0, 0.0};
+    cuda_check(cudaMemcpy(host, terms_, sizeof(double) * 3, cudaMemcpyDeviceToHost),
+               "step size terms");
+    // The absolute value matches the reference implementation exactly; see the
+    // comment on LinAlgBackend::step_size_terms for why it belongs here.
+    *interaction = std::fabs(host[0]);
+    *movement = omega * host[1] + host[2] / omega;
+  }
+
  private:
   static constexpr int kMaxBlocks = 512;
 
@@ -327,6 +425,8 @@ class CudaBackend final : public LinAlgBackend {
   mutable std::unordered_map<const SparseMatrix*, DeviceMatrix> matrices_;
   double* partial_ = nullptr;
   mutable std::vector<double> host_partial_;
+  double* terms_partial_ = nullptr;  // 3 x kMaxBlocks block sums
+  double* terms_ = nullptr;          // the three finished values
 };
 
 }  // namespace
