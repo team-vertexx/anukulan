@@ -1,6 +1,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <ios>
+#include <fstream>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -33,10 +34,13 @@ void print_usage() {
       "  --max-iter=<n>       iteration limit\n"
       "  --time-limit=<s>     wall clock limit in seconds\n"
       "  --no-scaling         turn off Ruiz and Pock-Chambolle preconditioning\n"
+      "  --ruiz-only          Ruiz equilibration only, no Pock-Chambolle pass\n"
       "  --no-adaptive        fixed step size\n"
       "  --no-restarts        no restarting\n"
       "  --no-primal-weight   keep the primal weight at one\n"
-      "  --verbose            print progress\n");
+      "  --verbose            print progress\n"
+      "  --solution=<path>    write the primal solution so it can be checked\n"
+      "                       independently\n");
 }
 
 int command_read(const std::vector<std::string>& args) {
@@ -216,6 +220,7 @@ int command_solve(const std::vector<std::string>& args) {
   sankhya::PdhgOptions options;
   bool as_json = false;
   bool quiet = false;
+  std::string solution_path;
 
   auto value_of = [](const std::string& arg, const std::string& prefix, double* out) {
     if (arg.rfind(prefix, 0) != 0) return false;
@@ -234,6 +239,10 @@ int command_solve(const std::vector<std::string>& args) {
       options.time_limit_seconds = v;
     } else if (value_of(a, "--check-every=", &v)) {
       options.termination_check_frequency = static_cast<sankhya::Int>(v);
+    } else if (a.rfind("--solution=", 0) == 0) {
+      solution_path = a.substr(std::string("--solution=").size());
+    } else if (a == "--ruiz-only") {
+      options.scaling.pock_chambolle = false;
     } else if (a == "--no-scaling") {
       options.scaling.ruiz_iterations = 0;
       options.scaling.pock_chambolle = false;
@@ -272,6 +281,24 @@ int command_solve(const std::vector<std::string>& args) {
   }
 
   const sankhya::PdhgResult r = sankhya::solve_pdhg(sf.lp, options);
+
+  if (!solution_path.empty()) {
+    // Column name and value, one per line. Deliberately plain text: the point is
+    // that something which shares no code with this program can read it back and
+    // check the answer for itself.
+    std::ofstream out(solution_path);
+    if (!out) {
+      std::fprintf(stderr, "cannot write solution to \"%s\"\n",
+                   solution_path.c_str());
+      return 1;
+    }
+    out.precision(17);
+    out << "# objective " << r.objective << "\n";
+    out << "# status " << sankhya::to_string(r.status) << "\n";
+    for (std::size_t j = 0; j < r.x.size(); ++j) {
+      out << read_result.model.col_names[j] << " " << r.x[j] << "\n";
+    }
+  }
 
   if (as_json) {
     std::ostringstream out;
