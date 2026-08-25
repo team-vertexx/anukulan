@@ -189,21 +189,37 @@ error drops to 2.7e-10 and 2.0e-11.
 
 ## If graph40-40 stays slow, profile it - do not guess
 
-It is 1.16x, and the reductions are not the reason. Nor is sparsity on its own:
+It is 1.15x, and the reductions are not the reason: 280 iterations is not enough
+for three synchronisations each to matter. Nor is sparsity on its own -
 `supportcase10` has 3.35 nonzeros per row against `graph40-40`'s 3.49 and gets
-3.89x. So the honest position is that it needs measuring:
+4.26x. So it needs measuring.
 
-    !nsys profile --stats=true -o /kaggle/working/graph40 \
-        ./build-cuda/sankhya solve data/lptestset/graph40-40.mps \
-            --backend=cuda --tol=1e-4 --quiet
+`nsys` is not on the Kaggle image and installing it there is its own afternoon,
+so the backend times itself instead:
 
-The `cuda_gpu_kern_sum` table in the output says which kernel owns the time. If
-it is `spmv_kernel`, the row-to-warp mapping is the thing to change - a whole
-32-lane warp per row with 3.5 nonzeros in it uses 11% of the lanes. If the time
-is not in kernels at all, it is launch overhead or memory, and that is a
-different fix. Bring the table back rather than a conclusion.
+    !./build-cuda/sankhya solve data/lptestset/graph40-40.mps \
+        --backend=cuda --tol=1e-4 --quiet --profile
 
----
+That prints a table of every kernel, its share of the device time, its launch
+count and its cost per launch. Step 7 of `gpu_test.sh` runs it for you and saves
+it to `results/graph40-40-profile.txt`, alongside the same table for `qap15` -
+an instance where the GPU already pays - so the two can be read side by side.
+
+Timing serialises the launches it measures, so a profiled run is slower than a
+real one and its wall clock is not a benchmark. The proportions are the point.
+
+How to read it:
+
+- **`spmv K x` and `spmv Kt y` dominate** - the row-to-warp mapping is the thing
+  to change. A whole 32-lane warp per row with 3.5 nonzeros in it uses 11% of
+  the lanes.
+- **the reductions dominate** - unlikely at 280 iterations, but if so the fused
+  step-size kernel is not doing its job.
+- **the kernels add up to much less than the wall clock** - then the time is not
+  on the device at all: it is launch overhead, the one-off matrix upload, or the
+  host side. Different fix.
+
+Send back the table rather than a conclusion.
 
 ## Step 6 — The number that matters
 
@@ -225,6 +241,12 @@ Anything written under `/kaggle/working` can be downloaded from the notebook's
 
     !cp -r results /kaggle/working/results
     !cp -r bench/results /kaggle/working/results 2>/dev/null || true
+
+If a script cannot find the binary, it is because `gpu_test.sh` builds into
+`build-cuda` while an ordinary cmake build goes to `build`. `verify_presolve.py`
+now looks for both, and takes `--binary` when neither is where it expects:
+
+    !python3 bench/verify_presolve.py --binary ./build-cuda/sankhya --abs-tol=1e-8
 
 The file worth sending back is `results/gpu_matrix.csv`. It has one row per
 instance per backend per presolve setting, so the speedups can be recomputed

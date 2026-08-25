@@ -78,7 +78,10 @@ def feasibility(model, solution):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--binary", default=os.path.join(ROOT, "build", "sankhya"))
+    # gpu_test.sh builds into build-cuda, an ordinary cmake build goes to build,
+    # and defaulting to one of them means the other run fails on a path.
+    ap.add_argument("--binary", default=None,
+                    help="path to the sankhya binary; found automatically if omitted")
     ap.add_argument("--data", default=os.path.join(ROOT, "data", "netlib"))
     ap.add_argument("--reference",
                     default=os.path.join(ROOT, "data", "reference", "netlib.csv"))
@@ -94,6 +97,20 @@ def main():
     ap.add_argument("--check-feasibility", action="store_true")
     ap.add_argument("--csv", default=None)
     args = ap.parse_args()
+
+    if not args.binary:
+        for candidate in (os.path.join(ROOT, "build-cuda", "sankhya"),
+                          os.path.join(ROOT, "build", "sankhya"),
+                          os.path.join(os.getcwd(), "build-cuda", "sankhya"),
+                          os.path.join(os.getcwd(), "build", "sankhya")):
+            if os.path.exists(candidate):
+                args.binary = candidate
+                break
+        else:
+            print("could not find the sankhya binary. Build it, or pass --binary.",
+                  file=sys.stderr)
+            return 2
+        print(f"using {args.binary}")
 
     optima = published_optima(args.reference)
     names = args.instances

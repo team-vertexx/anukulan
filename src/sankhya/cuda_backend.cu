@@ -18,6 +18,7 @@
 #include <cstdio>
 #include <stdexcept>
 #include <string>
+#include <map>
 #include <unordered_map>
 #include <vector>
 
@@ -238,8 +239,49 @@ class CudaBackend final : public LinAlgBackend {
     cuda_check(cudaMalloc(&terms_, sizeof(double) * 3), "step terms");
   }
 
+  void set_profiling(bool on) const override {
+    if (on && ev_start_ == nullptr) {
+      cudaEventCreate(&ev_start_);
+      cudaEventCreate(&ev_stop_);
+    }
+    profiling_ = on;
+    if (!on) timings_.clear();
+  }
+
+  std::string profile_report() const override {
+    if (timings_.empty()) return {};
+    double total = 0.0;
+    long long launches = 0;
+    for (const auto& [name, t] : timings_) {
+      total += t.seconds;
+      launches += t.calls;
+    }
+    std::vector<std::pair<std::string, Timing>> sorted(timings_.begin(), timings_.end());
+    std::sort(sorted.begin(), sorted.end(),
+              [](const auto& a, const auto& b) { return a.second.seconds > b.second.seconds; });
+    char line[256];
+    std::string out;
+    std::snprintf(line, sizeof(line),
+                  "%-22s %12s %10s %14s %8s\n",
+                  "kernel", "seconds", "share", "launches", "us each");
+    out += line;
+    for (const auto& [name, t] : sorted) {
+      std::snprintf(line, sizeof(line), "%-22s %12.4f %9.1f%% %14lld %8.1f\n",
+                    name.c_str(), t.seconds,
+                    total > 0.0 ? 100.0 * t.seconds / total : 0.0, t.calls,
+                    t.calls > 0 ? 1e6 * t.seconds / static_cast<double>(t.calls) : 0.0);
+      out += line;
+    }
+    std::snprintf(line, sizeof(line), "%-22s %12.4f %9.1f%% %14lld\n",
+                  "total in kernels", total, 100.0, launches);
+    out += line;
+    return out;
+  }
+
   ~CudaBackend() override {
     release();
+    if (ev_start_) cudaEventDestroy(ev_start_);
+    if (ev_stop_) cudaEventDestroy(ev_stop_);
     if (partial_) cudaFree(partial_);
     if (terms_partial_) cudaFree(terms_partial_);
     if (terms_) cudaFree(terms_);
@@ -277,7 +319,7 @@ class CudaBackend final : public LinAlgBackend {
       cuda_check(cudaMemset(target, 0, sizeof(double) * sz(n)), "fill zero");
       return;
     }
-    fill_kernel<<<blocks(n), kBlock>>>(n, value, target);
+    { Scope timer(this, "fill"); fill_kernel<<<blocks(n), kBlock>>>(n, value, target); }
   }
 
   void copy(const double* source, double* target, Int n) const override {
@@ -317,12 +359,12 @@ class CudaBackend final : public LinAlgBackend {
   }
 
   void multiply(const SparseMatrix& a, const double* x, double* y) const override {
-    spmv(a, x, y);
+    spmv(a, x, y, "spmv K x");
   }
 
   void multiply_transpose(const SparseMatrix& at, const double* y,
                           double* x) const override {
-    spmv(at, y, x);
+    spmv(at, y, x, "spmv Kt y");
   }
 
   double dot(const double* a, const double* b, Int n) const override {
@@ -341,6 +383,7 @@ class CudaBackend final : public LinAlgBackend {
                    const double* kt_y, const double* lower, const double* upper,
                    double* x_next, double* dx, double* x_bar) const override {
     if (n <= 0) return;
+    Scope timer(this, "primal step");
     primal_step_kernel<<<blocks(n), kBlock>>>(n, tau, x, c, kt_y, lower, upper,
                                               x_next, dx, x_bar);
   }
@@ -349,20 +392,30 @@ class CudaBackend final : public LinAlgBackend {
                  const double* q, const double* k_x_bar, const double* k_x,
                  double* y_next, double* dy, double* k_dx) const override {
     if (m <= 0) return;
+    Scope timer(this, "dual step");
     dual_step_kernel<<<blocks(m), kBlock>>>(m, num_equalities, sigma, y, q, k_x_bar,
                                             k_x, y_next, dy, k_dx);
   }
 
   void advance_kx(Int m, const double* k_x_bar, double* k_x) const override {
-    if (m > 0) advance_kx_kernel<<<blocks(m), kBlock>>>(m, k_x_bar, k_x);
+    if (m > 0) {
+      Scope timer(this, "advance Kx");
+      advance_kx_kernel<<<blocks(m), kBlock>>>(m, k_x_bar, k_x);
+    }
   }
 
   void accumulate(Int n, double weight, const double* v, double* sum) const override {
-    if (n > 0) accumulate_kernel<<<blocks(n), kBlock>>>(n, weight, v, sum);
+    if (n > 0) {
+      Scope timer(this, "accumulate");
+      accumulate_kernel<<<blocks(n), kBlock>>>(n, weight, v, sum);
+    }
   }
 
   void scale_into(Int n, double weight, const double* sum, double* out) const override {
-    if (n > 0) scale_into_kernel<<<blocks(n), kBlock>>>(n, 1.0 / weight, sum, out);
+    if (n > 0) {
+      Scope timer(this, "scale into");
+      scale_into_kernel<<<blocks(n), kBlock>>>(n, 1.0 / weight, sum, out);
+    }
   }
 
   double weighted_norm_squared(Int n, Int m, const double* dx, const double* dy,
@@ -380,11 +433,17 @@ class CudaBackend final : public LinAlgBackend {
       return;
     }
     const int grid = static_cast<int>(std::min<Int>(kMaxBlocks, blocks(longest)));
-    step_terms_kernel<<<grid, kBlock>>>(n, m, dx, dy, k_dx, terms_partial_, grid);
-    finish_terms_kernel<<<3, kBlock>>>(grid, terms_partial_, terms_);
+    {
+      Scope timer(this, "step-size terms");
+      step_terms_kernel<<<grid, kBlock>>>(n, m, dx, dy, k_dx, terms_partial_, grid);
+      finish_terms_kernel<<<3, kBlock>>>(grid, terms_partial_, terms_);
+    }
     double host[3] = {0.0, 0.0, 0.0};
-    cuda_check(cudaMemcpy(host, terms_, sizeof(double) * 3, cudaMemcpyDeviceToHost),
-               "step size terms");
+    {
+      Scope timer(this, "step-size copy back");
+      cuda_check(cudaMemcpy(host, terms_, sizeof(double) * 3, cudaMemcpyDeviceToHost),
+                 "step size terms");
+    }
     // The absolute value matches the reference implementation exactly; see the
     // comment on LinAlgBackend::step_size_terms for why it belongs here.
     *interaction = std::fabs(host[0]);
@@ -392,6 +451,31 @@ class CudaBackend final : public LinAlgBackend {
   }
 
  private:
+  struct Timing {
+    double seconds = 0.0;
+    long long calls = 0;
+  };
+
+  // Wraps one launch. Does nothing at all unless profiling is on, so the
+  // ordinary path pays a branch and no synchronisation.
+  struct Scope {
+    const CudaBackend* owner;
+    const char* name;
+    Scope(const CudaBackend* o, const char* n) : owner(o), name(n) {
+      if (owner->profiling_) cudaEventRecord(owner->ev_start_);
+    }
+    ~Scope() {
+      if (!owner->profiling_) return;
+      cudaEventRecord(owner->ev_stop_);
+      cudaEventSynchronize(owner->ev_stop_);
+      float ms = 0.0f;
+      cudaEventElapsedTime(&ms, owner->ev_start_, owner->ev_stop_);
+      Timing& t = owner->timings_[name];
+      t.seconds += static_cast<double>(ms) / 1000.0;
+      t.calls += 1;
+    }
+  };
+
   static constexpr int kMaxBlocks = 512;
 
   static Int blocks(Int n) {
@@ -399,11 +483,12 @@ class CudaBackend final : public LinAlgBackend {
     return b > 0 ? b : 1;
   }
 
-  void spmv(const SparseMatrix& a, const double* x, double* y) const {
+  void spmv(const SparseMatrix& a, const double* x, double* y, const char* label) const {
     prepare(a);
     const DeviceMatrix& d = matrices_.at(&a);
     const Int warps_per_block = kBlock / 32;
     const Int grid = (d.rows + warps_per_block - 1) / warps_per_block;
+    Scope timer(this, label);
     spmv_kernel<<<grid > 0 ? grid : 1, kBlock>>>(d.rows, d.start, d.index, d.value,
                                                  x, y);
   }
@@ -411,9 +496,12 @@ class CudaBackend final : public LinAlgBackend {
   template <bool kMaximum>
   double reduce(const double* a, const double* b, Int n) const {
     const int grid = static_cast<int>(std::min<Int>(kMaxBlocks, blocks(n)));
-    reduce_kernel<kMaximum><<<grid, kBlock>>>(n, a, b, partial_);
-    cuda_check(cudaMemcpy(host_partial_.data(), partial_, sizeof(double) * sz(grid),
-                          cudaMemcpyDeviceToHost), "reduce");
+    {
+      Scope timer(this, kMaximum ? "reduce max" : "reduce sum");
+      reduce_kernel<kMaximum><<<grid, kBlock>>>(n, a, b, partial_);
+      cuda_check(cudaMemcpy(host_partial_.data(), partial_, sizeof(double) * sz(grid),
+                            cudaMemcpyDeviceToHost), "reduce");
+    }
     double acc = 0.0;
     for (int i = 0; i < grid; ++i) {
       acc = kMaximum ? std::fmax(acc, host_partial_[sz(i)])
@@ -427,6 +515,11 @@ class CudaBackend final : public LinAlgBackend {
   mutable std::vector<double> host_partial_;
   double* terms_partial_ = nullptr;  // 3 x kMaxBlocks block sums
   double* terms_ = nullptr;          // the three finished values
+
+  mutable bool profiling_ = false;
+  mutable cudaEvent_t ev_start_ = nullptr;
+  mutable cudaEvent_t ev_stop_ = nullptr;
+  mutable std::map<std::string, Timing> timings_;
 };
 
 }  // namespace

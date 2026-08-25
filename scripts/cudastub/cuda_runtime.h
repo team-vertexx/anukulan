@@ -25,3 +25,13 @@ inline cudaError_t cudaMemset(void* d, int v, std::size_t n) {
 inline cudaError_t cudaGetDeviceCount(int* n) { *n = 1; return 0; }
 inline const char* cudaGetErrorString(cudaError_t) { return "stub"; }
 template <class T> inline T __shfl_down_sync(unsigned, T v, unsigned) { return v; }
+
+// Events, used by the backend's own per-kernel timing.
+struct CUevent_st;
+typedef CUevent_st* cudaEvent_t;
+inline cudaError_t cudaEventCreate(cudaEvent_t* e) { *e = nullptr; return 0; }
+inline cudaError_t cudaEventDestroy(cudaEvent_t) { return 0; }
+inline cudaError_t cudaEventRecord(cudaEvent_t) { return 0; }
+inline cudaError_t cudaEventSynchronize(cudaEvent_t) { return 0; }
+inline cudaError_t cudaEventElapsedTime(float* ms, cudaEvent_t, cudaEvent_t) {
+  *ms = 0.0f; return 0; }

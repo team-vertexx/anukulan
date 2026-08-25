@@ -57,6 +57,7 @@ void print_usage() {
       "  --no-restarts        no restarting\n"
       "  --no-primal-weight   keep the primal weight at one\n"
       "  --presolve           reduce the model first, then map the answer back\n"
+      "  --profile            report where the device time went, kernel by kernel\n"
       "  --verbose            print progress\n"
       "  --backend=cpu|cuda   force a backend instead of picking automatically\n"
       "  --solution=<path>    write the primal solution so it can be checked\n"
@@ -435,6 +436,7 @@ int command_simplex(const std::vector<std::string>& args) {
 
 int command_solve(const std::vector<std::string>& args) {
   bool use_presolve = false;
+  bool profile = false;
   sankhya::PresolveOptions presolve_options;
   if (args.empty()) {
     std::fprintf(stderr, "solve: expected a file name\n");
@@ -488,6 +490,8 @@ int command_solve(const std::vector<std::string>& args) {
       options.verbose = true;
     } else if (a == "--format=json") {
       as_json = true;
+    } else if (a == "--profile") {
+      profile = true;
     } else if (a == "--presolve") {
       use_presolve = true;
     } else if (a == "--presolve-no-bound-tightening") {
@@ -543,7 +547,15 @@ int command_solve(const std::vector<std::string>& args) {
     return 1;
   }
 
+  const sankhya::LinAlgBackend& profiled_backend =
+      options.backend ? *options.backend : sankhya::default_backend();
+  if (profile) profiled_backend.set_profiling(true);
   sankhya::PdhgResult r = sankhya::solve_pdhg(sf.lp, options);
+  std::string kernel_report;
+  if (profile) {
+    kernel_report = profiled_backend.profile_report();
+    profiled_backend.set_profiling(false);
+  }
 
   // The solver's residuals describe the model it was handed. With presolve in
   // front of it that is not the model the caller asked about, so the answer is
@@ -658,6 +670,13 @@ int command_solve(const std::vector<std::string>& args) {
       r.residual.primal_residual_inf, r.residual.dual_residual_inf,
       r.matrix_norm_estimate, r.scaling.row_spread_before,
       r.scaling.row_spread_after, violation_line.c_str());
+  if (!kernel_report.empty()) {
+    std::printf(
+        "\nwhere the device time went. Timing serialises the launches it\n"
+        "measures, so this run is slower than a real one and the wall clock\n"
+        "above is not a benchmark. The proportions are the point.\n\n%s",
+        kernel_report.c_str());
+  }
   return r.status == sankhya::PdhgStatus::kOptimal ? 0 : 1;
 }
 

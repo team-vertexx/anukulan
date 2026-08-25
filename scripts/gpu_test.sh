@@ -119,6 +119,8 @@ else:
               f"{r['cpu_wall']/max(1e-9, r['gpu_wall']):>8.2f}x {d:>18.1e}")
 PY
 
+mkdir -p results
+
 step "6. presolve on the GPU, and where the fused reduction should show"
 echo "The fused step-size reduction replaces three synchronising device-to-host"
 echo "copies per iteration with one. It can only matter where there are many"
@@ -172,6 +174,30 @@ if rows:
         if c and g and g[0]["seconds"] > 0:
             print(f"  {n:<15} {c[0]['seconds'] / g[0]['seconds']:.2f}x")
 STEP6
+
+step "7. where the device time goes on graph40-40"
+echo "graph40-40 runs about 280 iterations, so its speedup cannot be a reduction"
+echo "problem however it looks. This asks the backend itself which kernel owns"
+echo "the run - no external profiler, because nsys is not on this image and"
+echo "installing it there is its own afternoon."
+if [ -f data/lptestset/graph40-40.mps ]; then
+  "./$build/sankhya" solve data/lptestset/graph40-40.mps --backend=cuda \
+      --tol=1e-4 --max-iter=1000000 --time-limit=600 --quiet --profile \
+      | tee results/graph40-40-profile.txt || true
+  echo
+  echo "For comparison, the same on an instance where the GPU already pays:"
+  if [ -f data/lptestset/qap15.mps ]; then
+    "./$build/sankhya" solve data/lptestset/qap15.mps --backend=cuda \
+        --tol=1e-4 --max-iter=1000000 --time-limit=600 --quiet --profile \
+        | tee results/qap15-profile.txt || true
+  fi
+else
+  echo "graph40-40 not downloaded; run scripts/fetch_lptestset.py first"
+fi
+
+step "8. presolve end to end, checked against published optima"
+python3 bench/verify_presolve.py --binary "./$build/sankhya" --abs-tol=1e-8 \
+    --csv results/presolve_verified.csv || true
 
 printf '\n=== summary\n'
 if [ "$fail" -eq 0 ]; then

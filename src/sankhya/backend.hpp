@@ -121,6 +121,19 @@ class LinAlgBackend {
   virtual void step_size_terms(Int n, Int m, const double* dx, const double* dy,
                                const double* k_dx, double omega,
                                double* interaction, double* movement) const;
+
+  // Per-kernel timing, for finding out which one owns the run.
+  //
+  // This exists rather than a note saying "profile it with nsys" because nsys
+  // is not on the free GPU boxes and installing it there is its own afternoon.
+  // A backend already knows what it is launching and when, so it can time
+  // itself, and the answer arrives with the run instead of after a second one.
+  //
+  // Timing serialises the launches it measures, so a profiled run is slower
+  // than a real one and its wall clock is not a benchmark. The proportions are
+  // what it is for. A backend with nothing to say returns an empty report.
+  virtual void set_profiling(bool on) const { (void)on; }
+  virtual std::string profile_report() const { return {}; }
 };
 
 // Plain scalar C++. The reference against which any other backend is checked.
