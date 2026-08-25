@@ -31,6 +31,10 @@ void print_usage() {
       "\n"
       "solve options:\n"
       "  --tol=<x>            relative tolerance, default 1e-6\n"
+      "  --abs-tol=<x>        also require no single row violated by more than\n"
+      "                       this in absolute terms. 0 (default) is PDLP\n"
+      "                       behaviour; the relative measure alone can hide a\n"
+      "                       real violation on models with a large right-hand side\n"
       "  --max-iter=<n>       iteration limit\n"
       "  --time-limit=<s>     wall clock limit in seconds\n"
       "  --no-scaling         turn off Ruiz and Pock-Chambolle preconditioning\n"
@@ -233,6 +237,8 @@ int command_solve(const std::vector<std::string>& args) {
     double v = 0.0;
     if (value_of(a, "--tol=", &v)) {
       options.tolerance = v;
+    } else if (value_of(a, "--abs-tol=", &v)) {
+      options.absolute_tolerance = v;
     } else if (value_of(a, "--max-iter=", &v)) {
       options.max_iterations = static_cast<sankhya::Int>(v);
     } else if (value_of(a, "--time-limit=", &v)) {
@@ -313,6 +319,8 @@ int command_solve(const std::vector<std::string>& args) {
         << "\"rel_primal\":" << r.residual.relative_primal << ","
         << "\"rel_dual\":" << r.residual.relative_dual << ","
         << "\"rel_gap\":" << r.residual.relative_gap << ","
+        << "\"abs_primal\":" << r.residual.primal_residual_inf << ","
+        << "\"abs_dual\":" << r.residual.dual_residual_inf << ","
         << "\"matrix_norm\":" << r.matrix_norm_estimate << ","
         << "\"row_spread_before\":" << r.scaling.row_spread_before << ","
         << "\"row_spread_after\":" << r.scaling.row_spread_after << ","
@@ -328,11 +336,13 @@ int command_solve(const std::vector<std::string>& args) {
       "iterations    %d  (%d restarts)\n"
       "time          %.3f s\n"
       "relative      primal %.3e  dual %.3e  gap %.3e\n"
+      "worst abs     primal %.3e  dual %.3e\n"
       "||K||         %.6e\n"
       "row spread    %.3e -> %.3e\n",
       sankhya::to_string(r.status).c_str(), r.message.empty() ? "" : ": ",
       r.message.c_str(), r.objective, r.iterations, r.restarts, r.solve_seconds,
       r.residual.relative_primal, r.residual.relative_dual, r.residual.relative_gap,
+      r.residual.primal_residual_inf, r.residual.dual_residual_inf,
       r.matrix_norm_estimate, r.scaling.row_spread_before, r.scaling.row_spread_after);
   return r.status == sankhya::PdhgStatus::kOptimal ? 0 : 1;
 }

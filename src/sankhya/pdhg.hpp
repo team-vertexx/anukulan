@@ -27,6 +27,12 @@ struct PdhgOptions {
   // costs two more matrix-vector products, which is as much as an iteration.
   Int termination_check_frequency = 40;
 
+  // Additionally require that no single constraint is violated by more than this
+  // in absolute terms. Zero disables it, which is what PDLP does. A positive
+  // value is the safer default on models whose right-hand side is large, where
+  // the relative 2-norm criterion alone lets real violations through.
+  double absolute_tolerance = 0.0;
+
   // Each of these is a separate piece of machinery, kept switchable so their
   // effect can be measured one at a time rather than asserted.
   bool adaptive_step_size = true;
@@ -53,6 +59,15 @@ std::string to_string(PdhgStatus status);
 struct PdhgResidual {
   double primal_residual = 0.0;  // 2-norm
   double dual_residual = 0.0;    // 2-norm
+
+  // Largest single violation, unnormalised. Worth reporting separately because
+  // the relative 2-norm measure can hide it: on a model with a hundred thousand
+  // rows and a right-hand side in the thousands, dividing by ||q||_2 turns an
+  // absolute violation of 0.07 into a "relative residual" of 5e-06. That is
+  // exactly how a 3.6% objective error passed a 1e-4 tolerance on
+  // irish-electricity.
+  double primal_residual_inf = 0.0;
+  double dual_residual_inf = 0.0;
   double primal_objective = 0.0;
   double dual_objective = 0.0;
   double absolute_gap = 0.0;
@@ -60,9 +75,15 @@ struct PdhgResidual {
   double relative_dual = 0.0;
   double relative_gap = 0.0;
 
-  bool converged(double tolerance) const {
-    return relative_primal <= tolerance && relative_dual <= tolerance &&
-           relative_gap <= tolerance;
+  // `absolute_tolerance` of 0 keeps the pure PDLP behaviour; anything positive
+  // additionally demands that no single row or reduced cost is out by more than
+  // that much, which is what HiGHS and OSQP do.
+  bool converged(double tolerance, double absolute_tolerance = 0.0) const {
+    const bool relative_ok = relative_primal <= tolerance &&
+                             relative_dual <= tolerance && relative_gap <= tolerance;
+    if (absolute_tolerance <= 0.0) return relative_ok;
+    return relative_ok && primal_residual_inf <= absolute_tolerance &&
+           dual_residual_inf <= absolute_tolerance;
   }
 };
 

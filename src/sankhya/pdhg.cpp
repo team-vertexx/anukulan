@@ -51,7 +51,7 @@ PdhgResidual evaluate_residual(const StandardLp& lp, const std::vector<double>& 
   PdhgResidual r;
   std::vector<double> scratch;
 
-  lp.primal_residual(x, &scratch, &r.primal_residual, nullptr);
+  lp.primal_residual(x, &scratch, &r.primal_residual, &r.primal_residual_inf);
 
   std::vector<double> lambda;
   std::vector<double> work;
@@ -75,6 +75,7 @@ PdhgResidual evaluate_residual(const StandardLp& lp, const std::vector<double>& 
       leftover = l;  // free variables need a zero reduced cost
     }
     dual_sq += leftover * leftover;
+    r.dual_residual_inf = std::fmax(r.dual_residual_inf, std::fabs(leftover));
 
     // The bound contribution to the dual objective: minimising lambda_j * x_j
     // over the variable's own interval picks whichever end the sign favours.
@@ -238,7 +239,8 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
     result.y.assign(sz(m), 0.0);
     result.residual = evaluate_residual(original, result.x, result.y);
     result.objective = original.model_objective(result.x);
-    result.status = result.residual.converged(options.tolerance)
+    result.status = result.residual.converged(options.tolerance,
+                                             options.absolute_tolerance)
                         ? PdhgStatus::kOptimal
                         : PdhgStatus::kNumericalError;
     result.message = "no constraint matrix content";
@@ -410,7 +412,7 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
       y = cand_y;
       break;
     }
-    if (r.converged(tolerance)) {
+    if (r.converged(tolerance, options.absolute_tolerance)) {
       status = PdhgStatus::kOptimal;
       ++iteration;
       x = cand_x;

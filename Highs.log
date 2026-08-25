@@ -5969,3 +5969,68 @@ Model status        : Time limit reached
 Simplex   iterations: 2098
 Objective value     :  9.0942412602e+03
 HiGHS run time      :          1.01
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option time_limit to 600
+Set option write_solution_style to 1
+Set option solution_file to "/tmp/highs_ie.sol"
+LP irish-electricity has 104259 rows; 61728 cols; 523257 nonzeros
+Coefficient ranges:
+  Matrix  [1e+00, 2e+04]
+  Cost    [1e+00, 1e+00]
+  Bound   [1e+00, 1e+00]
+  RHS     [3e-01, 5e+03]
+Presolving model
+73507 rows, 43213 cols, 432850 nonzeros 0s
+Dependent equations search running on 2702 equations with time limit of 6.00s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 6.00s)
+65147 rows, 36529 cols, 403315 nonzeros 0s
+Presolve reductions: rows 65147(-39112); columns 36529(-25199); nonzeros 403315(-119942) 
+Solving the presolved LP
+Using dual simplex solver
+  Iteration        Objective     Infeasibilities num(sum)
+          0     0.0000000000e+00 Ph1: 0(0) 0.7s
+       9652     1.2464274953e+06 Pr: 8950(6.47267e+08); Du: 0(3.51908e-07) 5.9s
+      13241     1.8831728275e+06 Pr: 11465(3.3862e+07); Du: 0(4.17407e-07) 11.1s
+      16072     2.0609417106e+06 Pr: 11280(1.63128e+08); Du: 0(2.82707e-07) 16.3s
+      19119     2.1973652522e+06 Pr: 9937(6.40651e+07); Du: 0(2.90672e-07) 21.9s
+      21451     2.2683556225e+06 Pr: 11920(7.93134e+07); Du: 0(3.48772e-07) 26.9s
+      23717     2.3221825720e+06 Pr: 12118(5.36696e+10); Du: 0(1.18782e-07) 32.3s
+      25871     2.3652536337e+06 Pr: 12529(1.80968e+08); Du: 0(2.33817e-07) 38.0s
+      27949     2.4017639373e+06 Pr: 12985(2.0332e+08); Du: 0(1.74741e-07) 43.1s
+      30171     2.4417661778e+06 Pr: 10361(1.06614e+08); Du: 0(3.9798e-08) 48.6s
+      32518     2.4646983096e+06 Pr: 10569(1.35694e+07); Du: 0(1.28278e-07) 54.0s
+      34859     2.4887421651e+06 Pr: 9789(4.1479e+06); Du: 0(1.07924e-15) 59.4s
+      37151     2.5081413276e+06 Pr: 9087(1.33141e+07); Du: 0(2.21909e-07) 64.8s
+      39799     2.5240600261e+06 Pr: 8340(903565); Du: 0(1.33553e-07) 70.4s
+      42226     2.5324927461e+06 Pr: 9757(3.42987e+06); Du: 0(5.52195e-08) 75.4s
+      44856     2.5396777463e+06 Pr: 4337(375161); Du: 0(2.27928e-08) 80.7s
+      47896     2.5447965677e+06 Pr: 2728(71571); Du: 0(1.63599e-07) 86.1s
+      50842     2.5462545633e+06 Pr: 0(0); Du: 0(1.24724e-09) 90.0s
+      50842     2.5462545633e+06 Pr: 0(0); Du: 0(1.24724e-09) 90.0s
+Using dual simplex solver
+  Iteration        Objective     Infeasibilities num(sum)
+      50842     2.5462545633e+06 Pr: 5(1.24084e-06); Du: 0(1.99329e-08) 90.1s
+      50856     2.5462545633e+06 Pr: 0(0); Du: 0(2.11048e-08) 90.1s
+
+Performed postsolve
+Solving the original LP from the solution after postsolve
+Using dual simplex solver
+  Iteration        Objective     Infeasibilities num(sum)
+      50856     2.5462545633e+06 Pr: 18(9.58845e-06); Du: 0(4.67005e-13) 90.2s
+      50874     2.5462545633e+06 90.4s
+Using dual simplex solver
+  Iteration        Objective     Infeasibilities num(sum)
+      50874     2.5462545633e+06 Pr: 3(1.23697e-06); Du: 0(9.31282e-12) 90.4s
+      50876     2.5462545633e+06 90.5s
+Required 20 simplex iterations after postsolve
+WARNING: Model status changed from "Unknown" to "Optimal"
+
+Model name          : irish-electricity
+Model status        : Optimal
+Simplex   iterations: 50876
+Objective value     :  2.5462545633e+06
+P-D objective error :  3.5661765521e-15
+HiGHS run time      :         90.55
+Writing the solution to /tmp/highs_ie.sol
