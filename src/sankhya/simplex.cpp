@@ -784,4 +784,253 @@ SimplexResult solve_simplex(const StandardLp& lp, const SimplexOptions& options)
   return result;
 }
 
+
+namespace {
+
+// Puts every nonbasic column on the bound whose sign matches its reduced cost,
+// which is all "dual feasible" means for a boxed variable. Returns false when a
+// column wants a bound it does not have - the case a dual phase one would
+// handle and this does not.
+bool make_dual_feasible(const LogicalForm& form, SimplexBasis& basis,
+                        const std::vector<double>& reduced, double tolerance,
+                        Int* flips, Int* blocker) {
+  const Int columns = form.columns.rows();
+  bool ok = true;
+  for (Int j = 0; j < columns; ++j) {
+    const VarStatus st = basis.status()[sz(j)];
+    if (st == VarStatus::kBasic) continue;
+    const double d = reduced[sz(j)];
+    if (st == VarStatus::kFree) {
+      // A free column is dual feasible only at zero reduced cost, and there is
+      // no bound to put it on.
+      if (std::fabs(d) > tolerance) {
+        ok = false;
+        if (blocker && *blocker < 0) *blocker = j;
+      }
+      continue;
+    }
+    if (d < -tolerance && st == VarStatus::kAtLower) {
+      if (!std::isfinite(form.upper[sz(j)])) {
+        ok = false;
+        if (blocker && *blocker < 0) *blocker = j;
+        continue;
+      }
+      basis.status()[sz(j)] = VarStatus::kAtUpper;
+      ++*flips;
+    } else if (d > tolerance && st == VarStatus::kAtUpper) {
+      if (!std::isfinite(form.lower[sz(j)])) {
+        ok = false;
+        if (blocker && *blocker < 0) *blocker = j;
+        continue;
+      }
+      basis.status()[sz(j)] = VarStatus::kAtLower;
+      ++*flips;
+    }
+  }
+  return ok;
+}
+
+}  // namespace
+
+SimplexResult solve_dual_simplex(const StandardLp& lp,
+                                 const SimplexOptions& options) {
+  const auto started = std::chrono::steady_clock::now();
+  auto elapsed = [&] {
+    return std::chrono::duration<double>(std::chrono::steady_clock::now() - started)
+        .count();
+  };
+
+  SimplexResult result;
+  const LogicalForm form = to_logical_form(lp);
+  const Int m = form.num_rows;
+  const Int columns = form.columns.rows();
+
+  SimplexBasis basis;
+  std::string error;
+  if (!basis.set_initial(form, &error)) {
+    result.status = SimplexStatus::kNumericalError;
+    result.message = "could not factorise the initial basis: " + error;
+    return result;
+  }
+
+  std::vector<double> z, duals, reduced, rho, alpha_row(sz(columns), 0.0), alpha_q;
+
+  basis.compute_duals(form, &duals, &reduced);
+  Int blocker = -1;
+  if (!make_dual_feasible(form, basis, reduced, options.dual_tolerance,
+                          &result.dual_start_flips, &blocker)) {
+    result.status = SimplexStatus::kNumericalError;
+    result.message =
+        "the starting basis cannot be made dual feasible: column " +
+        std::to_string(blocker) +
+        " wants a bound it does not have. Use the primal.";
+    return result;
+  }
+
+  Int iteration = 0;
+  SimplexStatus status = SimplexStatus::kIterationLimit;
+  for (; iteration < options.max_iterations; ++iteration) {
+    if (elapsed() > options.time_limit_seconds) {
+      status = SimplexStatus::kTimeLimit;
+      break;
+    }
+    if (basis.updates_since_refactorization() >= options.refactorization_frequency) {
+      Int rolled = 0;
+      while (!basis.refactorize(form, &error)) {
+        if (rolled >= options.max_rollback || !basis.rollback_last_update()) {
+          status = SimplexStatus::kNumericalError;
+          result.message = "basis will not factorise: " + error;
+          break;
+        }
+        ++rolled;
+        ++result.rollbacks;
+      }
+      if (status == SimplexStatus::kNumericalError) break;
+      result.refactorizations++;
+    }
+
+    basis.compute_primal(form, &z);
+    basis.compute_duals(form, &duals, &reduced);
+
+    // Step 2, pricing: the basic variable furthest outside its bounds. Dual
+    // steepest edge would weight this by the row norm; that comes later.
+    Int leaving_row = -1;
+    double worst = options.primal_tolerance;
+    bool below = false;
+    for (Int i = 0; i < m; ++i) {
+      const Int j = basis.basic()[sz(i)];
+      const double value = z[sz(j)];
+      const double under = form.lower[sz(j)] - value;
+      const double over = value - form.upper[sz(j)];
+      if (std::isfinite(under) && under > worst) {
+        worst = under;
+        leaving_row = i;
+        below = true;
+      }
+      if (std::isfinite(over) && over > worst) {
+        worst = over;
+        leaving_row = i;
+        below = false;
+      }
+    }
+    if (leaving_row < 0) {
+      // Primal feasible and dual feasible at once, which is optimality. Only
+      // trusted off a fresh factorisation, for the same reason the primal does
+      // not trust it off an updated one.
+      if (basis.updates_since_refactorization() > 0) {
+        if (basis.refactorize(form, &error)) {
+          result.refactorizations++;
+          ++result.confirmations;
+          continue;
+        }
+        status = SimplexStatus::kNumericalError;
+        result.message = "could not refactorise to confirm optimality: " + error;
+        break;
+      }
+      status = SimplexStatus::kOptimal;
+      break;
+    }
+
+    // Steps 3 and 4: the pivot row of the tableau.
+    basis.pivot_row(form, leaving_row, &rho);
+    for (Int j = 0; j < columns; ++j) {
+      if (basis.status()[sz(j)] == VarStatus::kBasic) {
+        alpha_row[sz(j)] = 0.0;
+        continue;
+      }
+      double dot = 0.0;
+      for (Int e = form.columns.row_begin(j); e < form.columns.row_end(j); ++e)
+        dot += form.columns.value()[sz(e)] * rho[sz(form.columns.index()[sz(e)])];
+      alpha_row[sz(j)] = dot;
+    }
+
+    // Step 5, the ratio test. The sign flip is what makes the eligible set the
+    // same shape whichever bound was violated: a variable below its lower bound
+    // has to rise, one above its upper has to fall.
+    const double sign = below ? -1.0 : 1.0;
+    Int entering = -1;
+    double best_ratio = kInf;
+    double best_pivot = 0.0;
+    for (Int j = 0; j < columns; ++j) {
+      const VarStatus st = basis.status()[sz(j)];
+      if (st == VarStatus::kBasic) continue;
+      const double a = sign * alpha_row[sz(j)];
+      if (std::fabs(a) < options.pivot_tolerance) continue;
+      const bool eligible = st == VarStatus::kFree ||
+                            (st == VarStatus::kAtLower && a > 0.0) ||
+                            (st == VarStatus::kAtUpper && a < 0.0);
+      if (!eligible) continue;
+      double ratio = reduced[sz(j)] / a;
+      if (ratio < 0.0) ratio = 0.0;  // dual infeasibility inside the tolerance
+      // Ties go to the larger pivot, which costs nothing here.
+      if (ratio < best_ratio - 1e-9 ||
+          (ratio < best_ratio + 1e-9 && std::fabs(a) > best_pivot)) {
+        best_ratio = ratio;
+        best_pivot = std::fabs(a);
+        entering = j;
+      }
+    }
+    if (entering < 0) {
+      // Nothing can enter without breaking dual feasibility: the dual is
+      // unbounded, so the primal has no feasible point. Confirmed off a fresh
+      // factorisation before the word is used.
+      if (basis.updates_since_refactorization() > 0) {
+        if (basis.refactorize(form, &error)) {
+          result.refactorizations++;
+          ++result.confirmations;
+          continue;
+        }
+      }
+      status = SimplexStatus::kInfeasible;
+      break;
+    }
+
+    // Steps 6 and 7.
+    basis.ftran_column(form, entering, &alpha_q);
+    const VarStatus leaving_to = below ? VarStatus::kAtLower : VarStatus::kAtUpper;
+    if (!basis.pivot(form, leaving_row, entering, leaving_to, alpha_q, &error)) {
+      if (!basis.refactorize(form, &error)) {
+        status = SimplexStatus::kNumericalError;
+        result.message = "basis became singular: " + error;
+        break;
+      }
+      result.refactorizations++;
+      continue;
+    }
+
+    if (options.verbose && (iteration + 1) % options.log_frequency == 0) {
+      std::printf("  dual iter %7d  leaving row %6d  entering %6d  ratio %.3e\n",
+                  iteration + 1, leaving_row, entering, best_ratio);
+    }
+  }
+
+  basis.compute_primal(form, &z);
+  result.status = status;
+  result.iterations = iteration;
+  result.x.assign(sz(form.num_structural), 0.0);
+  for (Int j = 0; j < form.num_structural; ++j) result.x[sz(j)] = z[sz(j)];
+  basis.compute_duals(form, &duals, &reduced);
+  result.y = duals;
+  double objective = 0.0;
+  for (Int j = 0; j < form.num_structural; ++j)
+    objective += form.cost[sz(j)] * result.x[sz(j)];
+  result.objective = form.objective_scale * objective + form.objective_offset;
+  result.solve_seconds = elapsed();
+  return result;
+}
+
+SimplexResult solve_lp(const StandardLp& lp, const SimplexOptions& options) {
+  if (options.algorithm == SimplexOptions::Algorithm::kPrimal)
+    return solve_simplex(lp, options);
+  SimplexResult r = solve_dual_simplex(lp, options);
+  if (r.status == SimplexStatus::kNumericalError &&
+      r.message.rfind("the starting basis cannot be made dual feasible", 0) == 0) {
+    SimplexResult primal = solve_simplex(lp, options);
+    primal.fell_back_to_primal = true;
+    primal.dual_start_flips = r.dual_start_flips;
+    return primal;
+  }
+  return r;
+}
+
 }  // namespace sankhya

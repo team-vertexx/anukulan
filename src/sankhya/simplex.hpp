@@ -243,6 +243,19 @@ struct SimplexOptions {
   enum class Pricing { kDantzig, kDevex };
   Pricing pricing = Pricing::kDevex;
 
+  // Primal or dual. The primal walks feasible points until no column improves;
+  // the dual keeps the reduced costs feasible and drives the basic variables
+  // into their bounds.
+  //
+  // The dual is here for branch and bound. Tightening one bound on one variable
+  // leaves the parent's basis dual feasible and only makes it primal infeasible
+  // in that one row, so a child node re-optimises in a handful of pivots
+  // instead of solving from scratch. That is the whole reason node relaxations
+  // are affordable, and it is why every serious MILP code solves nodes with a
+  // dual simplex.
+  enum class Algorithm { kPrimal, kDual };
+  Algorithm algorithm = Algorithm::kPrimal;
+
   // The weights drift away from the true edge norms as the reference framework
   // ages. Past this the framework is reset to the current nonbasic set and
   // every weight goes back to one.
@@ -281,6 +294,10 @@ struct SimplexResult {
   Int confirmations = 0;
   // Times the Devex reference framework was restarted.
   Int devex_resets = 0;
+  // Nonbasic columns moved to their other bound to make the start dual
+  // feasible, and whether the dual had to hand back to the primal.
+  Int dual_start_flips = 0;
+  bool fell_back_to_primal = false;
   double solve_seconds = 0.0;
   std::string message;
 };
@@ -288,5 +305,21 @@ struct SimplexResult {
 // Primal simplex with bounded variables. Phase one drives the basis to
 // feasibility by minimising the total bound violation; phase two then optimises.
 SimplexResult solve_simplex(const StandardLp& lp, const SimplexOptions& options = {});
+
+// Dual simplex, following Koberstein's Algorithm 2 (The Dual Simplex Method,
+// 2005). Requires a dual feasible start, which for a boxed variable is a matter
+// of putting it on the bound whose sign matches its reduced cost - so the
+// starting basis is made dual feasible by flipping bounds, not by a phase one.
+//
+// A variable whose reduced cost has the wrong sign and no finite bound on that
+// side cannot be flipped, and there is no dual phase one here. When that
+// happens the result says so and the caller should use the primal; solve_lp
+// below does that automatically.
+SimplexResult solve_dual_simplex(const StandardLp& lp,
+                                 const SimplexOptions& options = {});
+
+// Picks by options.algorithm, and falls back from dual to primal when the start
+// cannot be made dual feasible.
+SimplexResult solve_lp(const StandardLp& lp, const SimplexOptions& options = {});
 
 }  // namespace sankhya

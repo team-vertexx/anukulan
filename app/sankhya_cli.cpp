@@ -341,6 +341,10 @@ int command_simplex(const std::vector<std::string>& args) {
       options.primal_tolerance = v;
     } else if (value_of(a, "--dual-tol=", &v)) {
       options.dual_tolerance = v;
+    } else if (a == "--dual") {
+      options.algorithm = sankhya::SimplexOptions::Algorithm::kDual;
+    } else if (a == "--primal") {
+      options.algorithm = sankhya::SimplexOptions::Algorithm::kPrimal;
     } else if (a == "--piecewise-phase-one") {
       options.piecewise_phase_one = true;
     } else if (a == "--dantzig") {
@@ -391,7 +395,7 @@ int command_simplex(const std::vector<std::string>& args) {
     return 1;
   }
 
-  sankhya::SimplexResult r = sankhya::solve_simplex(sf.lp, options);
+  sankhya::SimplexResult r = sankhya::solve_lp(sf.lp, options);
   if (use_presolve && !r.x.empty()) r.x = pre.postsolve.apply(r.x);
   const sankhya::ModelViolation checked =
       sankhya::measure_violation(read_result.model, r.x);
@@ -410,6 +414,8 @@ int command_simplex(const std::vector<std::string>& args) {
         << "\"worst_update_growth\":" << r.worst_update_growth << ","
         << "\"rollbacks\":" << r.rollbacks << ","
         << "\"devex_resets\":" << r.devex_resets << ","
+        << "\"dual_start_flips\":" << r.dual_start_flips << ","
+        << "\"fell_back_to_primal\":" << r.fell_back_to_primal << ","
         << "\"seconds\":" << r.solve_seconds << ","
         << "\"presolved\":" << use_presolve << ","
         << "\"row_violation\":" << checked.row_violation << ","

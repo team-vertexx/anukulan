@@ -14,6 +14,18 @@ using sankhya::LogicalForm;
 using sankhya::SimplexBasis;
 using sankhya::StandardFormResult;
 using sankhya::sz;
+using sankhya::Model;
+using sankhya::SimplexOptions;
+using sankhya::SimplexResult;
+using sankhya::SimplexStatus;
+using sankhya::SparseMatrix;
+using sankhya::Triplet;
+using sankhya::VarType;
+using sankhya::solve_dual_simplex;
+using sankhya::solve_lp;
+using sankhya::solve_simplex;
+using sankhya::to_standard_form;
+using sankhya::to_string;
 using sankhya::VarStatus;
 
 namespace {
@@ -245,7 +257,84 @@ void test_larger_instance_factorizes_and_solves() {
 
 }  // namespace
 
+// The dual simplex has to end up where the primal does. Random boxed LPs are
+// used because every column having two finite bounds is exactly the case the
+// dual can always start from: a boxed variable is dual feasible on whichever
+// bound matches the sign of its reduced cost, so no phase one is needed and the
+// solver is actually exercised rather than falling back.
+void test_dual_matches_primal() {
+  std::mt19937 rng(20260826);
+  std::uniform_real_distribution<double> coeff(-3.0, 3.0);
+  std::uniform_real_distribution<double> unit(0.0, 1.0);
+
+  int compared = 0;
+  int ran_dual = 0;
+  for (int trial = 0; trial < 40; ++trial) {
+    const Int cols = 4 + static_cast<Int>(rng() % 8);
+    const Int rows = 3 + static_cast<Int>(rng() % 6);
+
+    std::vector<double> feasible(sz(cols));
+    for (Int j = 0; j < cols; ++j) feasible[sz(j)] = unit(rng) * 4.0;
+
+    std::vector<Triplet> entries;
+    for (Int i = 0; i < rows; ++i)
+      for (Int j = 0; j < cols; ++j)
+        if (unit(rng) < 0.5) entries.push_back({i, j, coeff(rng)});
+
+    Model m;
+    m.name = "dual";
+    m.constraints = SparseMatrix::from_triplets(rows, cols, entries);
+    m.objective.resize(sz(cols));
+    for (Int j = 0; j < cols; ++j) m.objective[sz(j)] = coeff(rng);
+    m.col_lower.assign(sz(cols), 0.0);
+    m.col_upper.assign(sz(cols), 8.0);
+    m.col_type.assign(sz(cols), VarType::kContinuous);
+
+    std::vector<double> activity(sz(rows), 0.0);
+    m.constraints.multiply(feasible.data(), activity.data());
+    m.row_lower.resize(sz(rows));
+    m.row_upper.resize(sz(rows));
+    for (Int i = 0; i < rows; ++i) {
+      if (unit(rng) < 0.3) {
+        m.row_lower[sz(i)] = activity[sz(i)];
+        m.row_upper[sz(i)] = activity[sz(i)];
+      } else {
+        m.row_lower[sz(i)] = -kInf;
+        m.row_upper[sz(i)] = activity[sz(i)] + unit(rng) * 10.0;
+      }
+    }
+
+    const StandardFormResult sf = to_standard_form(m);
+    if (!sf.ok) continue;
+
+    SimplexOptions primal_options;
+    primal_options.max_iterations = 50000;
+    SimplexOptions dual_options = primal_options;
+    dual_options.algorithm = SimplexOptions::Algorithm::kDual;
+
+    const SimplexResult p = solve_simplex(sf.lp, primal_options);
+    const SimplexResult d = solve_lp(sf.lp, dual_options);
+    if (p.status != SimplexStatus::kOptimal) continue;
+    if (d.status != SimplexStatus::kOptimal) {
+      sankhya_test::report(__FILE__, __LINE__,
+                           "dual did not reach optimal where the primal did: " +
+                               to_string(d.status));
+      continue;
+    }
+    if (!d.fell_back_to_primal) ++ran_dual;
+    CHECK_NEAR(d.objective, p.objective, 1e-7);
+    ++compared;
+  }
+  // Vacuous assertions are the failure mode here, so the counts are assertions
+  // too: the dual has to have actually run, not merely handed back every time.
+  CHECK(compared >= 25);
+  CHECK(ran_dual >= 20);
+  std::printf("     dual vs primal: %d compared, %d actually ran the dual\n",
+              compared, ran_dual);
+}
+
 int main() {
+  test_dual_matches_primal();
   test_logical_form_shape();
   test_initial_basis_is_the_identity();
   test_basic_solution_satisfies_the_equalities();
