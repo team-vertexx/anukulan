@@ -504,6 +504,8 @@ int command_qp(const std::vector<std::string>& args) {
       options.scaling = false;
     } else if (a == "--osqp-termination") {
       options.max_absolute_residual = 0.0;
+    } else if (a == "--polish") {
+      options.polish = true;
     } else if (a == "--no-adaptive-rho") {
       options.adaptive_rho = false;
     } else if (a == "--verbose") {
@@ -532,6 +534,7 @@ int command_qp(const std::vector<std::string>& args) {
         << "\"iterations\":" << r.iterations << ","
         << "\"cg_iterations\":" << r.cg_iterations << ","
         << "\"rho_updates\":" << r.rho_updates << ","
+        << "\"polished\":" << (r.polished ? 1 : 0) << ","
         << "\"primal\":" << r.residual.primal << ","
         << "\"dual\":" << r.residual.dual << ","
         << "\"seconds\":" << r.solve_seconds << "}\n";
@@ -543,12 +546,14 @@ int command_qp(const std::vector<std::string>& args) {
       "status        %s%s%s\n"
       "objective     %.12e\n"
       "iterations    %d ADMM, %d conjugate gradient   (%d rho updates)\n"
+      "polish        %s\n"
       "residual      primal %.3e / %.3e   dual %.3e / %.3e\n"
       "time          %.3f s\n",
       sankhya::to_string(r.status).c_str(), r.message.empty() ? "" : ": ",
       r.message.c_str(), r.objective, r.iterations, r.cg_iterations, r.rho_updates,
-      r.residual.primal, r.residual.primal_tolerance, r.residual.dual,
-      r.residual.dual_tolerance, r.solve_seconds);
+      r.polished ? "accepted" : "not accepted", r.residual.primal,
+      r.residual.primal_tolerance, r.residual.dual, r.residual.dual_tolerance,
+      r.solve_seconds);
   return r.status == sankhya::QpStatus::kOptimal ? 0 : 1;
 }
 

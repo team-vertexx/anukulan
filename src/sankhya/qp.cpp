@@ -275,6 +275,7 @@ QpResult solve_qp(const Model& model, const QpOptions& options) {
 
   QpStatus status = QpStatus::kIterationLimit;
   Int iteration = 0;
+  result.residual = QpResidual{};
   for (; iteration < options.max_iterations; ++iteration) {
     // rhs = sigma x - q + A'(rho z - y)
     for (Int i = 0; i < m; ++i) work_m[sz(i)] = rho[sz(i)] * z[sz(i)] - y[sz(i)];
@@ -313,6 +314,7 @@ QpResult solve_qp(const Model& model, const QpOptions& options) {
     }
     if (r.converged()) {
       status = QpStatus::kOptimal;
+      result.residual = r;
       ++iteration;
       break;
     }
@@ -340,6 +342,121 @@ QpResult solve_qp(const Model& model, const QpOptions& options) {
         set_rho();
         result.rho_updates++;
       }
+    }
+  }
+
+  // Polishing. Guess the active set from the signs of the duals, then solve the
+  // equality-constrained problem that guess implies.
+  //
+  // OSQP does this with a direct factorisation of the reduced KKT system. That
+  // system is indefinite, so conjugate gradient cannot touch it - but
+  // eliminating the duals of the active rows turns it into
+  //
+  //   (P + delta I + (A_act' A_act)/delta) x = -q + (A_act' b_act)/delta
+  //
+  // which is symmetric positive definite, and therefore solvable with exactly
+  // the machinery already here.
+  if (options.polish && status == QpStatus::kOptimal) {
+    std::vector<Int> active;
+    std::vector<double> target;
+    for (Int i = 0; i < m; ++i) {
+      if (y[sz(i)] < -1e-8) {
+        active.push_back(i);
+        target.push_back(s.l[sz(i)]);
+      } else if (y[sz(i)] > 1e-8) {
+        active.push_back(i);
+        target.push_back(s.u[sz(i)]);
+      }
+    }
+
+    const double delta = options.polish_regularisation;
+    std::vector<double> row_active(sz(m), 0.0);
+    std::vector<double> row_target(sz(m), 0.0);
+    for (std::size_t idx = 0; idx < active.size(); ++idx) {
+      row_active[sz(active[idx])] = 1.0;
+      row_target[sz(active[idx])] = target[idx];
+    }
+
+    auto apply_polish = [&](const std::vector<double>& v, std::vector<double>* out) {
+      backend.multiply(s.p, v.data(), out->data());
+      backend.multiply(s.a, v.data(), cg_tmp.data());
+      for (Int i = 0; i < m; ++i) cg_tmp[sz(i)] *= row_active[sz(i)] / delta;
+      backend.multiply_transpose(s.at, cg_tmp.data(), work_n.data());
+      for (Int j = 0; j < n; ++j)
+        (*out)[sz(j)] += delta * v[sz(j)] + work_n[sz(j)];
+    };
+
+    std::vector<double> rhs_polish(sz(n), 0.0);
+    for (Int i = 0; i < m; ++i) cg_tmp[sz(i)] = row_target[sz(i)] / delta;
+    backend.multiply_transpose(s.at, cg_tmp.data(), rhs_polish.data());
+    for (Int j = 0; j < n; ++j) rhs_polish[sz(j)] -= s.q[sz(j)];
+
+    std::vector<double> polished = x;
+    std::vector<double> pr(sz(n)), pp(sz(n)), pmp(sz(n));
+    // Iterative refinement around the regularised solve, as OSQP does: the
+    // regularisation is what makes the system solvable and also what makes the
+    // answer slightly wrong, and refinement takes that back out.
+    for (Int pass = 0; pass < options.polish_refinement_steps; ++pass) {
+      apply_polish(polished, &pmp);
+      for (Int j = 0; j < n; ++j) pr[sz(j)] = rhs_polish[sz(j)] - pmp[sz(j)];
+      pp = pr;
+      double rr = backend.dot(pr.data(), pr.data(), n);
+      if (rr < 1e-30) break;
+      const double stop = 1e-14 * rr;
+      for (Int k = 0; k < options.polish_cg_iterations && rr > stop; ++k) {
+        apply_polish(pp, &pmp);
+        const double den = backend.dot(pp.data(), pmp.data(), n);
+        if (!(den > 0.0)) break;
+        const double alpha = rr / den;
+        for (Int j = 0; j < n; ++j) {
+          polished[sz(j)] += alpha * pp[sz(j)];
+          pr[sz(j)] -= alpha * pmp[sz(j)];
+        }
+        const double rr_next = backend.dot(pr.data(), pr.data(), n);
+        const double beta = rr_next / rr;
+        for (Int j = 0; j < n; ++j) pp[sz(j)] = pr[sz(j)] + beta * pp[sz(j)];
+        rr = rr_next;
+      }
+    }
+
+    // The duals have to be recovered too. Eliminating them is what made the
+    // system positive definite, so they come back from the same relation:
+    // y_active = (A_active x - target) / delta, and zero everywhere else.
+    // A first version of this kept the old duals and only replaced x, which
+    // made the dual residual worse by construction and meant the polished point
+    // was rejected every single time - fifteen instances out of fifteen.
+    const std::vector<double> saved_x = x;
+    const std::vector<double> saved_z = z;
+    const std::vector<double> saved_y = y;
+    x = polished;
+    backend.multiply(s.a, x.data(), ax.data());
+    for (Int i = 0; i < m; ++i) {
+      const std::size_t si = sz(i);
+      if (row_active[si] > 0.0) {
+        y[si] = (ax[si] - row_target[si]) / delta;
+        z[si] = row_target[si];
+      } else {
+        y[si] = 0.0;
+        z[si] = std::fmin(std::fmax(ax[si], s.l[si]), s.u[si]);
+      }
+    }
+    const QpResidual after = measure();
+    const bool better = std::isfinite(after.primal) && std::isfinite(after.dual) &&
+                        after.primal <= result.residual.primal + 1e-12 &&
+                        after.dual <= std::fmax(result.residual.dual, 1e-12);
+    if (options.verbose) {
+      std::printf(
+          "  polish: %zu of %d rows active   primal %.3e -> %.3e   "
+          "dual %.3e -> %.3e   %s\n",
+          active.size(), static_cast<int>(m), result.residual.primal, after.primal,
+          result.residual.dual, after.dual, better ? "accepted" : "rejected");
+    }
+    if (better) {
+      result.polished = true;
+    } else {
+      x = saved_x;
+      z = saved_z;
+      y = saved_y;
     }
   }
 

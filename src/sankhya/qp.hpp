@@ -59,6 +59,32 @@ struct QpOptions {
   bool scaling = true;
   Int ruiz_iterations = 10;
 
+  // Solution polishing. ADMM converges quickly to a rough answer and slowly to
+  // a sharp one, so OSQP finishes by guessing which constraints are active from
+  // the signs of the duals and solving one small system exactly.
+  //
+  // Off by default, because the implementation here does not earn its place and
+  // saying so is better than shipping a switch that quietly does nothing.
+  //
+  // OSQP factorises the reduced KKT system directly. That system is indefinite,
+  // so conjugate gradient cannot touch it, and the obvious way round -
+  // eliminating the active duals to leave something positive definite - trades
+  // an indefinite well-conditioned system for a definite one with a condition
+  // number of order 1/delta. Measured: with delta at 1e-6 the polished dual
+  // residual on dualc1 came out at 75 against 9.8e-05 before polishing, because
+  // conjugate gradient gets nowhere on a system that badly conditioned.
+  // Raising delta to 1e-3 conditions it better and makes the answer wrong
+  // instead. Zero of twelve instances accepted a polished point at either
+  // setting, at both loose and tight tolerances.
+  //
+  // The honest fix is a sparse LDL' of the indefinite system, which is the same
+  // factorisation the revised simplex needs in November. This gets switched
+  // back on then, for free. Until it does, the code stays here and stays off.
+  bool polish = false;
+  double polish_regularisation = 1e-6;
+  Int polish_refinement_steps = 3;
+  Int polish_cg_iterations = 400;
+
   bool verbose = false;
   Int log_frequency = 500;
 };
@@ -94,6 +120,7 @@ struct QpResult {
   Int iterations = 0;
   Int cg_iterations = 0;
   Int rho_updates = 0;
+  bool polished = false;
   double solve_seconds = 0.0;
   double final_rho = 0.0;
   QpResidual residual;
