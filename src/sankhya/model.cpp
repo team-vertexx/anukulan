@@ -63,6 +63,38 @@ bool Model::validate(std::string* error) const {
   return true;
 }
 
+ModelViolation measure_violation(const Model& model, const std::vector<double>& x) {
+  ModelViolation out;
+  if (static_cast<Int>(x.size()) != model.num_cols()) return out;
+
+  for (Int j = 0; j < model.num_cols(); ++j) {
+    const double v = x[sz(j)];
+    const double below = model.col_lower[sz(j)] - v;
+    const double above = v - model.col_upper[sz(j)];
+    const double miss = std::fmax(std::isfinite(below) ? below : 0.0,
+                                  std::isfinite(above) ? above : 0.0);
+    if (miss > out.bound_violation) {
+      out.bound_violation = miss;
+      out.worst_col = j;
+    }
+  }
+
+  std::vector<double> activity(sz(model.num_rows()), 0.0);
+  if (model.num_rows() > 0) model.constraints.multiply(x.data(), activity.data());
+  for (Int i = 0; i < model.num_rows(); ++i) {
+    const double a = activity[sz(i)];
+    const double below = model.row_lower[sz(i)] - a;
+    const double above = a - model.row_upper[sz(i)];
+    const double miss = std::fmax(std::isfinite(below) ? below : 0.0,
+                                  std::isfinite(above) ? above : 0.0);
+    if (miss > out.row_violation) {
+      out.row_violation = miss;
+      out.worst_row = i;
+    }
+  }
+  return out;
+}
+
 ModelStats compute_stats(const Model& model) {
   ModelStats s;
   s.rows = model.num_rows();

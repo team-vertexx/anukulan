@@ -12,6 +12,7 @@
 #include "sankhya/backend.hpp"
 #include "sankhya/branch_and_bound.hpp"
 #include "sankhya/pdhg.hpp"
+#include "sankhya/presolve.hpp"
 #include "sankhya/qp.hpp"
 #include "sankhya/standard_form.hpp"
 
@@ -28,6 +29,8 @@ void print_usage() {
       "  sankhya solve <file.mps> [options]    solve an LP with the first-order method\n"
       "  sankhya milp <file.mps> [options]     solve a MILP by branch and bound\n"
       "  sankhya qp <file.qps> [options]       solve a convex QP by ADMM\n"
+      "  sankhya presolve <file.mps> [opts]    reduce a model and report what went\n"
+      "                                        and what is left\n"
       "  sankhya backends                      report which backends this build has\n"
       "\n"
       "options:\n"
@@ -51,6 +54,7 @@ void print_usage() {
       "  --no-adaptive        fixed step size\n"
       "  --no-restarts        no restarting\n"
       "  --no-primal-weight   keep the primal weight at one\n"
+      "  --presolve           reduce the model first, then map the answer back\n"
       "  --verbose            print progress\n"
       "  --backend=cpu|cuda   force a backend instead of picking automatically\n"
       "  --solution=<path>    write the primal solution so it can be checked\n"
@@ -226,7 +230,83 @@ int command_standard(const std::vector<std::string>& args) {
   return 0;
 }
 
+int command_presolve(const std::vector<std::string>& args) {
+  if (args.empty()) {
+    std::fprintf(stderr, "presolve: expected a file name\n");
+    return 2;
+  }
+  bool as_json = false;
+  bool quiet = false;
+  sankhya::PresolveOptions options;
+  for (std::size_t i = 1; i < args.size(); ++i) {
+    const std::string& a = args[i];
+    if (a == "--format=json") {
+      as_json = true;
+    } else if (a == "--quiet") {
+      quiet = true;
+    } else if (a == "--no-bound-tightening") {
+      options.bound_tightening = false;
+    } else if (a == "--no-duplicate-rows") {
+      options.duplicate_rows = false;
+    } else if (a == "--no-forcing-rows") {
+      options.forcing_rows = false;
+    } else if (a == "--no-column-singletons") {
+      options.free_column_singletons = false;
+    } else if (a == "--rows-only") {
+      options.fixed_columns = false;
+      options.empty_columns = false;
+      options.free_column_singletons = false;
+    } else if (a != "--format=human") {
+      std::fprintf(stderr, "presolve: unknown option \"%s\"\n", a.c_str());
+      return 2;
+    }
+  }
+
+  const sankhya::MpsReadResult read_result = sankhya::read_mps(args[0]);
+  if (!read_result.ok) {
+    std::fprintf(stderr, "error: %s\n", read_result.error.c_str());
+    return 1;
+  }
+  if (!quiet) {
+    for (const std::string& w : read_result.warnings)
+      std::fprintf(stderr, "warning: %s\n", w.c_str());
+  }
+
+  const sankhya::PresolveResult r = sankhya::presolve(read_result.model, options);
+  const sankhya::PresolveCounts& c = r.counts;
+  if (as_json) {
+    std::ostringstream out;
+    out.precision(17);
+    out << "{\"name\":\"" << read_result.model.name << "\","
+        << "\"status\":\"" << sankhya::to_string(r.status) << "\","
+        << "\"rows_before\":" << r.original_rows << ","
+        << "\"cols_before\":" << r.original_cols << ","
+        << "\"nnz_before\":" << r.original_nnz << ","
+        << "\"rows_after\":" << (r.original_rows - c.rows_removed) << ","
+        << "\"cols_after\":" << (r.original_cols - c.cols_removed) << ","
+        << "\"nnz_after\":" << (r.original_nnz - c.nonzeros_removed) << ","
+        << "\"empty_rows\":" << c.empty_rows << ","
+        << "\"singleton_rows\":" << c.singleton_rows << ","
+        << "\"redundant_rows\":" << c.redundant_rows << ","
+        << "\"forcing_rows\":" << c.forcing_rows << ","
+        << "\"duplicate_rows\":" << c.duplicate_rows << ","
+        << "\"fixed_columns\":" << c.fixed_columns << ","
+        << "\"empty_columns\":" << c.empty_columns << ","
+        << "\"free_column_singletons\":" << c.free_column_singletons << ","
+        << "\"bounds_tightened\":" << c.bounds_tightened << ","
+        << "\"rounds\":" << c.rounds << ","
+        << "\"seconds\":" << r.seconds << "}\n";
+    std::fputs(out.str().c_str(), stdout);
+    return 0;
+  }
+
+  std::fputs(sankhya::format_presolve(r).c_str(), stdout);
+  return 0;
+}
+
 int command_solve(const std::vector<std::string>& args) {
+  bool use_presolve = false;
+  sankhya::PresolveOptions presolve_options;
   if (args.empty()) {
     std::fprintf(stderr, "solve: expected a file name\n");
     return 2;
@@ -285,6 +365,19 @@ int command_solve(const std::vector<std::string>& args) {
       options.verbose = true;
     } else if (a == "--format=json") {
       as_json = true;
+    } else if (a == "--presolve") {
+      use_presolve = true;
+    } else if (a == "--presolve-no-bound-tightening") {
+      use_presolve = true;
+      presolve_options.bound_tightening = false;
+    } else if (a == "--presolve-rows-only") {
+      use_presolve = true;
+      presolve_options.fixed_columns = false;
+      presolve_options.empty_columns = false;
+      presolve_options.free_column_singletons = false;
+    } else if (a == "--presolve-no-forcing") {
+      use_presolve = true;
+      presolve_options.forcing_rows = false;
     } else if (a == "--quiet") {
       quiet = true;
     } else if (a != "--format=human") {
@@ -303,13 +396,59 @@ int command_solve(const std::vector<std::string>& args) {
                  "warning: model has integer variables; solving the continuous "
                  "relaxation\n");
   }
-  const sankhya::StandardFormResult sf = sankhya::to_standard_form(read_result.model);
+  // Presolve sits in front of the solver and behind postsolve, so nothing
+  // downstream of here knows it happened: what comes back out is a point in the
+  // original model's columns, with the original model's objective.
+  sankhya::PresolveResult pre;
+  sankhya::Model solved_model = read_result.model;
+  if (use_presolve) {
+    pre = sankhya::presolve(read_result.model, presolve_options);
+    if (pre.status != sankhya::PresolveStatus::kReduced) {
+      std::printf("status        %s (proved by presolve, without solving)\n",
+                  sankhya::to_string(pre.status).c_str());
+      if (!pre.message.empty())
+        std::printf("reason        %s\n", pre.message.c_str());
+      return 1;
+    }
+    if (!quiet) std::fputs(sankhya::format_presolve(pre).c_str(), stdout);
+    solved_model = pre.reduced;
+  }
+
+  const sankhya::StandardFormResult sf = sankhya::to_standard_form(solved_model);
   if (!sf.ok) {
     std::fprintf(stderr, "error: %s\n", sf.error.c_str());
     return 1;
   }
 
-  const sankhya::PdhgResult r = sankhya::solve_pdhg(sf.lp, options);
+  sankhya::PdhgResult r = sankhya::solve_pdhg(sf.lp, options);
+
+  // The solver's residuals describe the model it was handed. With presolve in
+  // front of it that is not the model the caller asked about, so the answer is
+  // re-checked against the original before any claim is made about it. See
+  // measure_violation in model.hpp for what went wrong without this.
+  if (use_presolve) r.x = pre.postsolve.apply(r.x);
+
+  // Measured on both paths, because the number is worth seeing either way.
+  const sankhya::ModelViolation checked =
+      sankhya::measure_violation(read_result.model, r.x);
+
+  // Acted on only when presolve ran, and the asymmetry is deliberate. Without
+  // presolve the solver's own criteria already describe this model, and a
+  // violation that survives them is PDLP's documented relative behaviour, which
+  // --abs-tol exists to override. With presolve they describe the reduced model
+  // instead, so nothing has checked the original unless this does.
+  bool violates_cap = false;
+  if (use_presolve && r.status == sankhya::PdhgStatus::kOptimal) {
+    const double cap = options.absolute_tolerance > 0.0 ? options.absolute_tolerance
+                                                        : options.tolerance;
+    if (checked.worst() > cap) {
+      violates_cap = true;
+      r.status = sankhya::PdhgStatus::kNumericalError;
+      r.message =
+          "solved the reduced model, but the point it maps back to misses the "
+          "original model's rows by more than the tolerance allows";
+    }
+  }
 
   if (!solution_path.empty()) {
     // Column name and value, one per line. Deliberately plain text: the point is
@@ -336,6 +475,9 @@ int command_solve(const std::vector<std::string>& args) {
     out << "{\"name\":\"" << read_result.model.name << "\","
         << "\"status\":\"" << sankhya::to_string(r.status) << "\","
         << "\"objective\":" << r.objective << ","
+        << "\"presolved\":" << use_presolve << ","
+        << "\"original_row_violation\":" << checked.row_violation << ","
+        << "\"original_bound_violation\":" << checked.bound_violation << ","
         << "\"iterations\":" << r.iterations << ","
         << "\"restarts\":" << r.restarts << ","
         << "\"seconds\":" << r.solve_seconds << ","
@@ -355,6 +497,11 @@ int command_solve(const std::vector<std::string>& args) {
     return r.status == sankhya::PdhgStatus::kOptimal ? 0 : 1;
   }
 
+  char vb[220];
+  std::snprintf(vb, sizeof(vb), "vs original   row %.3e  bound %.3e%s\n",
+                checked.row_violation, checked.bound_violation,
+                violates_cap ? "   <- over the tolerance" : "");
+  const std::string violation_line(vb);
   std::printf(
       "status        %s%s%s\n"
       "objective     %.12e\n"
@@ -364,17 +511,19 @@ int command_solve(const std::vector<std::string>& args) {
       "rel inf-norm  primal %.3e  dual %.3e\n"
       "worst abs     primal %.3e  dual %.3e\n"
       "||K||         %.6e\n"
-      "row spread    %.3e -> %.3e\n",
+      "row spread    %.3e -> %.3e\n%s",
       sankhya::to_string(r.status).c_str(), r.message.empty() ? "" : ": ",
       r.message.c_str(), r.objective, r.iterations, r.restarts, r.solve_seconds,
       r.residual.relative_primal, r.residual.relative_dual, r.residual.relative_gap,
       r.residual.relative_primal_inf, r.residual.relative_dual_inf,
       r.residual.primal_residual_inf, r.residual.dual_residual_inf,
-      r.matrix_norm_estimate, r.scaling.row_spread_before, r.scaling.row_spread_after);
+      r.matrix_norm_estimate, r.scaling.row_spread_before,
+      r.scaling.row_spread_after, violation_line.c_str());
   return r.status == sankhya::PdhgStatus::kOptimal ? 0 : 1;
 }
 
 int command_milp(const std::vector<std::string>& args) {
+  bool use_presolve = false;
   if (args.empty()) {
     std::fprintf(stderr, "milp: expected a file name\n");
     return 2;
@@ -414,6 +563,8 @@ int command_milp(const std::vector<std::string>& args) {
     } else if (a == "--no-heuristic") {
       options.rounding_heuristic = false;
       options.diving_heuristic = false;
+    } else if (a == "--presolve") {
+      use_presolve = true;
     } else if (a == "--verbose") {
       options.verbose = true;
     } else if (a == "--format=json") {
@@ -433,8 +584,24 @@ int command_milp(const std::vector<std::string>& args) {
     std::fprintf(stderr, "warning: no integer variables; this is just an LP\n");
   }
 
-  const sankhya::BranchAndBoundResult r =
-      sankhya::solve_milp(read_result.model, options);
+  const bool quiet = as_json;
+  sankhya::PresolveResult pre;
+  sankhya::Model solved_model = read_result.model;
+  if (use_presolve) {
+    pre = sankhya::presolve(read_result.model);
+    if (pre.status != sankhya::PresolveStatus::kReduced) {
+      std::printf("status        %s (proved by presolve, without branching)\n",
+                  sankhya::to_string(pre.status).c_str());
+      if (!pre.message.empty())
+        std::printf("reason        %s\n", pre.message.c_str());
+      return 1;
+    }
+    if (!quiet) std::fputs(sankhya::format_presolve(pre).c_str(), stdout);
+    solved_model = pre.reduced;
+  }
+
+  sankhya::BranchAndBoundResult r = sankhya::solve_milp(solved_model, options);
+  if (use_presolve) r.x = pre.postsolve.apply(r.x);
 
   if (as_json) {
     std::ostringstream out;
@@ -475,6 +642,7 @@ int command_milp(const std::vector<std::string>& args) {
 }
 
 int command_qp(const std::vector<std::string>& args) {
+  bool use_presolve = false;
   if (args.empty()) {
     std::fprintf(stderr, "qp: expected a file name\n");
     return 2;
@@ -508,10 +676,14 @@ int command_qp(const std::vector<std::string>& args) {
       options.scaling = false;
     } else if (a == "--osqp-termination") {
       options.max_absolute_residual = 0.0;
+    } else if (a == "--presolve") {
+      use_presolve = true;
     } else if (a == "--polish") {
       options.polish = true;
     } else if (a == "--no-adaptive-rho") {
       options.adaptive_rho = false;
+    } else if (a == "--presolve") {
+      use_presolve = true;
     } else if (a == "--verbose") {
       options.verbose = true;
     } else if (a == "--format=json") {
@@ -527,7 +699,26 @@ int command_qp(const std::vector<std::string>& args) {
     std::fprintf(stderr, "error: %s\n", read_result.error.c_str());
     return 1;
   }
-  const sankhya::QpResult r = sankhya::solve_qp(read_result.model, options);
+  // A Hessian switches off every column-removing reduction, so what a QP gets
+  // out of this is the row side: rows that cannot bind, rows that are really
+  // bounds, and tighter bounds. Q carries over untouched.
+  sankhya::PresolveResult pre;
+  sankhya::Model solved_model = read_result.model;
+  if (use_presolve) {
+    pre = sankhya::presolve(read_result.model);
+    if (pre.status != sankhya::PresolveStatus::kReduced) {
+      std::printf("status        %s (proved by presolve, without solving)\n",
+                  sankhya::to_string(pre.status).c_str());
+      if (!pre.message.empty())
+        std::printf("reason        %s\n", pre.message.c_str());
+      return 1;
+    }
+    if (!as_json) std::fputs(sankhya::format_presolve(pre).c_str(), stdout);
+    solved_model = pre.reduced;
+  }
+
+  sankhya::QpResult r = sankhya::solve_qp(solved_model, options);
+  if (use_presolve) r.x = pre.postsolve.apply(r.x);
 
   if (as_json) {
     std::ostringstream out;
@@ -593,6 +784,7 @@ int main(int argc, char** argv) {
   const std::vector<std::string> rest(argv_all.begin() + 1, argv_all.end());
   if (command == "read") return command_read(rest);
   if (command == "standard") return command_standard(rest);
+  if (command == "presolve") return command_presolve(rest);
   if (command == "solve") return command_solve(rest);
   if (command == "milp") return command_milp(rest);
   if (command == "qp") return command_qp(rest);

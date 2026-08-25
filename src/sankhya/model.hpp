@@ -74,6 +74,31 @@ struct ModelStats {
 
 ModelStats compute_stats(const Model& model);
 
+// How badly a point misses the model it is supposed to solve.
+//
+// This exists because of what presolve did to the safety net. The solver's
+// absolute residual cap is measured on whatever it was handed, and once
+// presolve is in front of it that is the reduced model - whose rows have been
+// removed, merged and rescaled. On Netlib's share1b the cap brought the worst
+// row violation of an unpresolved solve from 2.9e-03 down to 8.7e-09, and made
+// no difference at all to a presolved one, which stayed at 4.2e-02. The check
+// was not failing; it was passing, on the wrong object.
+//
+// So the claim gets verified against the model the caller actually handed in,
+// after postsolve, by walking its own rows and its own bounds.
+struct ModelViolation {
+  double row_violation = 0.0;    // largest absolute amount a row bound is missed by
+  double bound_violation = 0.0;  // largest absolute amount a column bound is missed by
+  Int worst_row = -1;
+  Int worst_col = -1;
+
+  double worst() const {
+    return row_violation > bound_violation ? row_violation : bound_violation;
+  }
+};
+
+ModelViolation measure_violation(const Model& model, const std::vector<double>& x);
+
 std::string format_stats(const Model& model, const ModelStats& stats);
 
 }  // namespace sankhya
