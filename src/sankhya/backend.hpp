@@ -26,6 +26,14 @@ class LinAlgBackend {
 
   virtual std::string name() const = 0;
 
+  // A backend that keeps its own copy of a matrix - on a device, say - needs to
+  // know when one is about to be used many times, and when it can be dropped.
+  // The CPU backend ignores both. Without this the CUDA backend would have to
+  // guess whether a matrix it has seen before is still the same one, and branch
+  // and bound builds a fresh problem at every node, so guessing would be wrong.
+  virtual void prepare(const SparseMatrix& a) const { (void)a; }
+  virtual void release() const {}
+
   // y = A * x
   virtual void multiply(const SparseMatrix& a, const double* x, double* y) const = 0;
   // x = A^T * y, given A^T directly so both directions are a plain row sweep.
@@ -76,5 +84,16 @@ class LinAlgBackend {
 
 // Plain scalar C++. The reference against which any other backend is checked.
 const LinAlgBackend& cpu_backend();
+
+#ifdef SANKHYA_WITH_CUDA
+// Hand-written CUDA kernels. Throws if no device is present.
+const LinAlgBackend& cuda_backend();
+#endif
+
+// Returns the CUDA backend when this build has one and a device is present, and
+// the CPU backend otherwise. Never throws: a machine without a GPU simply gets
+// the reference implementation, which is what makes the same binary usable on a
+// laptop and on a GPU box.
+const LinAlgBackend& default_backend();
 
 }  // namespace sankhya

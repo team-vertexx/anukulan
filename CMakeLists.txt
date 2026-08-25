@@ -10,6 +10,17 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
 endif()
 
 option(SANKHYA_ENABLE_CUDA "Build the CUDA backend" OFF)
+
+if(SANKHYA_ENABLE_CUDA)
+  enable_language(CUDA)
+  set(CMAKE_CUDA_STANDARD 17)
+  set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+  if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+    # Covers the cards actually available on the free tiers: P100 is 60,
+    # T4 is 75, A100 is 80, L4 and 4090 are 89.
+    set(CMAKE_CUDA_ARCHITECTURES 60 70 75 80 89)
+  endif()
+endif()
 option(SANKHYA_WERROR "Treat warnings as errors" ON)
 
 add_library(sankhya
@@ -22,17 +33,27 @@ add_library(sankhya
   src/sankhya/pdhg.cpp
   src/sankhya/branch_and_bound.cpp
   src/sankhya/qp.cpp
+  src/sankhya/cuts.cpp
 )
 target_include_directories(sankhya PUBLIC src)
 
 if(MSVC)
   target_compile_options(sankhya PRIVATE /W4)
 else()
-  target_compile_options(sankhya PRIVATE -Wall -Wextra -Wpedantic -Wshadow
-                                         -Wconversion -Wsign-conversion)
+  target_compile_options(sankhya PRIVATE
+    $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wsign-conversion>)
   if(SANKHYA_WERROR)
-    target_compile_options(sankhya PRIVATE -Werror)
+    target_compile_options(sankhya PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Werror>)
   endif()
+endif()
+
+if(SANKHYA_ENABLE_CUDA)
+  target_sources(sankhya PRIVATE src/sankhya/cuda_backend.cu)
+  target_compile_definitions(sankhya PUBLIC SANKHYA_WITH_CUDA)
+  set_target_properties(sankhya PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+  # The strict warning set is for our C++; nvcc does not accept all of it.
+  set_source_files_properties(src/sankhya/cuda_backend.cu PROPERTIES
+                              COMPILE_OPTIONS "")
 endif()
 
 add_executable(sankhya-cli app/sankhya_cli.cpp)

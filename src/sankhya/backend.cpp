@@ -89,4 +89,19 @@ const LinAlgBackend& cpu_backend() {
   return backend;
 }
 
+const LinAlgBackend& default_backend() {
+#ifdef SANKHYA_WITH_CUDA
+  try {
+    return cuda_backend();
+  } catch (...) {
+    // Built with CUDA but running where there is no device. Fall back rather
+    // than fail: the same binary has to work on the laptop the code is written
+    // on and on the box it is benchmarked on.
+    return cpu_backend();
+  }
+#else
+  return cpu_backend();
+#endif
+}
+
 }  // namespace sankhya

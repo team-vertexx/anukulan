@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+# Build with CUDA and prove the GPU backend is correct, on a machine that has a
+# device. Run this on Kaggle, Colab, RunPod, or a cluster node - nothing here is
+# specific to any of them.
+#
+#   bash scripts/gpu_test.sh
+#
+# What it checks, in order:
+#   1. a device exists and nvcc works
+#   2. the CUDA build compiles
+#   3. every backend operation matches the CPU reference (test_backend)
+#   4. the whole solver, run on the GPU, reaches the published Netlib optima
+#   5. CPU against GPU on progressively larger instances, for the timing table
+#
+# The correctness gate is step 4, not "the two backends produce identical
+# iteration counts". They will not. Fused multiply-add alone moves iteration
+# counts by up to 25% between two CPU builds of the same source, so a different
+# device is certain to differ. What must match is the objective, against a value
+# published in 1988 that neither backend can influence.
+
+set -u
+root="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$root"
+build=build-cuda
+fail=0
+
+step() { printf '\n=== %s\n' "$1"; }
+
+step "1. device"
+if ! command -v nvcc > /dev/null; then
+  echo "nvcc not found. On Kaggle and Colab it ships with the image; check that"
+  echo "the notebook accelerator is actually set to a GPU."
+  exit 1
+fi
+nvcc --version | tail -2
+nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader || true
+
+step "2. build"
+cmake -S . -B "$build" -DCMAKE_BUILD_TYPE=Release -DSANKHYA_ENABLE_CUDA=ON > /dev/null
+cmake --build "$build" -j"$(nproc 2>/dev/null || echo 4)" 2>&1 | tail -3
+"./$build/sankhya" backends
+
+step "3. backend operations against the CPU reference"
+if ctest --test-dir "$build" --output-on-failure 2>&1 | tail -6; then :; else fail=1; fi
+
+step "4. solver on GPU against published Netlib optima"
+if [ ! -d data/netlib ]; then
+  echo "fetching the Netlib set"
+  python3 scripts/fetch_netlib.py > /dev/null 2>&1 || true
+fi
+python3 - "$build" <<'PY'
+import csv, json, subprocess, sys, pathlib
+build = sys.argv[1]
+ref = {r['name']: float(r['optimal'])
+       for r in csv.DictReader(open('data/reference/netlib.csv'))}
+names = ["afiro","sc50a","adlittle","blend","share1b","stocfor1","sctap1",
+         "scfxm1","bandm","degen2","fit1p","25fv47","degen3","maros-r7"]
+print(f"{'instance':<10} {'cpu obj':>16} {'gpu obj':>16} {'published':>16} "
+      f"{'gpu acc':>9} {'cpu it':>7} {'gpu it':>7}")
+bad = 0
+for n in names:
+    p = pathlib.Path(f"data/netlib/{n}.mps")
+    if not p.exists():
+        continue
+    out = {}
+    for tag, flag in (("cpu", "--backend=cpu"), ("gpu", "--backend=cuda")):
+        r = subprocess.run([f"./{build}/sankhya", "solve", str(p), "--tol=1e-6",
+                            "--max-iter=500000", "--time-limit=120",
+                            "--format=json", "--quiet", flag],
+                           capture_output=True, text=True)
+        out[tag] = json.loads(r.stdout) if r.stdout.strip() else None
+    if not out["cpu"] or not out["gpu"]:
+        print(f"{n:<10} FAILED"); bad += 1; continue
+    o = ref[n]
+    acc = abs(out["gpu"]["objective"] - o) / max(1.0, abs(o))
+    if acc > 1e-4: bad += 1
+    print(f"{n:<10} {out['cpu']['objective']:>16.9g} {out['gpu']['objective']:>16.9g} "
+          f"{o:>16.9g} {acc:>9.1e} {out['cpu']['iterations']:>7} "
+          f"{out['gpu']['iterations']:>7}")
+print(f"\n{'PASS' if bad == 0 else 'FAIL'}: {bad} instance(s) off the published optimum")
+sys.exit(1 if bad else 0)
+PY
+[ $? -ne 0 ] && fail=1
+
+step "5. CPU against GPU by size"
+echo "The Netlib set is too small for a GPU to pay. Pull the large instances"
+echo "first if they are not present:"
+echo "    python3 scripts/fetch_lptestset.py --max=4"
+python3 - "$build" <<'PY'
+import json, subprocess, sys, pathlib, time
+build = sys.argv[1]
+names = ["qap15", "supportcase10", "datt256_lp", "graph40-40"]
+rows = []
+for n in names:
+    p = pathlib.Path(f"data/lptestset/{n}.mps")
+    if not p.exists():
+        continue
+    row = {"name": n}
+    for tag, flag in (("cpu", "--backend=cpu"), ("gpu", "--backend=cuda")):
+        t = time.perf_counter()
+        r = subprocess.run([f"./{build}/sankhya", "solve", str(p), "--tol=1e-4",
+                            "--max-iter=1000000", "--time-limit=600",
+                            "--format=json", "--quiet", flag],
+                           capture_output=True, text=True)
+        row[tag] = json.loads(r.stdout) if r.stdout.strip() else None
+        row[tag + "_wall"] = time.perf_counter() - t
+    rows.append(row)
+if not rows:
+    print("no large instances downloaded; skipping")
+else:
+    print(f"{'instance':<15} {'cpu s':>9} {'gpu s':>9} {'speedup':>9} "
+          f"{'objectives agree':>18}")
+    for r in rows:
+        if not r.get("cpu") or not r.get("gpu"):
+            print(f"{r['name']:<15} incomplete"); continue
+        d = abs(r['cpu']['objective'] - r['gpu']['objective']) / \
+            max(1.0, abs(r['cpu']['objective']))
+        print(f"{r['name']:<15} {r['cpu_wall']:>9.2f} {r['gpu_wall']:>9.2f} "
+              f"{r['cpu_wall']/max(1e-9, r['gpu_wall']):>8.2f}x {d:>18.1e}")
+PY
+
+printf '\n=== summary\n'
+if [ "$fail" -eq 0 ]; then
+  echo "GPU backend is correct. Timing table above is the headline number."
+else
+  echo "Something failed above. The build and the backend tests come first;"
+  echo "a timing number from an incorrect backend is worth nothing."
+fi
+exit "$fail"

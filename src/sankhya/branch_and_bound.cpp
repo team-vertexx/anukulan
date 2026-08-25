@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdio>
 
+#include "sankhya/cuts.hpp"
 #include "sankhya/standard_form.hpp"
 
 namespace sankhya {
@@ -214,10 +215,38 @@ BranchAndBoundResult solve_milp(const Model& model,
   std::vector<Int> pseudo_down_n(sz(model.num_cols()), 0);
   std::vector<Int> pseudo_up_n(sz(model.num_cols()), 0);
 
+  // Root cut loop: solve, separate, add, repeat. Cuts are kept for the whole
+  // tree, so a round that tightens the root tightens every node below it.
+  StandardLp working = sf.lp;
+  if (options.root_cuts && !integer_columns.empty()) {
+    PdhgOptions root_options = options.relaxation;
+    for (Int round = 0; round < options.cut_rounds; ++round) {
+      const PdhgResult root_solve = solve_pdhg(working, root_options);
+      result.relaxations_solved++;
+      if (root_solve.status != PdhgStatus::kOptimal) break;
+      if (round == 0) {
+        result.root_bound_before_cuts =
+            sf.lp.objective_scale * sf.lp.standard_objective(root_solve.x) +
+            sf.lp.objective_offset;
+      }
+      result.root_bound_after_cuts =
+          sf.lp.objective_scale * sf.lp.standard_objective(root_solve.x) +
+          sf.lp.objective_offset;
+
+      CutOptions cut_options;
+      cut_options.max_cuts = options.cuts_per_round;
+      const std::vector<Cut> cuts =
+          separate_cuts(working, is_integral, root_solve.x, cut_options);
+      if (cuts.empty()) break;
+      working = append_cuts(working, cuts);
+      result.cuts_added += static_cast<Int>(cuts.size());
+    }
+  }
+
   std::vector<Node> stack;
   Node root;
-  root.lower = sf.lp.lower;
-  root.upper = sf.lp.upper;
+  root.lower = working.lower;
+  root.upper = working.upper;
   stack.push_back(std::move(root));
 
   auto try_incumbent = [&](const std::vector<double>& candidate) {
@@ -228,15 +257,15 @@ BranchAndBoundResult solve_milp(const Model& model,
       if (fractionality(candidate[sz(j)]) > options.integrality_tolerance) return false;
     }
     for (std::size_t j = 0; j < candidate.size(); ++j) {
-      if (candidate[j] < sf.lp.lower[j] - 1e-7) return false;
-      if (candidate[j] > sf.lp.upper[j] + 1e-7) return false;
+      if (candidate[j] < working.lower[j] - 1e-7) return false;
+      if (candidate[j] > working.upper[j] + 1e-7) return false;
     }
     std::vector<double> scratch;
     double inf_norm = 0.0;
-    sf.lp.primal_residual(candidate, &scratch, nullptr, &inf_norm);
+    working.primal_residual(candidate, &scratch, nullptr, &inf_norm);
     if (inf_norm > 1e-6) return false;
 
-    const double value = sf.lp.standard_objective(candidate);
+    const double value = working.standard_objective(candidate);
     if (value >= incumbent) return false;
     incumbent = value;
     incumbent_x = candidate;
@@ -245,7 +274,7 @@ BranchAndBoundResult solve_milp(const Model& model,
   };
 
   auto solve_node = [&](const Node& node, PdhgResult* out) {
-    StandardLp lp = sf.lp;
+    StandardLp lp = working;
     lp.lower = node.lower;
     lp.upper = node.upper;
     *out = solve_pdhg(lp, options.relaxation);
@@ -274,7 +303,7 @@ BranchAndBoundResult solve_milp(const Model& model,
     // Nothing below this node can beat the incumbent.
     if (node.parent_bound >= incumbent) continue;
 
-    if (provably_infeasible(sf.lp, node.lower, node.upper)) {
+    if (provably_infeasible(working, node.lower, node.upper)) {
       result.nodes_proved_infeasible++;
       continue;
     }
@@ -293,7 +322,7 @@ BranchAndBoundResult solve_milp(const Model& model,
       continue;
     }
 
-    const double node_objective = sf.lp.standard_objective(relaxation.x);
+    const double node_objective = working.standard_objective(relaxation.x);
 
     // Update the pseudocost for the branch that created this node: how much did
     // the objective actually degrade, per unit of fractionality given up.
@@ -348,7 +377,7 @@ BranchAndBoundResult solve_milp(const Model& model,
         return fractionality(relaxation.x[sz(a)]) > fractionality(relaxation.x[sz(b)]);
       });
 
-      bool ok = propagate_bounds(sf.lp, is_integral, &lo, &hi, 4);
+      bool ok = propagate_bounds(working, is_integral, &lo, &hi, 4);
       for (std::size_t idx = 0; ok && idx < order.size(); ++idx) {
         const std::size_t j = sz(order[idx]);
         if (hi[j] - lo[j] < 0.5) continue;  // propagation already fixed it
@@ -362,7 +391,7 @@ BranchAndBoundResult solve_milp(const Model& model,
           std::vector<double> trial_hi = hi;
           trial_lo[j] = value;
           trial_hi[j] = value;
-          if (propagate_bounds(sf.lp, is_integral, &trial_lo, &trial_hi, 4)) {
+          if (propagate_bounds(working, is_integral, &trial_lo, &trial_hi, 4)) {
             lo.swap(trial_lo);
             hi.swap(trial_hi);
             fixed = true;
@@ -374,7 +403,7 @@ BranchAndBoundResult solve_milp(const Model& model,
 
       if (ok) {
         // The integers are pinned; one solve settles the continuous variables.
-        StandardLp dive = sf.lp;
+        StandardLp dive = working;
         dive.lower = lo;
         dive.upper = hi;
         PdhgOptions dive_options = options.relaxation;

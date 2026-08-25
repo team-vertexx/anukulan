@@ -47,6 +47,11 @@ struct PdhgOptions {
 
   ScalingOptions scaling;
 
+  // Null means whatever this build and machine offer - CUDA when both are
+  // present, plain C++ otherwise. Set it explicitly to force one, which is what
+  // the CPU-versus-GPU comparison does.
+  const class LinAlgBackend* backend = nullptr;
+
   // Look for a Farkas certificate of primal infeasibility. A first-order method
   // cannot otherwise tell an infeasible problem from a slowly converging one, so
   // it burns its whole budget and the caller has to guess. That is tolerable for

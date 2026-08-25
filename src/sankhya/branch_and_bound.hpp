@@ -36,6 +36,14 @@ struct BranchAndBoundOptions {
   // Stop once the proven gap is this small, relative to the incumbent.
   double gap_tolerance = 1e-6;
 
+  // Cutting planes, separated from the original rows at the root before the
+  // tree starts. Gomory cuts would need a simplex tableau, which a first-order
+  // method does not have; cover and MIR inequalities need only the rows and the
+  // current point, so they are available now. See cuts.hpp.
+  bool root_cuts = true;
+  Int cut_rounds = 8;
+  Int cuts_per_round = 60;
+
   // Branching rule. Most-fractional is the classic bad default, kept so its
   // cost can be measured rather than asserted. Pseudocost keeps a running
   // average of how much the objective actually degraded the last time each
@@ -86,6 +94,9 @@ struct BranchAndBoundResult {
   Int nodes_relaxation_failed = 0;
   Int heuristic_successes = 0;
   Int dives_run = 0;
+  Int cuts_added = 0;
+  double root_bound_before_cuts = 0.0;
+  double root_bound_after_cuts = 0.0;
   double solve_seconds = 0.0;
   std::string message;
 };

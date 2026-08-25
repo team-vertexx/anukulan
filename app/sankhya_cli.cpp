@@ -1,5 +1,6 @@
 #include <cstdio>
 #include <cstdlib>
+#include <stdexcept>
 #include <ios>
 #include <fstream>
 #include <sstream>
@@ -8,6 +9,7 @@
 
 #include "sankhya/model.hpp"
 #include "sankhya/mps_reader.hpp"
+#include "sankhya/backend.hpp"
 #include "sankhya/branch_and_bound.hpp"
 #include "sankhya/pdhg.hpp"
 #include "sankhya/qp.hpp"
@@ -26,6 +28,7 @@ void print_usage() {
       "  sankhya solve <file.mps> [options]    solve an LP with the first-order method\n"
       "  sankhya milp <file.mps> [options]     solve a MILP by branch and bound\n"
       "  sankhya qp <file.qps> [options]       solve a convex QP by ADMM\n"
+      "  sankhya backends                      report which backends this build has\n"
       "\n"
       "options:\n"
       "  --neg-up-bound=keep|minus-inf   how to read a negative UP bound with no\n"
@@ -49,6 +52,7 @@ void print_usage() {
       "  --no-restarts        no restarting\n"
       "  --no-primal-weight   keep the primal weight at one\n"
       "  --verbose            print progress\n"
+      "  --backend=cpu|cuda   force a backend instead of picking automatically\n"
       "  --solution=<path>    write the primal solution so it can be checked\n"
       "                       independently\n");
 }
@@ -253,6 +257,17 @@ int command_solve(const std::vector<std::string>& args) {
       options.termination_check_frequency = static_cast<sankhya::Int>(v);
     } else if (a.rfind("--solution=", 0) == 0) {
       solution_path = a.substr(std::string("--solution=").size());
+    } else if (a == "--backend=cpu") {
+      options.backend = &sankhya::cpu_backend();
+    } else if (a == "--backend=cuda") {
+#ifdef SANKHYA_WITH_CUDA
+      options.backend = &sankhya::cuda_backend();
+#else
+      std::fprintf(stderr,
+                   "this build has no CUDA backend; configure with "
+                   "-DSANKHYA_ENABLE_CUDA=ON\n");
+      return 2;
+#endif
     } else if (a == "--pdlp-termination") {
       options.require_inf_norm_termination = false;
     } else if (a == "--ruiz-only") {
@@ -387,6 +402,8 @@ int command_milp(const std::vector<std::string>& args) {
       options.relaxation.tolerance = v;
     } else if (value_of(a, "--int-tol=", &v)) {
       options.integrality_tolerance = v;
+    } else if (a == "--no-cuts") {
+      options.root_cuts = false;
     } else if (a == "--most-fractional") {
       options.branching =
           sankhya::BranchAndBoundOptions::Branching::kMostFractional;
@@ -428,6 +445,9 @@ int command_milp(const std::vector<std::string>& args) {
         << "\"relaxations\":" << r.relaxations_solved << ","
         << "\"incumbents\":" << r.incumbents_found << ","
         << "\"heuristic_successes\":" << r.heuristic_successes << ","
+        << "\"cuts_added\":" << r.cuts_added << ","
+        << "\"root_before\":" << r.root_bound_before_cuts << ","
+        << "\"root_after\":" << r.root_bound_after_cuts << ","
         << "\"seconds\":" << r.solve_seconds << "}\n";
     std::fputs(out.str().c_str(), stdout);
     return r.status == sankhya::MilpStatus::kOptimal ? 0 : 1;
@@ -439,10 +459,12 @@ int command_milp(const std::vector<std::string>& args) {
       "dual bound    %.12e   (gap %.3e)\n"
       "nodes         %d   max depth %d   relaxations %d   incumbents %d\n"
       "pruned        %d proved infeasible   %d unconverged\n"
+      "root cuts     %d added   bound %.10e -> %.10e\n"
       "time          %.3f s\n",
       sankhya::to_string(r.status).c_str(), r.objective, r.dual_bound,
       r.relative_gap, r.nodes, r.max_depth, r.relaxations_solved,
       r.incumbents_found, r.nodes_proved_infeasible, r.nodes_relaxation_failed,
+      r.cuts_added, r.root_bound_before_cuts, r.root_bound_after_cuts,
       r.solve_seconds);
   if (!r.message.empty()) std::printf("note          %s\n", r.message.c_str());
   return r.status == sankhya::MilpStatus::kOptimal ? 0 : 1;
@@ -530,6 +552,26 @@ int command_qp(const std::vector<std::string>& args) {
   return r.status == sankhya::QpStatus::kOptimal ? 0 : 1;
 }
 
+int command_backends() {
+  std::printf("default       %s\n", sankhya::default_backend().name().c_str());
+  std::printf("cpu           available\n");
+#ifdef SANKHYA_WITH_CUDA
+  bool cuda_ok = true;
+  std::string why;
+  try {
+    (void)sankhya::cuda_backend();
+  } catch (const std::exception& e) {
+    cuda_ok = false;
+    why = e.what();
+  }
+  std::printf("cuda          %s%s%s\n", cuda_ok ? "available" : "built, unusable",
+              cuda_ok ? "" : ": ", why.c_str());
+#else
+  std::printf("cuda          not built (configure with -DSANKHYA_ENABLE_CUDA=ON)\n");
+#endif
+  return 0;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -545,6 +587,7 @@ int main(int argc, char** argv) {
   if (command == "solve") return command_solve(rest);
   if (command == "milp") return command_milp(rest);
   if (command == "qp") return command_qp(rest);
+  if (command == "backends") return command_backends();
 
   std::fprintf(stderr, "unknown command \"%s\"\n", command.c_str());
   print_usage();

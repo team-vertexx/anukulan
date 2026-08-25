@@ -266,9 +266,17 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
 
   // Everything below runs on a scaled copy; convergence is judged on the
   // original, because that is the problem that was asked about.
-  const LinAlgBackend& backend = cpu_backend();
+  const LinAlgBackend& backend =
+      options.backend ? *options.backend : default_backend();
   StandardLp lp = original;
   result.scaling = scale_lp(&lp, options.scaling);
+
+  backend.prepare(lp.k);
+  backend.prepare(lp.kt);
+  struct ReleaseGuard {
+    const LinAlgBackend& backend;
+    ~ReleaseGuard() { backend.release(); }
+  } release_guard{backend};
 
   const double matrix_norm = estimate_matrix_norm(lp, 200, 1e-8);
   result.matrix_norm_estimate = matrix_norm;
