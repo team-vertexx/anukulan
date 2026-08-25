@@ -269,6 +269,7 @@ QpResult solve_qp(const Model& model, const QpOptions& options) {
     r.dual_tolerance = options.absolute_tolerance +
                        options.relative_tolerance *
                            std::fmax(px_inf, std::fmax(aty_inf, q_inf));
+    r.absolute_cap = options.max_absolute_residual;
     return r;
   };
 

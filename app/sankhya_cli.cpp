@@ -465,12 +465,16 @@ int command_qp(const std::vector<std::string>& args) {
       options.max_iterations = static_cast<sankhya::Int>(v);
     } else if (value_of(a, "--time-limit=", &v)) {
       options.time_limit_seconds = v;
+    } else if (value_of(a, "--abs-cap=", &v)) {
+      options.max_absolute_residual = v;
     } else if (value_of(a, "--rho=", &v)) {
       options.rho = v;
     } else if (value_of(a, "--cg-iter=", &v)) {
       options.cg_max_iterations = static_cast<sankhya::Int>(v);
     } else if (a == "--no-scaling") {
       options.scaling = false;
+    } else if (a == "--osqp-termination") {
+      options.max_absolute_residual = 0.0;
     } else if (a == "--no-adaptive-rho") {
       options.adaptive_rho = false;
     } else if (a == "--verbose") {

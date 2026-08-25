@@ -26,6 +26,18 @@ struct QpOptions {
   double absolute_tolerance = 1e-6;
   double relative_tolerance = 1e-6;
 
+  // A hard ceiling on the residuals, on top of the relative test above.
+  //
+  // The relative dual tolerance is eps_abs + eps_rel * max(||Px||, ||A'y||,
+  // ||q||), which inflates as the dual iterate grows. On the dualc family from
+  // Maros-Meszaros that let a dual residual of 2.6e-02 pass a request for 1e-8
+  // and report optimal on an objective that was 0.9% wrong. Same failure the
+  // linear programming path had, in a different normalisation.
+  //
+  // Zero restores plain OSQP behaviour. A positive value refuses to call a point
+  // optimal when a residual is genuinely large, whatever the normalisation says.
+  double max_absolute_residual = 1e-4;
+
   Int max_iterations = 20000;
   double time_limit_seconds = 300.0;
   Int termination_check_frequency = 25;
@@ -65,7 +77,12 @@ struct QpResidual {
   double dual = 0.0;    // ||Px + q + A'y||_inf
   double primal_tolerance = 0.0;
   double dual_tolerance = 0.0;
-  bool converged() const { return primal <= primal_tolerance && dual <= dual_tolerance; }
+  double absolute_cap = 0.0;
+  bool converged() const {
+    const bool relative_ok = primal <= primal_tolerance && dual <= dual_tolerance;
+    if (absolute_cap <= 0.0) return relative_ok;
+    return relative_ok && primal <= absolute_cap && dual <= absolute_cap;
+  }
 };
 
 struct QpResult {
