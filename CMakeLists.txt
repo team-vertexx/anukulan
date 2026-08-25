@@ -34,6 +34,7 @@ add_library(sankhya
   src/sankhya/branch_and_bound.cpp
   src/sankhya/qp.cpp
   src/sankhya/cuts.cpp
+  src/sankhya/lu.cpp
 )
 target_include_directories(sankhya PUBLIC src)
 
