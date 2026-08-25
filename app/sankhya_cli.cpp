@@ -332,6 +332,10 @@ int command_simplex(const std::vector<std::string>& args) {
       options.time_limit_seconds = v;
     } else if (value_of(a, "--refactor=", &v)) {
       options.refactorization_frequency = static_cast<sankhya::Int>(v);
+    } else if (value_of(a, "--max-rollback=", &v)) {
+      options.max_rollback = static_cast<sankhya::Int>(v);
+    } else if (value_of(a, "--stall=", &v)) {
+      options.stall_iterations = static_cast<sankhya::Int>(v);
     } else if (value_of(a, "--primal-tol=", &v)) {
       options.primal_tolerance = v;
     } else if (value_of(a, "--dual-tol=", &v)) {
@@ -395,6 +399,9 @@ int command_simplex(const std::vector<std::string>& args) {
         << "\"iterations\":" << r.iterations << ","
         << "\"phase_one_iterations\":" << r.phase_one_iterations << ","
         << "\"refactorizations\":" << r.refactorizations << ","
+        << "\"bland_switches\":" << r.bland_switches << ","
+        << "\"worst_update_growth\":" << r.worst_update_growth << ","
+        << "\"rollbacks\":" << r.rollbacks << ","
         << "\"seconds\":" << r.solve_seconds << ","
         << "\"presolved\":" << use_presolve << ","
         << "\"row_violation\":" << checked.row_violation << ","

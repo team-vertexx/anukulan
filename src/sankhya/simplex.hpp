@@ -69,6 +69,14 @@ class SimplexBasis {
   const std::vector<VarStatus>& status() const { return status_; }
   std::vector<VarStatus>& status() { return status_; }
 
+  // Undoes the most recent update, putting the basis back to what it was one
+  // pivot ago. The recovery path when a refactorisation fails: a stale product
+  // form can report a pivotal column accurate enough to pass every test and
+  // still pick a row whose true pivot is zero, and the basis that results is
+  // genuinely singular rather than merely ill-conditioned. Refactorising it
+  // cannot help; going back one pivot and refactorising that can.
+  bool rollback_last_update();
+
   // Swaps `entering` in at row `leaving_row`, whose current occupant leaves to
   // the bound given.
   //
@@ -111,6 +119,10 @@ class SimplexBasis {
     std::vector<Int> rows;
     std::vector<double> values;
     double pivot = 1.0;
+    // Enough to undo it: who came in, who left, and where each of them was.
+    Int entered = -1;
+    Int left = -1;
+    VarStatus entered_was = VarStatus::kAtLower;
   };
 
   std::vector<Int> basic_;
@@ -130,7 +142,39 @@ struct SimplexOptions {
 
   Int max_iterations = 200000;
   double time_limit_seconds = 300.0;
-  Int refactorization_frequency = 50;
+  // Measured, not chosen. Over sixteen Netlib instances the product form stays
+  // trustworthy up to 20 pivots between factorisations and stops at 25, where
+  // brandy reports a feasible model infeasible. A wrong answer is a worse
+  // failure than a slow one, so the default sits below the cliff rather than on
+  // it. Above 20 the extra speed is real - degen2 halves - and it is not worth
+  // having on a number that turns into a false infeasibility just past it.
+  Int refactorization_frequency = 15;
+
+  // Refactorising is driven by a count. A growth-based trigger was tried first
+  // - refactorise once the largest 1/|pivot| since the last factorisation
+  // passes a threshold - on the theory that a small pivot is what decays the
+  // representation. It does not work: on brandy every threshold from 1e2 to
+  // 1e12 fails the same way, and the worst growth sits at 4.4e6 regardless. The
+  // measurement is still reported, because it is informative; it is just not a
+  // criterion. What does work is rolling the updates back, below.
+
+  // A degenerate pivot moves nothing: the step is zero, the basis changes, and
+  // the objective does not. A run of them is how a simplex cycles, and Netlib's
+  // brandy does exactly that - the same variable entering at the same row with
+  // a zero step, forever.
+  //
+  // After this many consecutive zero steps the pricing and the ratio test both
+  // switch to Bland's rule, which takes the lowest eligible index at both ends
+  // and cannot cycle. It is a slow rule, which is why it is not the default;
+  // the moment a real step is taken the solver goes back to Dantzig. Bland,
+  // "New finite pivoting rules for the simplex method", Math. of OR 2(2), 1977.
+  Int stall_iterations = 20;
+
+  // How far back a refactorisation may walk before giving up.
+  Int max_rollback = 20;
+
+  // A step below this counts as degenerate for the purpose above.
+  double degenerate_step = 1e-9;
 
   bool verbose = false;
   Int log_frequency = 1000;
@@ -156,6 +200,16 @@ struct SimplexResult {
   Int iterations = 0;
   Int phase_one_iterations = 0;
   Int refactorizations = 0;
+  // How many times pricing switched into or out of Bland's rule. A nonzero
+  // count means the model stalled and the anti-cycling rule earned its keep.
+  Int bland_switches = 0;
+  // The largest 1/|pivot| the product form was asked to divide by, over the
+  // whole solve. Says how close the updates came to being unusable.
+  double worst_update_growth = 1.0;
+  // Pivots undone because the basis they produced would not factorise.
+  Int rollbacks = 0;
+  // Times a conclusion was held back until the basis had been refactorised.
+  Int confirmations = 0;
   double solve_seconds = 0.0;
   std::string message;
 };

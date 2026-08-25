@@ -83,10 +83,26 @@ bool SimplexBasis::set_initial(const LogicalForm& form, std::string* error) {
 }
 
 bool SimplexBasis::refactorize(const LogicalForm& form, std::string* error) {
+  // The updates are only discarded once there is a factorisation to replace
+  // them with. A failed refactorisation leaves the basis exactly as it was, so
+  // the caller still has something to roll back.
+  if (!lu_.factorize(form.columns, basic_, LuOptions{}, error)) return false;
   updates_ = 0;
   growth_ = 1.0;
   updates_list_.clear();
-  return lu_.factorize(form.columns, basic_, LuOptions{}, error);
+  return true;
+}
+
+bool SimplexBasis::rollback_last_update() {
+  if (updates_list_.empty()) return false;
+  const Update& u = updates_list_.back();
+  if (u.entered < 0 || u.left < 0) return false;
+  basic_[sz(u.row)] = u.left;
+  status_[sz(u.left)] = VarStatus::kBasic;
+  status_[sz(u.entered)] = u.entered_was;
+  updates_list_.pop_back();
+  if (updates_ > 0) --updates_;
+  return true;
 }
 
 // B^-1 = E_k^-1 ... E_1^-1 B_0^-1, so the factorisation goes first and the
@@ -222,6 +238,9 @@ bool SimplexBasis::pivot(const LogicalForm& form, Int leaving_row, Int entering,
   }
 
   const Int leaving = basic_[sz(leaving_row)];
+  update.entered = entering;
+  update.left = leaving;
+  update.entered_was = status_[sz(entering)];
   basic_[sz(leaving_row)] = entering;
   status_[sz(entering)] = VarStatus::kBasic;
   status_[sz(leaving)] = leaving_to;
@@ -312,17 +331,35 @@ SimplexResult solve_simplex(const StandardLp& lp, const SimplexOptions& options)
   Int iteration = 0;
   SimplexStatus status = SimplexStatus::kIterationLimit;
 
+  // Two ratios counting as equal, for the tie-break Bland's rule needs.
+  constexpr double kRatioTie = 1e-9;
+  Int degenerate_run = 0;
+  bool bland = false;
+
   for (; iteration < options.max_iterations; ++iteration) {
     if (elapsed() > options.time_limit_seconds) {
       status = SimplexStatus::kTimeLimit;
       break;
     }
+    result.worst_update_growth =
+        std::fmax(result.worst_update_growth, basis.update_growth());
     if (basis.updates_since_refactorization() >= options.refactorization_frequency) {
-      if (!basis.refactorize(form, &error)) {
-        status = SimplexStatus::kNumericalError;
-        result.message = error;
-        break;
+      // If it will not factorise, walk back one pivot at a time until it does.
+      // Each rollback throws away an iteration's work and no more, which is
+      // cheap next to the alternative of declaring a numerical failure on a
+      // model that a factorisation from one pivot earlier handles fine.
+      Int rolled = 0;
+      while (!basis.refactorize(form, &error)) {
+        if (rolled >= options.max_rollback || !basis.rollback_last_update()) {
+          status = SimplexStatus::kNumericalError;
+          result.message = "basis will not factorise after rolling back " +
+                           std::to_string(rolled) + " pivots: " + error;
+          break;
+        }
+        ++rolled;
+        ++result.rollbacks;
       }
+      if (status == SimplexStatus::kNumericalError) break;
       result.refactorizations++;
     }
 
@@ -357,6 +394,11 @@ SimplexResult solve_simplex(const StandardLp& lp, const SimplexOptions& options)
 
     // Dantzig pricing: the most favourable reduced cost. Devex comes later; this
     // is the version its iteration counts get compared against.
+    //
+    // Unless the solver is stalling, in which case the first eligible column by
+    // index is taken instead. That is Bland's rule, and it is the half of the
+    // anti-cycling guarantee that lives here; the other half is in the ratio
+    // test below. Both ends have to follow it for the guarantee to hold.
     Int entering = -1;
     double best = options.dual_tolerance;
     bool increase = true;
@@ -364,6 +406,18 @@ SimplexResult solve_simplex(const StandardLp& lp, const SimplexOptions& options)
       const VarStatus st = basis.status()[sz(j)];
       if (st == VarStatus::kBasic) continue;
       const double d = reduced[sz(j)];
+      if (bland) {
+        if (st == VarStatus::kAtLower && d < -options.dual_tolerance) {
+          entering = j; increase = true; break;
+        }
+        if (st == VarStatus::kAtUpper && d > options.dual_tolerance) {
+          entering = j; increase = false; break;
+        }
+        if (st == VarStatus::kFree && std::fabs(d) > options.dual_tolerance) {
+          entering = j; increase = d < 0.0; break;
+        }
+        continue;
+      }
       if (st == VarStatus::kAtLower && -d > best) {
         best = -d;
         entering = j;
@@ -380,6 +434,24 @@ SimplexResult solve_simplex(const StandardLp& lp, const SimplexOptions& options)
     }
 
     if (entering < 0) {
+      // Both conclusions available here - that the model is infeasible, and
+      // that this point is optimal - are claims about every column, drawn from
+      // reduced costs computed through the product form. An updated basis is
+      // accurate enough to pivot on and not always accurate enough to close a
+      // case with: on brandy a stale one priced every column as unimprovable
+      // and the solver reported a feasible model infeasible. So nothing is
+      // concluded until the factorisation is fresh. If it already is, the
+      // conclusion stands.
+      if (basis.updates_since_refactorization() > 0) {
+        if (basis.refactorize(form, &error)) {
+          result.refactorizations++;
+          ++result.confirmations;
+          continue;
+        }
+        status = SimplexStatus::kNumericalError;
+        result.message = "could not refactorise to confirm the result: " + error;
+        break;
+      }
       if (phase_one) {
         // Nothing improves the infeasibility, so there is no feasible point.
         status = SimplexStatus::kInfeasible;
@@ -395,6 +467,19 @@ SimplexResult solve_simplex(const StandardLp& lp, const SimplexOptions& options)
     // Ratio test. Moving the entering variable by t changes basic i by
     // -direction * column[i] * t, and the step is limited by whichever basic
     // reaches a bound first - or by the entering variable's own opposite bound.
+    //
+    // This takes the smallest ratio and accepts whatever pivot element comes
+    // with it. Harris's two-pass test was tried here instead: relax every bound
+    // by the feasibility tolerance to find a slightly larger limit, then among
+    // every row within that limit take the largest pivot. It is the standard
+    // answer to exactly the problem brandy has, and measured over fourteen
+    // Netlib instances it was a net loss - three better, six worse, and blend
+    // stopped solving at all. The reason is in the literature and was skipped
+    // on the way in: Harris lets basic variables overshoot their bounds by a
+    // little, and needs Gill, Murray, Saunders and Wright's EXPAND (Math. Prog.
+    // 45, 1989) alongside it to stop those overshoots accumulating. Half of a
+    // two-part method is not a smaller version of it. Worth doing properly, not
+    // worth doing like this.
     double step = form.upper[sz(entering)] - form.lower[sz(entering)];
     if (!std::isfinite(step)) step = kInf;
     Int leaving_row = -1;
@@ -430,8 +515,15 @@ SimplexResult solve_simplex(const StandardLp& lp, const SimplexOptions& options)
         }
       }
       if (limit < 0.0) limit = 0.0;
-      if (limit < step) {
+      if (limit < step - kRatioTie) {
         step = limit;
+        leaving_row = i;
+        leaving_to = to;
+      } else if (bland && leaving_row >= 0 && limit <= step + kRatioTie &&
+                 basis.basic()[sz(i)] < basis.basic()[sz(leaving_row)]) {
+        // Ties in the ratio go to the lowest variable index, not the lowest
+        // row. Breaking them by row is what lets a cycle close.
+        step = std::fmin(step, limit);
         leaving_row = i;
         leaving_to = to;
       }
@@ -447,6 +539,17 @@ SimplexResult solve_simplex(const StandardLp& lp, const SimplexOptions& options)
       basis.status()[sz(entering)] = increase ? VarStatus::kAtUpper
                                               : VarStatus::kAtLower;
       continue;
+    }
+
+    if (step > options.degenerate_step) {
+      degenerate_run = 0;
+      if (bland) {
+        bland = false;
+        ++result.bland_switches;
+      }
+    } else if (++degenerate_run >= options.stall_iterations && !bland) {
+      bland = true;
+      ++result.bland_switches;
     }
 
     if (!basis.pivot(form, leaving_row, entering, leaving_to, column, &error)) {
