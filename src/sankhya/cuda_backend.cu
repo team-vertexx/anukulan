@@ -36,25 +36,57 @@ void cuda_check(cudaError_t status, const char* what) {
   }
 }
 
-// One warp per row. Rows in these problems are short - a handful of nonzeros -
-// so a whole warp per row wastes lanes, but it keeps the loads coalesced and
-// avoids the divergence a thread-per-row layout suffers when row lengths differ.
+// A group of lanes per row, with the group size chosen from how long the rows
+// actually are.
+//
+// A whole 32-lane warp per row is the textbook CSR-vector kernel and it wastes
+// most of the warp when rows are short. The profile says so directly. On
+// graph40-40 the same kernel over the same 1,260,900 nonzeros takes 1256 us for
+// K, whose rows hold 3.49 nonzeros, and 384 us for K transpose, whose rows hold
+// 12.29 - a factor of 3.3 for a factor of 3.5 in occupancy. qap15 shows the
+// same thing with the roles swapped: its K transpose has 4.26 per row and takes
+// 46.5 us against 19.4 us for K at 15.0. Same code, same nonzero count, only
+// the row length differs, in both directions.
+//
+// So the width comes from the matrix: the smallest power of two at least as
+// large as the average row, between 2 and 32. graph40-40's K gets 4 lanes per
+// row instead of 32, which puts eight times as many rows in flight per warp.
+//
+// Bell and Garland, Implementing Sparse Matrix-Vector Multiplication on
+// Throughput-Oriented Processors, SC 2009.
+template <int kVector>
 __global__ void spmv_kernel(Int rows, const Int* __restrict__ start,
                             const Int* __restrict__ index,
                             const double* __restrict__ value,
                             const double* __restrict__ x, double* __restrict__ y) {
-  const int warp = (blockIdx.x * blockDim.x + threadIdx.x) >> 5;
-  const int lane = threadIdx.x & 31;
-  if (warp >= rows) return;
+  const int lane = static_cast<int>(threadIdx.x) % kVector;
+  const int vector_in_block = static_cast<int>(threadIdx.x) / kVector;
+  const int vectors_per_block = kBlock / kVector;
+  const Int stride = static_cast<Int>(vectors_per_block) * static_cast<Int>(gridDim.x);
 
-  const Int begin = start[warp];
-  const Int end = start[warp + 1];
-  double sum = 0.0;
-  for (Int k = begin + lane; k < end; k += 32) sum += value[k] * x[index[k]];
+  // The loop runs over the block's first row, not over each vector's own row,
+  // so its condition is identical for every thread in the block. With several
+  // vectors to a warp, letting each leave as its row ran out would have some
+  // lanes reach __shfl_down_sync while others had returned, and the full-warp
+  // mask below would then be a lie. Rows past the end fall through with a zero
+  // partial sum and write nothing.
+  for (Int base = static_cast<Int>(blockIdx.x) * vectors_per_block; base < rows;
+       base += stride) {
+    const Int row = base + vector_in_block;
+    double sum = 0.0;
+    if (row < rows) {
+      const Int begin = start[row];
+      const Int end = start[row + 1];
+      for (Int k = begin + lane; k < end; k += kVector) sum += value[k] * x[index[k]];
+    }
 
-  for (int offset = 16; offset > 0; offset >>= 1)
-    sum += __shfl_down_sync(0xffffffffu, sum, offset);
-  if (lane == 0) y[warp] = sum;
+    // kVector divides 32, so a shuffle by less than kVector reaches outside this
+    // row only in lanes whose result is discarded: lane 0 accumulates from
+    // inside its own vector at every step.
+    for (int offset = kVector / 2; offset > 0; offset >>= 1)
+      sum += __shfl_down_sync(0xffffffffu, sum, offset);
+    if (lane == 0 && row < rows) y[row] = sum;
+  }
 }
 
 __global__ void primal_step_kernel(Int n, double tau, const double* __restrict__ x,
@@ -216,6 +248,8 @@ __global__ void finish_terms_kernel(int grid, const double* __restrict__ partial
 
 struct DeviceMatrix {
   Int rows = 0;
+  Int nnz = 0;
+  int vector_width = 32;  // lanes per row, chosen from the average row length
   Int* start = nullptr;
   Int* index = nullptr;
   double* value = nullptr;
@@ -250,6 +284,17 @@ class CudaBackend final : public LinAlgBackend {
 
   std::string profile_report() const override {
     if (timings_.empty()) return {};
+    std::string widths;
+    for (const auto& [key, d] : matrices_) {
+      (void)key;
+      char w[128];
+      std::snprintf(w, sizeof(w),
+                    "  %8d rows, %9d nonzeros, %5.2f per row -> %2d lanes per row\n",
+                    d.rows, d.nnz,
+                    d.rows > 0 ? static_cast<double>(d.nnz) / d.rows : 0.0,
+                    d.vector_width);
+      widths += w;
+    }
     double total = 0.0;
     long long launches = 0;
     for (const auto& [name, t] : timings_) {
@@ -275,6 +320,7 @@ class CudaBackend final : public LinAlgBackend {
     std::snprintf(line, sizeof(line), "%-22s %12.4f %9.1f%% %14lld\n",
                   "total in kernels", total, 100.0, launches);
     out += line;
+    if (!widths.empty()) out += "\nsparse products:\n" + widths;
     return out;
   }
 
@@ -332,6 +378,8 @@ class CudaBackend final : public LinAlgBackend {
     if (matrices_.count(&a)) return;
     DeviceMatrix d;
     d.rows = a.rows();
+    d.nnz = a.nnz();
+    d.vector_width = choose_vector_width(a.rows(), a.nnz());
     const std::size_t start_bytes = sizeof(Int) * (sz(a.rows()) + 1);
     const std::size_t nnz_bytes_i = sizeof(Int) * sz(a.nnz());
     const std::size_t nnz_bytes_d = sizeof(double) * sz(a.nnz());
@@ -483,14 +531,43 @@ class CudaBackend final : public LinAlgBackend {
     return b > 0 ? b : 1;
   }
 
+  // The smallest power of two at least as wide as the average row, held between
+  // 2 and 32. A row shorter than its vector leaves lanes idle for that row; a
+  // row longer than it simply loops, which costs nothing. So rounding up is the
+  // safe direction and the average is the right statistic to round from.
+  static int choose_vector_width(Int rows, Int nnz) {
+    if (rows <= 0 || nnz <= 0) return 2;
+    const double per_row = static_cast<double>(nnz) / static_cast<double>(rows);
+    int width = 2;
+    while (width < 32 && static_cast<double>(width) < per_row) width *= 2;
+    return width;
+  }
+
   void spmv(const SparseMatrix& a, const double* x, double* y, const char* label) const {
     prepare(a);
     const DeviceMatrix& d = matrices_.at(&a);
-    const Int warps_per_block = kBlock / 32;
-    const Int grid = (d.rows + warps_per_block - 1) / warps_per_block;
+    const int vectors_per_block = kBlock / d.vector_width;
+    Int grid = (d.rows + vectors_per_block - 1) / vectors_per_block;
+    if (grid < 1) grid = 1;
+    if (grid > 65535) grid = 65535;  // the kernel strides, so a cap is fine
     Scope timer(this, label);
-    spmv_kernel<<<grid > 0 ? grid : 1, kBlock>>>(d.rows, d.start, d.index, d.value,
-                                                 x, y);
+    switch (d.vector_width) {
+      case 2:
+        spmv_kernel<2><<<grid, kBlock>>>(d.rows, d.start, d.index, d.value, x, y);
+        break;
+      case 4:
+        spmv_kernel<4><<<grid, kBlock>>>(d.rows, d.start, d.index, d.value, x, y);
+        break;
+      case 8:
+        spmv_kernel<8><<<grid, kBlock>>>(d.rows, d.start, d.index, d.value, x, y);
+        break;
+      case 16:
+        spmv_kernel<16><<<grid, kBlock>>>(d.rows, d.start, d.index, d.value, x, y);
+        break;
+      default:
+        spmv_kernel<32><<<grid, kBlock>>>(d.rows, d.start, d.index, d.value, x, y);
+        break;
+    }
   }
 
   template <bool kMaximum>
