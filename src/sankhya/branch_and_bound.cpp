@@ -516,6 +516,19 @@ BranchAndBoundResult solve_milp(const Model& model,
                             std::fmax(1e-10, std::fabs(result.objective));
     }
   } else if (status == MilpStatus::kInfeasible) {
+    // "Infeasible" is a claim, and it is only true when every node was pruned
+    // with a proof. If any relaxation ran out of budget without converging,
+    // what we actually know is that we failed to solve the problem, and saying
+    // infeasible instead would be reporting a wrong answer confidently. The
+    // refinery MILP hit exactly this: its root relaxation does not converge, and
+    // an earlier version of this code called the instance infeasible while
+    // HiGHS solved it to optimality.
+    if (result.nodes_relaxation_failed > 0) {
+      status = MilpStatus::kRelaxationFailed;
+      result.message =
+          std::to_string(result.nodes_relaxation_failed) +
+          " relaxation(s) did not converge, so infeasibility was never proved";
+    }
     result.objective = maximizing ? -kInf : kInf;
   }
 

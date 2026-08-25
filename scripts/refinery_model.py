@@ -88,6 +88,7 @@ class MpsWriter:
         self.rhs = {}
         self.ranges = {}
         self.bounds = []         # (type, col, value)
+        self.integer_cols = set()
         self.maximize = False
 
     def row(self, kind, name, rhs=None):
@@ -102,6 +103,11 @@ class MpsWriter:
         if name not in self.cols:
             self.cols[name] = []
             self.col_order.append(name)
+        return name
+
+    def integer(self, name):
+        self.col(name)
+        self.integer_cols.add(name)
         return name
 
     def put(self, col, row, coeff):
@@ -127,7 +133,15 @@ class MpsWriter:
         for kind, name in self.rows:
             w(f" {kind}  {name}\n")
         w("COLUMNS\n")
-        for col in self.col_order:
+        # Continuous columns first, then the integer block between markers, so
+        # the file needs one INTORG/INTEND pair instead of one per variable.
+        ordered = ([c for c in self.col_order if c not in self.integer_cols] +
+                   [c for c in self.col_order if c in self.integer_cols])
+        marker_open = False
+        for col in ordered:
+            if col in self.integer_cols and not marker_open:
+                w("    MARKER                 'MARKER'                 'INTORG'\n")
+                marker_open = True
             entries = []
             if col in self.obj:
                 entries.append(("COST", self.obj[col]))
@@ -138,6 +152,8 @@ class MpsWriter:
                 for row, coeff in pair:
                     line += f"  {row:<24} {coeff:.10g}"
                 w(line + "\n")
+        if marker_open:
+            w("    MARKER                 'MARKER'                 'INTEND'\n")
         w("RHS\n")
         for name, value in self.rhs.items():
             if value != 0.0:
@@ -155,7 +171,23 @@ class MpsWriter:
         w("ENDATA\n")
 
 
-def build(periods, crudes, cdu_capacity, seed_scale):
+# Discrete decisions. These are what make refinery scheduling a mixed-integer
+# problem rather than a linear one, and both are physical rather than modelling
+# conveniences:
+#
+#   Crude arrives in cargoes. You cannot buy 12,000 barrels of Arab Light; you
+#   charter a vessel or you do not, and a parcel is on the order of a third of a
+#   period's throughput.
+#
+#   A conversion unit either runs or is down. Below a minimum throughput the
+#   catalyst circulation and heat balance do not hold, so a plan that runs the
+#   FCC at 3% of capacity is not a plan.
+CARGO_FRACTION = 0.30        # one parcel, as a fraction of CDU throughput
+FCC_MIN_FRACTION = 0.40      # of FCC capacity, when running at all
+HDT_MIN_FRACTION = 0.25
+
+
+def build(periods, crudes, cdu_capacity, seed_scale, discrete=False):
     """Component-level blending.
 
     The first version of this generator pooled each cut across all crudes and
@@ -208,8 +240,18 @@ def build(periods, crudes, cdu_capacity, seed_scale):
                 m.put(f"INVC_{cname}_{t-1}", bal, 1.0)
 
             m.put(chg, cap, 1.0)
-            m.bound("UP", buy, 0.42 * cdu_capacity)
             m.bound("UP", inv, 0.55 * cdu_capacity)
+
+            if discrete:
+                # buy = cargo_size * (number of parcels chartered)
+                parcels = f"NCARGO_{cname}_{t}"
+                link = m.row("E", f"CARGO_{cname}_{t}", 0.0)
+                m.put(buy, link, 1.0)
+                m.put(parcels, link, -CARGO_FRACTION * cdu_capacity)
+                m.integer(parcels)
+                m.bound("UI", parcels, 2.0)
+            else:
+                m.bound("UP", buy, 0.42 * cdu_capacity)
 
             # Each (crude, cut) stream is produced by yield, then routed: blended
             # straight, hydrotreated first, cracked (VGO only), or left unused.
@@ -247,12 +289,37 @@ def build(periods, crudes, cdu_capacity, seed_scale):
                         m.put(f"FBL_{cname}_{cut}_{pname}_{t}", cracked, -1.0)
 
         # Unit capacities, shared across the crude slate.
-        fcc_cap = m.row("L", f"FCCCAP_{t}", FCC_CAPACITY_FRACTION * cdu_capacity)
-        hdt_cap = m.row("L", f"HDTCAP_{t}", HDT_CAPACITY_FRACTION * cdu_capacity)
+        fcc_cap = m.row("L", f"FCCCAP_{t}", 0.0 if discrete
+                        else FCC_CAPACITY_FRACTION * cdu_capacity)
+        hdt_cap = m.row("L", f"HDTCAP_{t}", 0.0 if discrete
+                        else HDT_CAPACITY_FRACTION * cdu_capacity)
         for cname, _cc, _cs, *_y in slate:
             m.put(f"FCC_{cname}_{t}", fcc_cap, 1.0)
             for cut in CUTS:
                 m.put(f"HDT_{cname}_{cut}_{t}", hdt_cap, 1.0)
+
+        if discrete:
+            # Running the unit is a decision, and running it at all means
+            # running it above a minimum rate. Written as
+            #   min_rate * on <= throughput <= capacity * on
+            # so the on/off variable both caps and floors the unit.
+            for tag, cap_row, cap_fraction, min_fraction, columns in (
+                ("FCC", fcc_cap, FCC_CAPACITY_FRACTION, FCC_MIN_FRACTION,
+                 [f"FCC_{c[0]}_{t}" for c in slate]),
+                ("HDT", hdt_cap, HDT_CAPACITY_FRACTION, HDT_MIN_FRACTION,
+                 [f"HDT_{c[0]}_{cut}_{t}" for c in slate for cut in CUTS]),
+            ):
+                on = f"ON_{tag}_{t}"
+                m.integer(on)
+                m.bound("UP", on, 1.0)
+                m.put(on, cap_row, -cap_fraction * cdu_capacity)
+                floor_row = m.row("G", f"{tag}MIN_{t}", 0.0)
+                for col in columns:
+                    m.put(col, floor_row, 1.0)
+                m.put(on, floor_row, -min_fraction * cap_fraction * cdu_capacity)
+                # A unit that is down still costs something to keep warm, so
+                # switching it off is a real decision rather than free.
+                m.cost(on, -0.004 * cap_fraction * cdu_capacity * 145.0)
 
         for pi, (pname, price, spec, allowed) in enumerate(PRODUCTS):
             sale = f"SELL_{pname}_{t}"
@@ -289,6 +356,8 @@ def main() -> int:
     ap.add_argument("--capacity", type=float, default=1.5e6,
                     help="CDU throughput per period, in barrels")
     ap.add_argument("--out", default="data/refinery/refinery.mps")
+    ap.add_argument("--milp", action="store_true",
+                    help="add cargo sizing and unit on/off decisions")
     args = ap.parse_args()
 
     if args.crudes > len(CRUDES):
@@ -298,7 +367,7 @@ def main() -> int:
     import pathlib
     out = pathlib.Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    m = build(args.periods, args.crudes, args.capacity, 1.0)
+    m = build(args.periods, args.crudes, args.capacity, 1.0, args.milp)
     with out.open("w") as handle:
         m.write(handle)
 
@@ -306,6 +375,8 @@ def main() -> int:
     print(f"wrote {out}")
     print(f"  periods {args.periods}, crudes {args.crudes}, "
           f"CDU capacity {args.capacity:,.0f} bbl/period")
+    if m.integer_cols:
+        print(f"  integer columns {len(m.integer_cols)}")
     print(f"  rows {len(m.rows)}, cols {len(m.col_order)}, "
           f"nonzeros {sum(len(v) for v in m.cols.values()) + len(m.obj)}")
     print(f"  |a| in [{min(coeffs):.4g}, {max(coeffs):.4g}]  "

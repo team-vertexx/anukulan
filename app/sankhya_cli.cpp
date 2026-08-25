@@ -400,6 +400,10 @@ int command_milp(const std::vector<std::string>& args) {
       options.time_limit_seconds = v;
     } else if (value_of(a, "--lp-tol=", &v)) {
       options.relaxation.tolerance = v;
+    } else if (value_of(a, "--lp-max-iter=", &v)) {
+      options.relaxation.max_iterations = static_cast<sankhya::Int>(v);
+    } else if (value_of(a, "--lp-time=", &v)) {
+      options.relaxation.time_limit_seconds = v;
     } else if (value_of(a, "--int-tol=", &v)) {
       options.integrality_tolerance = v;
     } else if (a == "--no-cuts") {
