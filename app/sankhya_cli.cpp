@@ -8,6 +8,7 @@
 
 #include "sankhya/model.hpp"
 #include "sankhya/mps_reader.hpp"
+#include "sankhya/branch_and_bound.hpp"
 #include "sankhya/pdhg.hpp"
 #include "sankhya/standard_form.hpp"
 
@@ -22,6 +23,7 @@ void print_usage() {
       "  sankhya standard <file.mps> [options] read a model and build the solver's\n"
       "                                        standard form, printing its shape\n"
       "  sankhya solve <file.mps> [options]    solve an LP with the first-order method\n"
+      "  sankhya milp <file.mps> [options]     solve a MILP by branch and bound\n"
       "\n"
       "options:\n"
       "  --neg-up-bound=keep|minus-inf   how to read a negative UP bound with no\n"
@@ -355,6 +357,88 @@ int command_solve(const std::vector<std::string>& args) {
   return r.status == sankhya::PdhgStatus::kOptimal ? 0 : 1;
 }
 
+int command_milp(const std::vector<std::string>& args) {
+  if (args.empty()) {
+    std::fprintf(stderr, "milp: expected a file name\n");
+    return 2;
+  }
+  sankhya::BranchAndBoundOptions options;
+  options.relaxation.tolerance = 1e-8;
+  options.relaxation.max_iterations = 500000;
+  options.relaxation.time_limit_seconds = 30.0;
+  bool as_json = false;
+
+  auto value_of = [](const std::string& arg, const std::string& prefix, double* out) {
+    if (arg.rfind(prefix, 0) != 0) return false;
+    *out = std::strtod(arg.c_str() + prefix.size(), nullptr);
+    return true;
+  };
+
+  for (std::size_t i = 1; i < args.size(); ++i) {
+    const std::string& a = args[i];
+    double v = 0.0;
+    if (value_of(a, "--node-limit=", &v)) {
+      options.node_limit = static_cast<sankhya::Int>(v);
+    } else if (value_of(a, "--time-limit=", &v)) {
+      options.time_limit_seconds = v;
+    } else if (value_of(a, "--lp-tol=", &v)) {
+      options.relaxation.tolerance = v;
+    } else if (value_of(a, "--int-tol=", &v)) {
+      options.integrality_tolerance = v;
+    } else if (a == "--verbose") {
+      options.verbose = true;
+    } else if (a == "--format=json") {
+      as_json = true;
+    } else if (a != "--quiet" && a != "--format=human") {
+      std::fprintf(stderr, "milp: unknown option \"%s\"\n", a.c_str());
+      return 2;
+    }
+  }
+
+  const sankhya::MpsReadResult read_result = sankhya::read_mps(args[0]);
+  if (!read_result.ok) {
+    std::fprintf(stderr, "error: %s\n", read_result.error.c_str());
+    return 1;
+  }
+  if (!read_result.model.has_integers()) {
+    std::fprintf(stderr, "warning: no integer variables; this is just an LP\n");
+  }
+
+  const sankhya::BranchAndBoundResult r =
+      sankhya::solve_milp(read_result.model, options);
+
+  if (as_json) {
+    std::ostringstream out;
+    out.precision(17);
+    out << "{\"name\":\"" << read_result.model.name << "\","
+        << "\"status\":\"" << sankhya::to_string(r.status) << "\","
+        << "\"objective\":" << r.objective << ","
+        << "\"dual_bound\":" << r.dual_bound << ","
+        << "\"gap\":" << r.relative_gap << ","
+        << "\"nodes\":" << r.nodes << ","
+        << "\"max_depth\":" << r.max_depth << ","
+        << "\"relaxations\":" << r.relaxations_solved << ","
+        << "\"incumbents\":" << r.incumbents_found << ","
+        << "\"seconds\":" << r.solve_seconds << "}\n";
+    std::fputs(out.str().c_str(), stdout);
+    return r.status == sankhya::MilpStatus::kOptimal ? 0 : 1;
+  }
+
+  std::printf(
+      "status        %s\n"
+      "objective     %.12e\n"
+      "dual bound    %.12e   (gap %.3e)\n"
+      "nodes         %d   max depth %d   relaxations %d   incumbents %d\n"
+      "pruned        %d proved infeasible   %d unconverged\n"
+      "time          %.3f s\n",
+      sankhya::to_string(r.status).c_str(), r.objective, r.dual_bound,
+      r.relative_gap, r.nodes, r.max_depth, r.relaxations_solved,
+      r.incumbents_found, r.nodes_proved_infeasible, r.nodes_relaxation_failed,
+      r.solve_seconds);
+  if (!r.message.empty()) std::printf("note          %s\n", r.message.c_str());
+  return r.status == sankhya::MilpStatus::kOptimal ? 0 : 1;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -368,6 +452,7 @@ int main(int argc, char** argv) {
   if (command == "read") return command_read(rest);
   if (command == "standard") return command_standard(rest);
   if (command == "solve") return command_solve(rest);
+  if (command == "milp") return command_milp(rest);
 
   std::fprintf(stderr, "unknown command \"%s\"\n", command.c_str());
   print_usage();

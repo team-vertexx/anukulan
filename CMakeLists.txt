@@ -19,6 +19,7 @@ add_library(sankhya
   src/sankhya/standard_form.cpp
   src/sankhya/scaling.cpp
   src/sankhya/pdhg.cpp
+  src/sankhya/branch_and_bound.cpp
 )
 target_include_directories(sankhya PUBLIC src)
 
