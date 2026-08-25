@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -33,6 +34,28 @@ class LinAlgBackend {
   // and bound builds a fresh problem at every node, so guessing would be wrong.
   virtual void prepare(const SparseMatrix& a) const { (void)a; }
   virtual void release() const {}
+
+  // Working memory, owned by the backend.
+  //
+  // This is the difference between a GPU port that pays and one that does not.
+  // If the operations take host pointers, every one of them has to copy its
+  // arguments across and its results back, and on a first-order method that is
+  // roughly ten transfers per iteration - which is exactly what the first
+  // version of the CUDA backend did, and why it measured slower than the CPU it
+  // was supposed to accelerate.
+  //
+  // With the vectors allocated here, they stay where the kernels are. The
+  // solver moves data across only when it genuinely needs to look at it, which
+  // is at the convergence check, every fortieth iteration.
+  //
+  // The CPU backend allocates ordinary host memory, so the same solver code
+  // runs unchanged on both.
+  virtual double* allocate(Int n) const = 0;
+  virtual void deallocate(double* p) const = 0;
+  virtual void upload(const double* host, double* target, Int n) const = 0;
+  virtual void download(const double* source, double* host, Int n) const = 0;
+  virtual void fill(double* target, Int n, double value) const = 0;
+  virtual void copy(const double* source, double* target, Int n) const = 0;
 
   // y = A * x
   virtual void multiply(const SparseMatrix& a, const double* x, double* y) const = 0;
@@ -95,5 +118,46 @@ const LinAlgBackend& cuda_backend();
 // the reference implementation, which is what makes the same binary usable on a
 // laptop and on a GPU box.
 const LinAlgBackend& default_backend();
+
+// Holds a backend allocation for as long as it is needed. The solver keeps a
+// dozen of these and never sees a raw pointer's lifetime.
+class BackendVector {
+ public:
+  BackendVector() = default;
+  BackendVector(const LinAlgBackend& backend, Int n)
+      : backend_(&backend), size_(n), data_(backend.allocate(n)) {}
+  ~BackendVector() {
+    if (backend_ && data_) backend_->deallocate(data_);
+  }
+  BackendVector(const BackendVector&) = delete;
+  BackendVector& operator=(const BackendVector&) = delete;
+  BackendVector(BackendVector&& other) noexcept { swap(other); }
+  BackendVector& operator=(BackendVector&& other) noexcept {
+    swap(other);
+    return *this;
+  }
+
+  double* data() { return data_; }
+  const double* data() const { return data_; }
+  Int size() const { return size_; }
+
+  void upload(const std::vector<double>& host) {
+    backend_->upload(host.data(), data_, size_);
+  }
+  void download(std::vector<double>* host) const {
+    host->resize(sz(size_));
+    backend_->download(data_, host->data(), size_);
+  }
+
+ private:
+  void swap(BackendVector& other) {
+    std::swap(backend_, other.backend_);
+    std::swap(size_, other.size_);
+    std::swap(data_, other.data_);
+  }
+  const LinAlgBackend* backend_ = nullptr;
+  Int size_ = 0;
+  double* data_ = nullptr;
+};
 
 }  // namespace sankhya

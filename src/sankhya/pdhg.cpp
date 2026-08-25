@@ -333,30 +333,47 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
     x[sz(j)] = v;
   }
 
-  std::vector<double> x_next(sz(n), 0.0);
-  std::vector<double> y_next(sz(m), 0.0);
-  std::vector<double> kt_y(sz(n), 0.0);
-  std::vector<double> x_bar(sz(n), 0.0);
-  std::vector<double> k_x_bar(sz(m), 0.0);
-  std::vector<double> k_x(sz(m), 0.0);
-  std::vector<double> dx(sz(n), 0.0);
-  std::vector<double> dy(sz(m), 0.0);
-  std::vector<double> k_dx(sz(m), 0.0);
+  // The working set lives wherever the backend puts it. On CUDA that is the
+  // device, and it stays there - the loop below never moves a vector across the
+  // bus. Data comes back only at the convergence check, every fortieth
+  // iteration, because that is the only place the host needs to look at it.
+  //
+  // The first CUDA backend took host pointers and staged every argument across
+  // on every call, roughly ten transfers per iteration. Measured on a T4 it came
+  // out slower than the CPU it was meant to accelerate. The kernels were never
+  // the problem.
+  std::vector<double> host_x = x;
+  std::vector<double> host_y = y;
+  std::vector<double> host_dy(sz(m), 0.0);
+  std::vector<double> host_avg_x(sz(n), 0.0);
+  std::vector<double> host_avg_y(sz(m), 0.0);
 
-  backend.multiply(lp.k, x.data(), k_x.data());
+  BackendVector d_x(backend, n), x_next(backend, n), kt_y(backend, n);
+  BackendVector x_bar(backend, n), dx(backend, n), sum_x(backend, n);
+  BackendVector avg_x(backend, n);
+  BackendVector d_y(backend, m), y_next(backend, m), k_x_bar(backend, m);
+  BackendVector k_x(backend, m), dy(backend, m), k_dx(backend, m);
+  BackendVector sum_y(backend, m), avg_y(backend, m);
 
-  // Running average over the current restart period, weighted by step size, and
-  // the anchors the restart rules compare against.
-  std::vector<double> sum_x(sz(n), 0.0);
-  std::vector<double> sum_y(sz(m), 0.0);
+  // Problem data the kernels read, uploaded once and left alone.
+  BackendVector d_c(backend, n), d_lower(backend, n), d_upper(backend, n);
+  BackendVector d_q(backend, m);
+  d_c.upload(lp.c);
+  d_lower.upload(lp.lower);
+  d_upper.upload(lp.upper);
+  d_q.upload(lp.q);
+  d_x.upload(host_x);
+
+  backend.multiply(lp.k, d_x.data(), k_x.data());
+
   double sum_weight = 0.0;
-  std::vector<double> avg_x(sz(n), 0.0);
-  std::vector<double> avg_y(sz(m), 0.0);
 
-  std::vector<double> restart_x = x;
-  std::vector<double> restart_y = y;
-  std::vector<double> previous_restart_x = x;
-  std::vector<double> previous_restart_y = y;
+  // Restart anchors are read only at restarts, which are rare, so they stay on
+  // the host rather than occupying device memory.
+  std::vector<double> restart_x = host_x;
+  std::vector<double> restart_y = host_y;
+  std::vector<double> previous_restart_x = host_x;
+  std::vector<double> previous_restart_y = host_y;
   bool have_previous_restart = false;
 
   KktWork kkt_work;
@@ -373,7 +390,7 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
   PdhgStatus status = PdhgStatus::kIterationLimit;
 
   for (; iteration < options.max_iterations; ++iteration) {
-    backend.multiply_transpose(lp.kt, y.data(), kt_y.data());
+    backend.multiply_transpose(lp.kt, d_y.data(), kt_y.data());
 
     // One PDHG step, retried at a smaller step size if the adaptive rule rejects
     // it. Rejected trials cost one matrix-vector product each.
@@ -381,13 +398,13 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
       const double tau = eta / omega;
       const double sigma = eta * omega;
 
-      backend.primal_step(n, tau, x.data(), lp.c.data(), kt_y.data(),
-                          lp.lower.data(), lp.upper.data(), x_next.data(),
+      backend.primal_step(n, tau, d_x.data(), d_c.data(), kt_y.data(),
+                          d_lower.data(), d_upper.data(), x_next.data(),
                           dx.data(), x_bar.data());
 
       backend.multiply(lp.k, x_bar.data(), k_x_bar.data());
 
-      backend.dual_step(m, lp.num_equalities, sigma, y.data(), lp.q.data(),
+      backend.dual_step(m, lp.num_equalities, sigma, d_y.data(), d_q.data(),
                         k_x_bar.data(), k_x.data(), y_next.data(), dy.data(),
                         k_dx.data());
 
@@ -423,21 +440,28 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
     }
 
     backend.advance_kx(m, k_x_bar.data(), k_x.data());
-    x.swap(x_next);
-    y.swap(y_next);
+    std::swap(d_x, x_next);
+    std::swap(d_y, y_next);
     ++iterations_since_restart;
 
     if (options.restarts) {
-      backend.accumulate(n, eta, x.data(), sum_x.data());
-      backend.accumulate(m, eta, y.data(), sum_y.data());
+      backend.accumulate(n, eta, d_x.data(), sum_x.data());
+      backend.accumulate(m, eta, d_y.data(), sum_y.data());
       sum_weight += eta;
     }
 
     const bool check = ((iteration + 1) % options.termination_check_frequency == 0);
     if (!check) continue;
 
+    // Everything from here to the end of the iteration runs on the host, so
+    // this is where the data comes back - twice per check, not ten times per
+    // iteration.
+    d_x.download(&host_x);
+    d_y.download(&host_y);
+    dy.download(&host_dy);
+
     if (options.detect_infeasibility &&
-        is_infeasibility_certificate(lp, dy, options.infeasibility_tolerance,
+        is_infeasibility_certificate(lp, host_dy, options.infeasibility_tolerance,
                                      &infeasibility_work)) {
       status = PdhgStatus::kPrimalInfeasible;
       result.message = "Farkas certificate found in the dual iterate difference";
@@ -447,20 +471,33 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
 
     // The candidate is whichever of the current iterate and the running average
     // has the smaller KKT error. Both restarting and stopping are judged on it.
-    const double current_kkt = weighted_kkt_error(lp, x, y, omega, &kkt_work);
+    const double current_kkt = weighted_kkt_error(lp, host_x, host_y, omega, &kkt_work);
     bool use_average = false;
     double candidate_kkt = current_kkt;
     if (options.restarts && sum_weight > 0.0) {
       backend.scale_into(n, sum_weight, sum_x.data(), avg_x.data());
       backend.scale_into(m, sum_weight, sum_y.data(), avg_y.data());
-      const double average_kkt = weighted_kkt_error(lp, avg_x, avg_y, omega, &kkt_work);
+      avg_x.download(&host_avg_x);
+      avg_y.download(&host_avg_y);
+      const double average_kkt =
+          weighted_kkt_error(lp, host_avg_x, host_avg_y, omega, &kkt_work);
       if (average_kkt < current_kkt) {
         use_average = true;
         candidate_kkt = average_kkt;
       }
     }
-    const std::vector<double>& cand_x = use_average ? avg_x : x;
-    const std::vector<double>& cand_y = use_average ? avg_y : y;
+    const std::vector<double>& cand_x = use_average ? host_avg_x : host_x;
+    const std::vector<double>& cand_y = use_average ? host_avg_y : host_y;
+
+    // Adopting the candidate has to move it on the device too, not only on the
+    // host mirror the checks were computed from.
+    auto adopt_candidate = [&]() {
+      if (!use_average) return;
+      backend.copy(avg_x.data(), d_x.data(), n);
+      backend.copy(avg_y.data(), d_y.data(), m);
+      host_x = host_avg_x;
+      host_y = host_avg_y;
+    };
 
     result.scaling.scaling.unscale_primal(cand_x, &unscaled_x);
     result.scaling.scaling.unscale_dual(cand_y, &unscaled_y);
@@ -470,16 +507,14 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
       status = PdhgStatus::kNumericalError;
       result.message = "iterates stopped being finite";
       ++iteration;
-      x = cand_x;
-      y = cand_y;
+      adopt_candidate();
       break;
     }
     if (r.converged(tolerance, options.absolute_tolerance,
                     options.require_inf_norm_termination)) {
       status = PdhgStatus::kOptimal;
       ++iteration;
-      x = cand_x;
-      y = cand_y;
+      adopt_candidate();
       break;
     }
     if (options.verbose && (iteration + 1) % options.log_frequency == 0) {
@@ -491,8 +526,7 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
     if (elapsed() > options.time_limit_seconds) {
       status = PdhgStatus::kTimeLimit;
       ++iteration;
-      x = cand_x;
-      y = cand_y;
+      adopt_candidate();
       break;
     }
 
@@ -508,9 +542,8 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
 
     if (!(sufficient || necessary || too_long)) continue;
 
-    x = cand_x;
-    y = cand_y;
-    backend.multiply(lp.k, x.data(), k_x.data());
+    adopt_candidate();
+    backend.multiply(lp.k, d_x.data(), k_x.data());
 
     if (options.primal_weight_updates && have_previous_restart) {
       // Exponential smoothing in log space, theta = 0.5, so the new weight is
@@ -519,11 +552,11 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
       double delta_x_sq = 0.0;
       double delta_y_sq = 0.0;
       for (Int j = 0; j < n; ++j) {
-        const double d = x[sz(j)] - previous_restart_x[sz(j)];
+        const double d = host_x[sz(j)] - previous_restart_x[sz(j)];
         delta_x_sq += d * d;
       }
       for (Int i = 0; i < m; ++i) {
-        const double d = y[sz(i)] - previous_restart_y[sz(i)];
+        const double d = host_y[sz(i)] - previous_restart_y[sz(i)];
         delta_y_sq += d * d;
       }
       const double delta_x = std::sqrt(delta_x_sq);
@@ -540,20 +573,22 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
     previous_restart_x = restart_x;
     previous_restart_y = restart_y;
     have_previous_restart = true;
-    restart_x = x;
-    restart_y = y;
+    restart_x = host_x;
+    restart_y = host_y;
 
-    std::fill(sum_x.begin(), sum_x.end(), 0.0);
-    std::fill(sum_y.begin(), sum_y.end(), 0.0);
+    backend.fill(sum_x.data(), n, 0.0);
+    backend.fill(sum_y.data(), m, 0.0);
     sum_weight = 0.0;
     iterations_since_restart = 0;
     last_candidate_kkt = kInf;
-    kkt_at_restart = weighted_kkt_error(lp, x, y, omega, &kkt_work);
+    kkt_at_restart = weighted_kkt_error(lp, host_x, host_y, omega, &kkt_work);
     ++result.restarts;
   }
 
-  result.scaling.scaling.unscale_primal(x, &result.x);
-  result.scaling.scaling.unscale_dual(y, &result.y);
+  d_x.download(&host_x);
+  d_y.download(&host_y);
+  result.scaling.scaling.unscale_primal(host_x, &result.x);
+  result.scaling.scaling.unscale_dual(host_y, &result.y);
   result.residual = evaluate_residual(original, result.x, result.y);
   result.objective = original.model_objective(result.x);
   result.iterations = iteration;

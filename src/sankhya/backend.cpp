@@ -1,5 +1,6 @@
 #include "sankhya/backend.hpp"
 
+#include <algorithm>
 #include <cmath>
 
 namespace sankhya {
@@ -16,6 +17,23 @@ class CpuBackend final : public LinAlgBackend {
   void multiply_transpose(const SparseMatrix& at, const double* y,
                           double* x) const override {
     at.multiply(y, x);
+  }
+
+  double* allocate(Int n) const override {
+    return n > 0 ? new double[sz(n)]() : nullptr;
+  }
+  void deallocate(double* p) const override { delete[] p; }
+  void upload(const double* host, double* target, Int n) const override {
+    std::copy(host, host + sz(n), target);
+  }
+  void download(const double* source, double* host, Int n) const override {
+    std::copy(source, source + sz(n), host);
+  }
+  void fill(double* target, Int n, double value) const override {
+    std::fill(target, target + sz(n), value);
+  }
+  void copy(const double* source, double* target, Int n) const override {
+    std::copy(source, source + sz(n), target);
   }
 
   double dot(const double* a, const double* b, Int n) const override {

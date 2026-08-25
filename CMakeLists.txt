@@ -43,6 +43,8 @@ if(MSVC)
 else()
   target_compile_options(sankhya PRIVATE
     $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wsign-conversion>)
+  # nvcc must not be handed the C++ warning set at all.
+  target_compile_options(sankhya PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-w>)
   if(SANKHYA_WERROR)
     target_compile_options(sankhya PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Werror>)
   endif()
@@ -52,9 +54,13 @@ if(SANKHYA_ENABLE_CUDA)
   target_sources(sankhya PRIVATE src/sankhya/cuda_backend.cu)
   target_compile_definitions(sankhya PUBLIC SANKHYA_WITH_CUDA)
   set_target_properties(sankhya PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
-  # The strict warning set is for our C++; nvcc does not accept all of it.
+  # The strict warning set is ours, for our C++. nvcc forwards host flags to the
+  # host compiler while also generating its own code, and -Wshadow fires inside
+  # the CUDA headers rather than in anything we wrote - which is why a first
+  # attempt at building this on Kaggle had to delete -Werror wholesale. Scoping
+  # the flags to C++ sources keeps them on for the code they were meant for.
   set_source_files_properties(src/sankhya/cuda_backend.cu PROPERTIES
-                              COMPILE_OPTIONS "")
+                              COMPILE_OPTIONS "-w")
 endif()
 
 add_executable(sankhya-cli app/sankhya_cli.cpp)

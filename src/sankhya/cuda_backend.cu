@@ -13,6 +13,8 @@
 
 #include <cuda_runtime.h>
 
+#include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <stdexcept>
 #include <string>
@@ -89,6 +91,11 @@ __global__ void dual_step_kernel(Int m, Int num_equalities, double sigma,
   k_dx[i] = 0.5 * (k_x_bar[i] - k_x[i]);
 }
 
+__global__ void fill_kernel(Int n, double value, double* __restrict__ target) {
+  const Int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n) target[i] = value;
+}
+
 __global__ void advance_kx_kernel(Int m, const double* __restrict__ k_x_bar,
                                   double* __restrict__ k_x) {
   const Int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -141,10 +148,11 @@ struct DeviceMatrix {
   double* value = nullptr;
 };
 
-// Device-side scratch that the solver's vectors are staged through. The
-// interface hands us host pointers, so each call copies in and out. That is the
-// honest cost of keeping one algorithm for both backends, and it is why the
-// steps are fused: fewer calls, fewer transfers.
+// The vectors the solver works on live here, allocated through the interface
+// and never copied back until the solver asks. An earlier version staged every
+// argument across the bus on every call, which is about ten transfers per
+// iteration, and measured slower on a T4 than the CPU it was meant to
+// accelerate. The kernels were not the problem.
 class CudaBackend final : public LinAlgBackend {
  public:
   CudaBackend() {
@@ -158,10 +166,48 @@ class CudaBackend final : public LinAlgBackend {
   ~CudaBackend() override {
     release();
     if (partial_) cudaFree(partial_);
-    for (double* p : pool_) cudaFree(p);
   }
 
   std::string name() const override { return "cuda"; }
+
+  double* allocate(Int n) const override {
+    if (n <= 0) return nullptr;
+    double* p = nullptr;
+    cuda_check(cudaMalloc(&p, sizeof(double) * sz(n)), "allocate");
+    cuda_check(cudaMemset(p, 0, sizeof(double) * sz(n)), "allocate zero");
+    return p;
+  }
+
+  void deallocate(double* p) const override {
+    if (p) cudaFree(p);
+  }
+
+  void upload(const double* host, double* target, Int n) const override {
+    if (n <= 0) return;
+    cuda_check(cudaMemcpy(target, host, sizeof(double) * sz(n),
+                          cudaMemcpyHostToDevice), "upload");
+  }
+
+  void download(const double* source, double* host, Int n) const override {
+    if (n <= 0) return;
+    cuda_check(cudaMemcpy(host, source, sizeof(double) * sz(n),
+                          cudaMemcpyDeviceToHost), "download");
+  }
+
+  void fill(double* target, Int n, double value) const override {
+    if (n <= 0) return;
+    if (value == 0.0) {
+      cuda_check(cudaMemset(target, 0, sizeof(double) * sz(n)), "fill zero");
+      return;
+    }
+    fill_kernel<<<blocks(n), kBlock>>>(n, value, target);
+  }
+
+  void copy(const double* source, double* target, Int n) const override {
+    if (n <= 0) return;
+    cuda_check(cudaMemcpy(target, source, sizeof(double) * sz(n),
+                          cudaMemcpyDeviceToDevice), "copy");
+  }
 
   void prepare(const SparseMatrix& a) const override {
     if (matrices_.count(&a)) return;
@@ -194,19 +240,16 @@ class CudaBackend final : public LinAlgBackend {
   }
 
   void multiply(const SparseMatrix& a, const double* x, double* y) const override {
-    spmv(a, x, y, a.cols(), a.rows());
+    spmv(a, x, y);
   }
 
   void multiply_transpose(const SparseMatrix& at, const double* y,
                           double* x) const override {
-    spmv(at, y, x, at.cols(), at.rows());
+    spmv(at, y, x);
   }
 
   double dot(const double* a, const double* b, Int n) const override {
-    if (n <= 0) return 0.0;
-    double* da = stage(a, n, 0);
-    double* db = stage(b, n, 1);
-    return reduce<false>(da, db, n);
+    return n > 0 ? reduce<false>(a, b, n) : 0.0;
   }
 
   double two_norm(const double* a, Int n) const override {
@@ -214,69 +257,35 @@ class CudaBackend final : public LinAlgBackend {
   }
 
   double inf_norm(const double* a, Int n) const override {
-    if (n <= 0) return 0.0;
-    double* da = stage(a, n, 0);
-    return reduce<true>(da, nullptr, n);
+    return n > 0 ? reduce<true>(a, nullptr, n) : 0.0;
   }
 
   void primal_step(Int n, double tau, const double* x, const double* c,
                    const double* kt_y, const double* lower, const double* upper,
                    double* x_next, double* dx, double* x_bar) const override {
     if (n <= 0) return;
-    double* dx_in = stage(x, n, 0);
-    double* dc = stage(c, n, 1);
-    double* dk = stage(kt_y, n, 2);
-    double* dl = stage(lower, n, 3);
-    double* du = stage(upper, n, 4);
-    double* o1 = buffer(n, 5);
-    double* o2 = buffer(n, 6);
-    double* o3 = buffer(n, 7);
-    primal_step_kernel<<<blocks(n), kBlock>>>(n, tau, dx_in, dc, dk, dl, du, o1, o2, o3);
-    fetch(o1, x_next, n);
-    fetch(o2, dx, n);
-    fetch(o3, x_bar, n);
+    primal_step_kernel<<<blocks(n), kBlock>>>(n, tau, x, c, kt_y, lower, upper,
+                                              x_next, dx, x_bar);
   }
 
   void dual_step(Int m, Int num_equalities, double sigma, const double* y,
                  const double* q, const double* k_x_bar, const double* k_x,
                  double* y_next, double* dy, double* k_dx) const override {
     if (m <= 0) return;
-    double* dy_in = stage(y, m, 0);
-    double* dq = stage(q, m, 1);
-    double* dkb = stage(k_x_bar, m, 2);
-    double* dkx = stage(k_x, m, 3);
-    double* o1 = buffer(m, 4);
-    double* o2 = buffer(m, 5);
-    double* o3 = buffer(m, 6);
-    dual_step_kernel<<<blocks(m), kBlock>>>(m, num_equalities, sigma, dy_in, dq, dkb,
-                                            dkx, o1, o2, o3);
-    fetch(o1, y_next, m);
-    fetch(o2, dy, m);
-    fetch(o3, k_dx, m);
+    dual_step_kernel<<<blocks(m), kBlock>>>(m, num_equalities, sigma, y, q, k_x_bar,
+                                            k_x, y_next, dy, k_dx);
   }
 
   void advance_kx(Int m, const double* k_x_bar, double* k_x) const override {
-    if (m <= 0) return;
-    double* a = stage(k_x_bar, m, 0);
-    double* b = stage(k_x, m, 1);
-    advance_kx_kernel<<<blocks(m), kBlock>>>(m, a, b);
-    fetch(b, k_x, m);
+    if (m > 0) advance_kx_kernel<<<blocks(m), kBlock>>>(m, k_x_bar, k_x);
   }
 
   void accumulate(Int n, double weight, const double* v, double* sum) const override {
-    if (n <= 0) return;
-    double* dv = stage(v, n, 0);
-    double* ds = stage(sum, n, 1);
-    accumulate_kernel<<<blocks(n), kBlock>>>(n, weight, dv, ds);
-    fetch(ds, sum, n);
+    if (n > 0) accumulate_kernel<<<blocks(n), kBlock>>>(n, weight, v, sum);
   }
 
   void scale_into(Int n, double weight, const double* sum, double* out) const override {
-    if (n <= 0) return;
-    double* ds = stage(sum, n, 0);
-    double* o = buffer(n, 1);
-    scale_into_kernel<<<blocks(n), kBlock>>>(n, 1.0 / weight, ds, o);
-    fetch(o, out, n);
+    if (n > 0) scale_into_kernel<<<blocks(n), kBlock>>>(n, 1.0 / weight, sum, out);
   }
 
   double weighted_norm_squared(Int n, Int m, const double* dx, const double* dy,
@@ -286,48 +295,19 @@ class CudaBackend final : public LinAlgBackend {
 
  private:
   static constexpr int kMaxBlocks = 512;
-  static constexpr int kSlots = 10;
 
   static Int blocks(Int n) {
-    return static_cast<Int>((static_cast<long long>(n) + kBlock - 1) / kBlock);
+    const Int b = static_cast<Int>((static_cast<long long>(n) + kBlock - 1) / kBlock);
+    return b > 0 ? b : 1;
   }
 
-  double* buffer(Int n, int slot) const {
-    const std::size_t want = sz(n);
-    if (pool_.size() <= static_cast<std::size_t>(slot)) {
-      pool_.resize(static_cast<std::size_t>(kSlots), nullptr);
-      sizes_.resize(static_cast<std::size_t>(kSlots), 0);
-    }
-    if (sizes_[sz(slot)] < want) {
-      if (pool_[sz(slot)]) cudaFree(pool_[sz(slot)]);
-      cuda_check(cudaMalloc(&pool_[sz(slot)], sizeof(double) * want), "buffer");
-      sizes_[sz(slot)] = want;
-    }
-    return pool_[sz(slot)];
-  }
-
-  double* stage(const double* host, Int n, int slot) const {
-    double* device = buffer(n, slot);
-    cuda_check(cudaMemcpy(device, host, sizeof(double) * sz(n),
-                          cudaMemcpyHostToDevice), "stage");
-    return device;
-  }
-
-  void fetch(const double* device, double* host, Int n) const {
-    cuda_check(cudaMemcpy(host, device, sizeof(double) * sz(n),
-                          cudaMemcpyDeviceToHost), "fetch");
-  }
-
-  void spmv(const SparseMatrix& a, const double* x, double* y, Int in, Int out) const {
+  void spmv(const SparseMatrix& a, const double* x, double* y) const {
     prepare(a);
     const DeviceMatrix& d = matrices_.at(&a);
-    double* dx = stage(x, in, 8);
-    double* dy = buffer(out, 9);
     const Int warps_per_block = kBlock / 32;
-    const Int grid = (out + warps_per_block - 1) / warps_per_block;
+    const Int grid = (d.rows + warps_per_block - 1) / warps_per_block;
     spmv_kernel<<<grid > 0 ? grid : 1, kBlock>>>(d.rows, d.start, d.index, d.value,
-                                                 dx, dy);
-    fetch(dy, y, out);
+                                                 x, y);
   }
 
   template <bool kMaximum>
@@ -345,8 +325,6 @@ class CudaBackend final : public LinAlgBackend {
   }
 
   mutable std::unordered_map<const SparseMatrix*, DeviceMatrix> matrices_;
-  mutable std::vector<double*> pool_;
-  mutable std::vector<std::size_t> sizes_;
   double* partial_ = nullptr;
   mutable std::vector<double> host_partial_;
 };
