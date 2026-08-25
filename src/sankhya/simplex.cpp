@@ -520,8 +520,38 @@ SimplexResult solve_simplex(const StandardLp& lp, const SimplexOptions& options)
       const double lo = form.lower[sz(j)];
       const double hi = form.upper[sz(j)];
 
-      // A basic variable that is already outside its bounds is heading back in;
-      // it blocks when it arrives, not when it leaves the far side.
+      // x_i(t) = value - alpha * t, so alpha > 0 is a basic variable falling and
+      // alpha < 0 is one rising. Three situations:
+      //
+      //   outside its bounds and getting worse - it may move by as much as it
+      //     is already violating by, and no further;
+      //   outside its bounds and heading back in - it passes through the bound
+      //     it is violating and travels to the opposite one;
+      //   feasible - it travels to whichever bound it is heading for.
+      //
+      // The middle case is a long step, and the comment that used to sit here
+      // said the opposite: that such a variable blocks on arriving at the bound
+      // it was violating. It does not, and the difference is not cosmetic -
+      // stopping there makes almost every phase one step degenerate. Two
+      // attempts to "fix" the code to match the old comment were measured
+      // against sixteen Netlib instances and both were worse than what is
+      // written here. Making the two outside-its-bounds tests block at the
+      // violated bound took Dantzig from 16 of 16 to 7, with sctap1 going from
+      // 387 iterations to the 300,000 limit. Leaving those alone and only
+      // adding a block for the case where the opposite bound is infinite took
+      // it to 14 of 16, losing share1b and fit1p, because rows that used to
+      // fall through to a bound flip started pivoting instead.
+      //
+      // What is genuinely missing is the third case, which neither attempt was:
+      // a piecewise-linear ratio test that walks the breakpoints in order,
+      // tracking the slope of the sum of infeasibilities, and stops where the
+      // slope turns non-negative. That is the principled long step. The one
+      // known defect of what is here - fit1p under Devex reaching a step with
+      // no blocking row at all, because the variable heading back in has an
+      // infinite opposite bound, and phase one then calling a feasible model
+      // infeasible - is a case a piecewise-linear test handles by construction,
+      // since the slope turns at the violated bound whether or not the far one
+      // exists.
       double limit = kInf;
       VarStatus to = VarStatus::kAtLower;
       if (alpha > 0.0) {
