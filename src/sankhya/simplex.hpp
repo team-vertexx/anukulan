@@ -25,7 +25,7 @@ struct LogicalForm {
   Int num_structural = 0;
   Int num_rows = 0;
 
-  Int num_columns() const { return num_structural + (num_rows - num_equalities); }
+  Int num_columns() const { return num_structural + num_rows; }
   Int num_equalities = 0;
 
   double objective_scale = 1.0;
@@ -79,5 +79,48 @@ class SimplexBasis {
   LuFactor lu_;
   Int updates_ = 0;
 };
+
+struct SimplexOptions {
+  double primal_tolerance = 1e-7;
+  double dual_tolerance = 1e-7;
+  // A pivot smaller than this is refused: dividing by it would wreck the
+  // factorisation regardless of what the ratio test wants.
+  double pivot_tolerance = 1e-7;
+
+  Int max_iterations = 200000;
+  double time_limit_seconds = 300.0;
+  Int refactorization_frequency = 50;
+
+  bool verbose = false;
+  Int log_frequency = 1000;
+};
+
+enum class SimplexStatus {
+  kOptimal,
+  kUnbounded,
+  kInfeasible,
+  kIterationLimit,
+  kTimeLimit,
+  kNumericalError,
+};
+
+std::string to_string(SimplexStatus status);
+
+struct SimplexResult {
+  SimplexStatus status = SimplexStatus::kNumericalError;
+  std::vector<double> x;  // structural variables only, in model order
+  std::vector<double> y;  // row duals
+  double objective = 0.0;
+
+  Int iterations = 0;
+  Int phase_one_iterations = 0;
+  Int refactorizations = 0;
+  double solve_seconds = 0.0;
+  std::string message;
+};
+
+// Primal simplex with bounded variables. Phase one drives the basis to
+// feasibility by minimising the total bound violation; phase two then optimises.
+SimplexResult solve_simplex(const StandardLp& lp, const SimplexOptions& options = {});
 
 }  // namespace sankhya

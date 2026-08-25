@@ -67,16 +67,39 @@ void activity(const LogicalForm& form, const std::vector<double>& z,
 
 void test_logical_form_shape() {
   const LogicalForm form = build(kMixed);
-  // One slack per inequality row, none for the equality.
+  // Every row gets a logical, equalities included. The equality's logical is
+  // fixed at zero, so it changes nothing about the feasible set, and in return
+  // the all-logical basis is the identity and cannot be singular.
   CHECK_EQ(form.num_rows, 4);
   CHECK_EQ(form.num_equalities, 1);
-  CHECK_EQ(form.columns.rows(), form.num_structural + 3);
-  // Slacks are non-negative and unbounded above.
+  CHECK_EQ(form.columns.rows(), form.num_structural + form.num_rows);
+
   for (Int j = form.num_structural; j < form.columns.rows(); ++j) {
+    const Int row = j - form.num_structural;
     CHECK_NEAR(form.lower[sz(j)], 0.0, 0.0);
-    CHECK_NEAR(form.upper[sz(j)], kInf, 0.0);
     CHECK_NEAR(form.cost[sz(j)], 0.0, 0.0);
+    if (row < form.num_equalities) {
+      CHECK_NEAR(form.upper[sz(j)], 0.0, 0.0);  // pinned shut
+    } else {
+      CHECK_NEAR(form.upper[sz(j)], kInf, 0.0);
+    }
   }
+}
+
+void test_initial_basis_is_the_identity() {
+  // Whatever the model, the starting basis is the logical one, so the first
+  // factorisation is of -I and always succeeds. An earlier version picked a
+  // structural column for each equality row by a greedy rule and produced
+  // singular bases on scfxm1, bandm and degen2 - all three failed before the
+  // first iteration.
+  const LogicalForm form = build(kMixed);
+  SimplexBasis basis;
+  std::string error;
+  CHECK(basis.set_initial(form, &error));
+  for (Int i = 0; i < form.num_rows; ++i) {
+    CHECK_EQ(basis.basic()[sz(i)], form.num_structural + i);
+  }
+  CHECK_EQ(basis.factors().nucleus_size(), 0);
 }
 
 void test_basic_solution_satisfies_the_equalities() {
@@ -224,6 +247,7 @@ void test_larger_instance_factorizes_and_solves() {
 
 int main() {
   test_logical_form_shape();
+  test_initial_basis_is_the_identity();
   test_basic_solution_satisfies_the_equalities();
   test_reduced_costs_vanish_on_the_basis();
   test_pivoting_preserves_the_invariant();
