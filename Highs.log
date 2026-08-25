@@ -8715,3 +8715,238 @@ Simplex   iterations: 2498
 Objective value     :  1.4971851665e+06
 P-D objective error :  6.9980492059e-16
 HiGHS run time      :          0.58
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+LP small has 112 rows; 164 cols; 452 nonzeros
+Coefficient ranges:
+  Matrix  [1e-01, 3e+04]
+  Cost    [7e+01, 9e+03]
+  Bound   [2e+05, 1e+09]
+  RHS     [2e+06, 2e+06]
+WARNING: Problem has some excessively large column bounds
+WARNING: Problem has some excessively large row bounds
+WARNING:    Consider scaling the    bounds by 1e-3, or setting the user_bound_scale option to -10
+Presolving model
+96 rows, 136 cols, 384 nonzeros 0s
+71 rows, 112 cols, 332 nonzeros 0s
+Dependent equations search running on 60 equations with time limit of 1000.00s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1000.00s)
+71 rows, 112 cols, 332 nonzeros 0s
+Presolve reductions: rows 71(-41); columns 112(-52); nonzeros 332(-120) 
+Solving the presolved LP
+Using dual simplex solver
+  Iteration        Objective     Infeasibilities num(sum)
+          0     0.0000000000e+00 Ph1: 0(0) 0.0s
+         69    -3.5882484862e+07 Pr: 0(0) 0.0s
+
+Performed postsolve
+Solving the original LP from the solution after postsolve
+
+Model name          : small
+Model status        : Optimal
+Simplex   iterations: 69
+Objective value     :  3.5882484862e+07
+P-D objective error :  1.0381918256e-16
+HiGHS run time      :          0.00
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+LP refinery has 384 rows; 636 cols; 2080 nonzeros
+Coefficient ranges:
+  Matrix  [1e-01, 3e+04]
+  Cost    [7e+01, 9e+03]
+  Bound   [2e+05, 1e+09]
+  RHS     [2e+06, 2e+06]
+WARNING: Problem has some excessively large column bounds
+WARNING: Problem has some excessively large row bounds
+WARNING:    Consider scaling the    bounds by 1e-3, or setting the user_bound_scale option to -10
+Presolving model
+324 rows, 552 cols, 1852 nonzeros 0s
+Dependent equations search running on 240 equations with time limit of 1000.00s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1000.00s)
+264 rows, 492 cols, 1732 nonzeros 0s
+Presolve reductions: rows 264(-120); columns 492(-144); nonzeros 1732(-348) 
+Solving the presolved LP
+Using dual simplex solver
+  Iteration        Objective     Infeasibilities num(sum)
+          0     0.0000000000e+00 Ph1: 0(0) 0.0s
+        379    -4.1631822095e+08 Pr: 0(0) 0.0s
+
+Performed postsolve
+Solving the original LP from the solution after postsolve
+
+Model name          : refinery
+Model status        : Optimal
+Simplex   iterations: 379
+Objective value     :  4.1631822095e+08
+P-D objective error :  1.5748796444e-15
+HiGHS run time      :          0.01
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+LP refinery has 684 rows; 1776 cols; 4360 nonzeros
+Coefficient ranges:
+  Matrix  [1e-01, 4e+04]
+  Cost    [7e+01, 9e+03]
+  Bound   [2e+05, 8e+05]
+  RHS     [2e+06, 2e+06]
+WARNING: Problem has some excessively large row bounds
+WARNING:    Consider scaling the    bounds by 1e-1, or setting the user_bound_scale option to -1
+Presolving model
+684 rows, 1776 cols, 4360 nonzeros 0s
+Dependent equations search running on 528 equations with time limit of 1000.00s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1000.00s)
+588 rows, 1680 cols, 4648 nonzeros 0s
+Presolve reductions: rows 588(-96); columns 1680(-96); nonzeros 4648(+288) 
+Solving the presolved LP
+Using dual simplex solver
+  Iteration        Objective     Infeasibilities num(sum)
+          0     0.0000000000e+00 Ph1: 0(0) 0.0s
+       1077    -4.8654681009e+09 Pr: 0(0); Du: 0(2.52396e-11) 0.0s
+Using dual simplex solver
+  Iteration        Objective     Infeasibilities num(sum)
+       1077    -4.8654681009e+09 Pr: 1(1.40643e-06); Du: 0(3.98104e-10) 0.0s
+       1078    -4.8654681009e+09 Pr: 0(0); Du: 0(2.08509e-10) 0.0s
+
+Performed postsolve
+Solving the original LP from the solution after postsolve
+
+Model name          : refinery
+Model status        : Optimal
+Simplex   iterations: 1078
+Objective value     :  4.8654681009e+09
+P-D objective error :  1.9600874911e-16
+HiGHS run time      :          0.03
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+LP refinery has 1380 rows; 4368 cols; 10888 nonzeros
+Coefficient ranges:
+  Matrix  [1e-01, 4e+04]
+  Cost    [7e+01, 9e+03]
+  Bound   [2e+05, 8e+05]
+  RHS     [4e+05, 2e+06]
+WARNING: Problem has some excessively large row bounds
+WARNING:    Consider scaling the    bounds by 1e-1, or setting the user_bound_scale option to -1
+Presolving model
+1380 rows, 4368 cols, 10888 nonzeros 0s
+804 rows, 3792 cols, 11080 nonzeros 0s
+Dependent equations search running on 624 equations with time limit of 1000.00s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1000.00s)
+708 rows, 3216 cols, 10848 nonzeros 0s
+Presolve reductions: rows 708(-672); columns 3216(-1152); nonzeros 10848(-40) 
+Solving the presolved LP
+Using dual simplex solver
+  Iteration        Objective     Infeasibilities num(sum)
+          0     0.0000000000e+00 Ph1: 0(0) 0.0s
+       1553    -2.4260622669e+10 Pr: 0(0) 0.0s
+
+Performed postsolve
+Solving the original LP from the solution after postsolve
+
+Model name          : refinery
+Model status        : Optimal
+Simplex   iterations: 1553
+Objective value     :  2.4260622669e+10
+P-D objective error :  7.8619112906e-17
+HiGHS run time      :          0.05
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+LP r_4_4 has 252 rows; 736 cols; 1820 nonzeros
+Coefficient ranges:
+  Matrix  [1e-01, 4e+04]
+  Cost    [7e+01, 9e+03]
+  Bound   [2e+05, 8e+05]
+  RHS     [4e+05, 2e+06]
+WARNING: Problem has some excessively large row bounds
+WARNING:    Consider scaling the    bounds by 1e-1, or setting the user_bound_scale option to -1
+Presolving model
+252 rows, 736 cols, 1820 nonzeros 0s
+156 rows, 640 cols, 1852 nonzeros 0s
+Dependent equations search running on 112 equations with time limit of 1000.00s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1000.00s)
+140 rows, 544 cols, 1800 nonzeros 0s
+Presolve reductions: rows 140(-112); columns 544(-192); nonzeros 1800(-20) 
+Solving the presolved LP
+Using dual simplex solver
+  Iteration        Objective     Infeasibilities num(sum)
+          0     0.0000000000e+00 Ph1: 0(0) 0.0s
+        275    -7.1400337740e+09 Pr: 0(0) 0.0s
+
+Performed postsolve
+Solving the original LP from the solution after postsolve
+
+Model name          : r_4_4
+Model status        : Optimal
+Simplex   iterations: 275
+Objective value     :  7.1400337740e+09
+P-D objective error :  3.3391799903e-16
+HiGHS run time      :          0.01
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+LP r_12_8 has 1380 rows; 4368 cols; 10888 nonzeros
+Coefficient ranges:
+  Matrix  [1e-01, 4e+04]
+  Cost    [7e+01, 9e+03]
+  Bound   [2e+05, 8e+05]
+  RHS     [4e+05, 2e+06]
+WARNING: Problem has some excessively large row bounds
+WARNING:    Consider scaling the    bounds by 1e-1, or setting the user_bound_scale option to -1
+Presolving model
+1380 rows, 4368 cols, 10888 nonzeros 0s
+804 rows, 3792 cols, 11080 nonzeros 0s
+Dependent equations search running on 624 equations with time limit of 1000.00s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1000.00s)
+708 rows, 3216 cols, 10848 nonzeros 0s
+Presolve reductions: rows 708(-672); columns 3216(-1152); nonzeros 10848(-40) 
+Solving the presolved LP
+Using dual simplex solver
+  Iteration        Objective     Infeasibilities num(sum)
+          0     0.0000000000e+00 Ph1: 0(0) 0.0s
+       1553    -2.4260622669e+10 Pr: 0(0) 0.0s
+
+Performed postsolve
+Solving the original LP from the solution after postsolve
+
+Model name          : r_12_8
+Model status        : Optimal
+Simplex   iterations: 1553
+Objective value     :  2.4260622669e+10
+P-D objective error :  7.8619112906e-17
+HiGHS run time      :          0.05
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+LP r_52_8 has 5980 rows; 18928 cols; 47208 nonzeros
+Coefficient ranges:
+  Matrix  [1e-01, 4e+04]
+  Cost    [7e+01, 9e+03]
+  Bound   [2e+05, 8e+05]
+  RHS     [4e+05, 2e+06]
+WARNING: Problem has some excessively large row bounds
+WARNING:    Consider scaling the    bounds by 1e-1, or setting the user_bound_scale option to -1
+Presolving model
+5980 rows, 18928 cols, 47208 nonzeros 0s
+3484 rows, 16432 cols, 48040 nonzeros 0s
+Dependent equations search running on 2704 equations with time limit of 1000.00s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1000.00s)
+3068 rows, 13936 cols, 47168 nonzeros 0s
+Presolve reductions: rows 3068(-2912); columns 13936(-4992); nonzeros 47168(-40) 
+Solving the presolved LP
+Using dual simplex solver
+  Iteration        Objective     Infeasibilities num(sum)
+          0     0.0000000000e+00 Ph1: 0(0) 0.1s
+       6518    -1.0534542181e+11 Pr: 0(0) 0.3s
+
+Performed postsolve
+Solving the original LP from the solution after postsolve
+
+Model name          : r_52_8
+Model status        : Optimal
+Simplex   iterations: 6518
+Objective value     :  1.0534542181e+11
+P-D objective error :  3.6211324613e-16
+HiGHS run time      :          0.28
