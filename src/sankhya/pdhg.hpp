@@ -47,12 +47,21 @@ struct PdhgOptions {
 
   ScalingOptions scaling;
 
+  // Look for a Farkas certificate of primal infeasibility. A first-order method
+  // cannot otherwise tell an infeasible problem from a slowly converging one, so
+  // it burns its whole budget and the caller has to guess. That is tolerable for
+  // a standalone solve and ruinous inside branch and bound, where most nodes are
+  // infeasible and a guess makes the dual bound worthless as a proof.
+  bool detect_infeasibility = true;
+  double infeasibility_tolerance = 1e-8;
+
   bool verbose = false;
   Int log_frequency = 5000;
 };
 
 enum class PdhgStatus {
   kOptimal,
+  kPrimalInfeasible,
   kIterationLimit,
   kTimeLimit,
   kNumericalError,

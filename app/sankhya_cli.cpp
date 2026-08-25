@@ -387,6 +387,12 @@ int command_milp(const std::vector<std::string>& args) {
       options.relaxation.tolerance = v;
     } else if (value_of(a, "--int-tol=", &v)) {
       options.integrality_tolerance = v;
+    } else if (a == "--most-fractional") {
+      options.branching =
+          sankhya::BranchAndBoundOptions::Branching::kMostFractional;
+    } else if (a == "--no-heuristic") {
+      options.rounding_heuristic = false;
+      options.diving_heuristic = false;
     } else if (a == "--verbose") {
       options.verbose = true;
     } else if (a == "--format=json") {
@@ -421,6 +427,7 @@ int command_milp(const std::vector<std::string>& args) {
         << "\"max_depth\":" << r.max_depth << ","
         << "\"relaxations\":" << r.relaxations_solved << ","
         << "\"incumbents\":" << r.incumbents_found << ","
+        << "\"heuristic_successes\":" << r.heuristic_successes << ","
         << "\"seconds\":" << r.solve_seconds << "}\n";
     std::fputs(out.str().c_str(), stdout);
     return r.status == sankhya::MilpStatus::kOptimal ? 0 : 1;

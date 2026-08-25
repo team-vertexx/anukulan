@@ -44,6 +44,8 @@ std::string to_string(PdhgStatus status) {
   switch (status) {
     case PdhgStatus::kOptimal:
       return "optimal";
+    case PdhgStatus::kPrimalInfeasible:
+      return "primal infeasible";
     case PdhgStatus::kIterationLimit:
       return "iteration limit";
     case PdhgStatus::kTimeLimit:
@@ -110,6 +112,53 @@ PdhgResidual evaluate_residual(const StandardLp& lp, const std::vector<double>& 
   r.relative_gap = r.absolute_gap / (1.0 + std::fabs(r.primal_objective) +
                                      std::fabs(r.dual_objective));
   return r;
+}
+
+// Farkas test for an empty feasible set.
+//
+// The set {x : K_eq x = q_eq, K_ineq x >= q_ineq, l <= x <= u} is empty when
+// there is a y, non-negative on the inequality block, with
+//
+//     max_{l <= x <= u} y'Kx  <  y'q
+//
+// The maximum on the left is separable: with lambda = K'y it is the sum over
+// columns of lambda_j u_j where lambda_j > 0 and lambda_j l_j where it is
+// negative. So the whole test is one transpose product and a pass over the
+// columns.
+//
+// PDLP's observation is that while the iterates themselves diverge on an
+// infeasible problem, the difference of consecutive dual iterates converges to
+// exactly such a ray, so it is the natural thing to test.
+bool is_infeasibility_certificate(const StandardLp& lp, const std::vector<double>& dy,
+                                  double tolerance, std::vector<double>* work) {
+  double scale = 0.0;
+  for (Int i = 0; i < lp.num_rows(); ++i) {
+    if (i >= lp.num_equalities && dy[sz(i)] < 0.0) return false;  // outside the cone
+    scale = std::fmax(scale, std::fabs(dy[sz(i)]));
+  }
+  if (scale <= 0.0) return false;
+
+  work->resize(sz(lp.num_cols()));
+  lp.kt.multiply(dy.data(), work->data());
+
+  double support = 0.0;
+  for (Int j = 0; j < lp.num_cols(); ++j) {
+    const double lambda = (*work)[sz(j)];
+    if (lambda > 0.0) {
+      if (lp.upper[sz(j)] >= kInf) return false;  // unbounded above, no certificate
+      support += lambda * lp.upper[sz(j)];
+    } else if (lambda < 0.0) {
+      if (lp.lower[sz(j)] <= -kInf) return false;
+      support += lambda * lp.lower[sz(j)];
+    }
+  }
+
+  double rhs = 0.0;
+  for (Int i = 0; i < lp.num_rows(); ++i) rhs += lp.q[sz(i)] * dy[sz(i)];
+
+  // Normalise by the size of the ray so the margin means the same thing whatever
+  // scale the iterates happen to be at.
+  return (rhs - support) / scale > tolerance;
 }
 
 double estimate_matrix_norm(const StandardLp& lp, int iterations, double tolerance) {
@@ -308,6 +357,7 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
 
   std::vector<double> unscaled_x;
   std::vector<double> unscaled_y;
+  std::vector<double> infeasibility_work;
 
   const double tolerance = options.tolerance;
   Int iteration = 0;
@@ -377,6 +427,15 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
 
     const bool check = ((iteration + 1) % options.termination_check_frequency == 0);
     if (!check) continue;
+
+    if (options.detect_infeasibility &&
+        is_infeasibility_certificate(lp, dy, options.infeasibility_tolerance,
+                                     &infeasibility_work)) {
+      status = PdhgStatus::kPrimalInfeasible;
+      result.message = "Farkas certificate found in the dual iterate difference";
+      ++iteration;
+      break;
+    }
 
     // The candidate is whichever of the current iterate and the running average
     // has the smaller KKT error. Both restarting and stopping are judged on it.

@@ -9040,3 +9040,63 @@ Solving report
   Nodes             0
   Repair LPs        0
   LP iterations     0
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "simplex"
+MIP flugpl has 18 rows; 18 cols; 46 nonzeros; 11 integer variables (0 binary)
+Coefficient ranges:
+  Matrix  [9e-01, 2e+02]
+  Cost    [3e+01, 3e+03]
+  Bound   [2e+01, 8e+01]
+  RHS     [6e+01, 1e+04]
+WARNING: Solver "simplex" is not available for MIP. Option "solver" ignored
+Presolving model
+15 rows, 15 cols, 38 nonzeros 0s
+13 rows, 14 cols, 34 nonzeros 0s
+Presolve reductions: rows 13(-5); columns 14(-4); nonzeros 34(-12) 
+Objective function is integral with scale 0.0333333
+
+Solving MIP model with:
+   13 rows
+   14 cols (0 binary, 9 integer, 5 implied int., 0 continuous, 0 domain fixed)
+   34 nonzeros
+   Thread count 5 (of 10 threads). Using 1 max workers. Parallel search off
+
+Src: B => Branching; C => Central rounding; F => Feasibility pump; H => Heuristic;
+     I => Shifting; J => Feasibility jump; L => Sub-MIP; P => Empty MIP; R => Randomized rounding;
+     S => Solve LP; T => Evaluate node; U => Unbounded; X => User solution; Y => HiGHS solution;
+     Z => ZI Round; l => Trivial lower; p => Trivial point; u => Trivial upper; z => Trivial zero
+
+        Nodes      |    B&B Tree     |            Objective Bounds              |  Dynamic Constraints |       Work      
+Src  Proc. InQueue |  Leaves   Expl. | BestBound       BestSol              Gap |   Cuts   InLp Confl. | LpIters     Time
+
+         0       0         0   0.00%   1018500         inf                  inf        0      0      0         0     0.0s
+         0       0         0   0.00%   1167875.166377  inf                  inf        0      0      3        10     0.0s
+ B      18       2         3  26.56%   1173524.953014  1201800            2.35%      155      6    451       338     0.0s
+ T      87       1        26  99.41%   1189075         1201500            1.03%      172      9    756       847     0.1s
+        89       0        28 100.00%   1201500         1201500            0.00%      187     12    759       858     0.1s
+
+Solving report
+  Model             flugpl
+  Status            Optimal
+  Primal bound      1201500
+  Dual bound        1201500
+  Gap               0% (tolerance: 0.01%)
+  P-D integral      0.000315699774063
+  Solution status   feasible
+                    1201500 (objective)
+                    0 (bound viol.)
+                    3.5527136788e-15 (int. viol.)
+                    0 (row viol.)
+  Timing            0.06
+                    0.00 (Presolve)
+                    0.06 (Solve)
+                    0.00 (Postsolve)
+  Max sub-MIP depth 0
+  Nodes             89
+  Repair LPs        0
+  LP iterations     858
+                    311 (strong br.)
+                    41 (separation)
+                    289 (heuristics)
