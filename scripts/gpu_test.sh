@@ -119,6 +119,60 @@ else:
               f"{r['cpu_wall']/max(1e-9, r['gpu_wall']):>8.2f}x {d:>18.1e}")
 PY
 
+step "6. presolve on the GPU, and where the fused reduction should show"
+echo "The fused step-size reduction replaces three synchronising device-to-host"
+echo "copies per iteration with one. It can only matter where there are many"
+echo "iterations: qap15 runs about 24,700 of them, graph40-40 about 280. So"
+echo "qap15 is the instance to watch here, and graph40-40 is not."
+python3 - "$build" <<'STEP6'
+import csv, json, subprocess, sys, pathlib, time
+build = sys.argv[1]
+names = ["qap15", "supportcase10", "datt256_lp", "graph40-40"]
+rows = []
+print(f"{'instance':<15} {'backend':>8} {'presolve':>9} {'status':>10} "
+      f"{'iters':>9} {'secs':>8} {'objective':>18}")
+for n in names:
+    path = pathlib.Path(f"data/lptestset/{n}.mps")
+    if not path.exists():
+        continue
+    for flag, backend in (("--backend=cpu", "cpu"), ("--backend=cuda", "gpu")):
+        for pre in (False, True):
+            cmd = [f"./{build}/sankhya", "solve", str(path), "--tol=1e-4",
+                   "--max-iter=1000000", "--time-limit=600", "--format=json",
+                   "--quiet", flag]
+            if pre:
+                cmd.append("--presolve")
+            t = time.perf_counter()
+            r = subprocess.run(cmd, capture_output=True, text=True)
+            wall = time.perf_counter() - t
+            try:
+                d = json.loads(r.stdout.strip().splitlines()[-1])
+            except Exception:
+                print(f"{n:<15} {backend:>8} {str(pre):>9} {'FAILED':>10}")
+                continue
+            print(f"{n:<15} {backend:>8} {str(pre):>9} {d['status']:>10} "
+                  f"{d['iterations']:>9} {wall:>8.2f} {d['objective']:>18.9g}")
+            rows.append(dict(instance=n, backend=backend, presolve=pre,
+                             status=d["status"], iterations=d["iterations"],
+                             seconds=wall, objective=d["objective"]))
+if rows:
+    out = pathlib.Path("results")
+    out.mkdir(exist_ok=True)
+    with open(out / "gpu_matrix.csv", "w", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=list(rows[0].keys()))
+        w.writeheader()
+        w.writerows(rows)
+    print("\nwrote results/gpu_matrix.csv")
+    print("\ngpu speedup, presolve off:")
+    for n in names:
+        c = [r for r in rows if r["instance"] == n and r["backend"] == "cpu"
+             and not r["presolve"]]
+        g = [r for r in rows if r["instance"] == n and r["backend"] == "gpu"
+             and not r["presolve"]]
+        if c and g and g[0]["seconds"] > 0:
+            print(f"  {n:<15} {c[0]['seconds'] / g[0]['seconds']:.2f}x")
+STEP6
+
 printf '\n=== summary\n'
 if [ "$fail" -eq 0 ]; then
   echo "GPU backend is correct. Timing table above is the headline number."

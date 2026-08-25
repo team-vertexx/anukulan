@@ -27,9 +27,19 @@ first run.
 
 ### Option A: upload the code as a private Dataset (simplest)
 
-On your Mac:
+On your Mac, check the CUDA compiles before you upload anything:
 
     cd ~/sih26119-solver
+    bash scripts/check_cuda_syntax.sh
+
+That stubs the CUDA runtime, strips the `<<<grid, block>>>` launch
+configurations, and hands the rest to clang. It catches typos, wrong argument
+types and missing members - everything a compiler catches except the parts that
+are genuinely about a device. It exists because a round trip to Kaggle was
+already spent once on a compile error, and a round trip is twenty minutes.
+
+It must print `cuda_backend.cu type-checks clean`. Then package:
+
     bash scripts/package_for_kaggle.sh
 
 That writes `sankhya-source.zip`, a few megabytes - source only, no benchmark
@@ -116,6 +126,7 @@ instances. What it does, in order:
    reference
 4. runs the solver on GPU against **published** Netlib optimal values
 5. times CPU against GPU on the large instances
+6. crosses CPU/GPU with presolve on/off and writes `results/gpu_matrix.csv`
 
 ### What a pass looks like
 
@@ -131,6 +142,59 @@ by up to 25% between two CPU builds of the same source, so a different device is
 certain to differ. **The gate is the objective against the published optimum**,
 which is a number from 1988 that no backend can influence. If the objectives
 match and the iteration counts do not, the port is correct.
+
+---
+
+## What this run is meant to settle
+
+Two things went in since the last GPU run, and each has one question attached.
+
+**The fused step-size reduction.** Every iteration the adaptive step rule needs
+three inner products, and asking for them one at a time meant three
+device-to-host copies - three synchronisations, three pipeline drains. They are
+now one kernel, finished on the device, with three doubles crossing the bus.
+
+Where that shows up is a question of iteration count, not problem size:
+
+| instance | iterations | three stalls cost | share of GPU time |
+|---|---|---|---|
+| `qap15` | ~24,700 | ~1.1 s | **~17%** |
+| `datt256_lp` | ~920 | ~41 ms | ~1% |
+| `graph40-40` | ~280 | ~13 ms | <1% |
+
+So **`qap15` is the row to watch.** It was 1.11x. If the fusion works it should
+move, and `graph40-40` at 1.16x should not - it does not run enough iterations
+for reductions to be its problem, whatever else is.
+
+**Presolve.** New, and never run on a GPU. On CPU it is 1.33x geomean over the
+18 Netlib instances with published optima. The question is whether it still
+pays once the per-iteration cost is a GPU's rather than a CPU's - a smaller
+model means fewer nonzeros per kernel, and a GPU that was already underfed may
+not care. Step 6 of the script runs every large instance four ways, CPU and GPU
+crossed with presolve on and off, and writes `results/gpu_matrix.csv`.
+
+One thing to check rather than assume: presolve reports a `vs original` line
+now. If it says `<- over the tolerance`, the reduced model was solved to its
+own tolerance but the point that maps back misses the original model's rows.
+Re-run that instance with `--abs-tol=1e-8` and it should come out clean.
+
+---
+
+## If graph40-40 stays slow, profile it - do not guess
+
+It is 1.16x, and the reductions are not the reason. Nor is sparsity on its own:
+`supportcase10` has 3.35 nonzeros per row against `graph40-40`'s 3.49 and gets
+3.89x. So the honest position is that it needs measuring:
+
+    !nsys profile --stats=true -o /kaggle/working/graph40 \
+        ./build-cuda/sankhya solve data/lptestset/graph40-40.mps \
+            --backend=cuda --tol=1e-4 --quiet
+
+The `cuda_gpu_kern_sum` table in the output says which kernel owns the time. If
+it is `spmv_kernel`, the row-to-warp mapping is the thing to change - a whole
+32-lane warp per row with 3.5 nonzeros in it uses 11% of the lanes. If the time
+is not in kernels at all, it is launch overhead or memory, and that is a
+different fix. Bring the table back rather than a conclusion.
 
 ---
 
@@ -152,7 +216,12 @@ to 360,900 rows and 1.5 million nonzeros, which is where a GPU starts to matter.
 Anything written under `/kaggle/working` can be downloaded from the notebook's
 **Output** tab after the session ends. Save the tables:
 
-    !cp -r bench/results /kaggle/working/results
+    !cp -r results /kaggle/working/results
+    !cp -r bench/results /kaggle/working/results 2>/dev/null || true
+
+The file worth sending back is `results/gpu_matrix.csv`. It has one row per
+instance per backend per presolve setting, so the speedups can be recomputed
+rather than retyped.
 
 ---
 
