@@ -49,6 +49,14 @@ class SimplexBasis {
 
   bool refactorize(const LogicalForm& form, std::string* error = nullptr);
 
+  // B^-1 x and B^-T x for the basis as it stands, which is the factorisation
+  // plus whatever pivots have happened since it was taken. Everything that
+  // needs to solve with the basis goes through these rather than reaching for
+  // the factors directly, because the factors alone are out of date the moment
+  // a pivot lands.
+  void ftran(std::vector<double>* x) const;
+  void btran(std::vector<double>* x) const;
+
   // x_B = B^-1 (q - N x_N), written into `values` for the basic positions and
   // the bound value for everything else.
   void compute_primal(const LogicalForm& form, std::vector<double>* values) const;
@@ -62,7 +70,20 @@ class SimplexBasis {
   std::vector<VarStatus>& status() { return status_; }
 
   // Swaps `entering` in at row `leaving_row`, whose current occupant leaves to
-  // the bound given. Returns false if the new basis will not factorise.
+  // the bound given.
+  //
+  // The new basis differs from the old one in a single column, so its inverse
+  // differs by a single elementary factor and there is no need to build the
+  // whole thing again. The factor is written from the pivotal column, which the
+  // ratio test has already computed - hence the overload that takes it, and
+  // hence the other one, which is the same thing for a caller that has not.
+  //
+  // Returns false when the pivot element is too small to divide by, which is
+  // the caller's cue to refactorise and try again. Nothing is modified in that
+  // case.
+  bool pivot(const LogicalForm& form, Int leaving_row, Int entering,
+             VarStatus leaving_to, const std::vector<double>& pivotal_column,
+             std::string* error = nullptr);
   bool pivot(const LogicalForm& form, Int leaving_row, Int entering,
              VarStatus leaving_to, std::string* error = nullptr);
 
@@ -73,11 +94,31 @@ class SimplexBasis {
   Int updates_since_refactorization() const { return updates_; }
   const LuFactor& factors() const { return lu_; }
 
+  // The largest 1/|pivot| used since the last refactorisation. Each update
+  // divides by its pivot element, so this is how much the representation can
+  // have magnified a rounding error, and it is a better reason to refactorise
+  // than a fixed pivot count. Small pivots are what makes the product form
+  // decay; counting iterations only guesses at when that happened.
+  double update_growth() const { return growth_; }
+
  private:
+  // One elementary factor. B_new = B_old E, where E is the identity with its
+  // `row` column replaced by the pivotal column, so B_new^-1 = E^-1 B_old^-1
+  // and E^-1 is elementary too. Only the off-diagonal nonzeros are kept; the
+  // diagonal is `pivot`.
+  struct Update {
+    Int row = 0;
+    std::vector<Int> rows;
+    std::vector<double> values;
+    double pivot = 1.0;
+  };
+
   std::vector<Int> basic_;
   std::vector<VarStatus> status_;
   LuFactor lu_;
+  std::vector<Update> updates_list_;
   Int updates_ = 0;
+  double growth_ = 1.0;
 };
 
 struct SimplexOptions {

@@ -23,7 +23,7 @@ d6cube,416,6184,43888,315.49166667,
 degen2,445,534,4449,-1435.178,
 degen3,1504,1818,26230,-987.294,
 dfl001,6072,12230,41873,11266400.0,approximate
-e226,224,282,2767,-18.751929066,
+e226,224,282,2767,-18.751929066,"published value is c.x alone; the file puts -7.113 on the objective row and this table leaves that constant out. HiGHS and both of our solvers report -11.638929066 with it applied. the only Netlib model with an objective constant"
 etamacro,401,688,2489,-755.71521774,
 fffff800,525,854,6235,555679.61165,
 finnis,498,614,2714,172790.96547,

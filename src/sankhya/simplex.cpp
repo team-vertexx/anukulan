@@ -84,7 +84,36 @@ bool SimplexBasis::set_initial(const LogicalForm& form, std::string* error) {
 
 bool SimplexBasis::refactorize(const LogicalForm& form, std::string* error) {
   updates_ = 0;
+  growth_ = 1.0;
+  updates_list_.clear();
   return lu_.factorize(form.columns, basic_, LuOptions{}, error);
+}
+
+// B^-1 = E_k^-1 ... E_1^-1 B_0^-1, so the factorisation goes first and the
+// updates follow in the order they were made.
+void SimplexBasis::ftran(std::vector<double>* x) const {
+  lu_.ftran(x);
+  for (const Update& u : updates_list_) {
+    const double at_pivot = (*x)[sz(u.row)];
+    if (at_pivot == 0.0) continue;
+    const double scaled = at_pivot / u.pivot;
+    for (std::size_t k = 0; k < u.rows.size(); ++k)
+      (*x)[sz(u.rows[k])] -= u.values[k] * scaled;
+    (*x)[sz(u.row)] = scaled;
+  }
+}
+
+// B^-T = B_0^-T (E_1^-1)^T ... (E_k^-1)^T, which reads right to left: the
+// updates in reverse, then the factorisation.
+void SimplexBasis::btran(std::vector<double>* x) const {
+  for (std::size_t t = updates_list_.size(); t-- > 0;) {
+    const Update& u = updates_list_[t];
+    double sum = (*x)[sz(u.row)];
+    for (std::size_t k = 0; k < u.rows.size(); ++k)
+      sum -= u.values[k] * (*x)[sz(u.rows[k])];
+    (*x)[sz(u.row)] = sum / u.pivot;
+  }
+  lu_.btran(x);
 }
 
 void SimplexBasis::compute_primal(const LogicalForm& form,
@@ -121,7 +150,7 @@ void SimplexBasis::compute_primal(const LogicalForm& form,
     }
   }
 
-  lu_.ftran(&residual);
+  ftran(&residual);
   for (Int i = 0; i < m; ++i) (*values)[sz(basic_[sz(i)])] = residual[sz(i)];
 }
 
@@ -132,7 +161,7 @@ void SimplexBasis::compute_duals(const LogicalForm& form, std::vector<double>* d
 
   std::vector<double> cb(sz(m), 0.0);
   for (Int i = 0; i < m; ++i) cb[sz(i)] = form.cost[sz(basic_[sz(i)])];
-  lu_.btran(&cb);
+  btran(&cb);
   *duals = cb;
 
   reduced_costs->assign(sz(columns), 0.0);
@@ -152,27 +181,62 @@ void SimplexBasis::ftran_column(const LogicalForm& form, Int column,
   for (Int e = form.columns.row_begin(column); e < form.columns.row_end(column); ++e) {
     (*out)[sz(form.columns.index()[sz(e)])] = form.columns.value()[sz(e)];
   }
-  lu_.ftran(out);
+  ftran(out);
 }
 
 bool SimplexBasis::pivot(const LogicalForm& form, Int leaving_row, Int entering,
-                         VarStatus leaving_to, std::string* error) {
+                         VarStatus leaving_to,
+                         const std::vector<double>& pivotal_column,
+                         std::string* error) {
+  // Dividing by this is the whole update, so refusing here and refactorising is
+  // cheaper than carrying a factor that is mostly rounding error.
+  constexpr double kMinimumPivot = 1e-11;
+  // Entries this far below the pivot cannot change an answer at double
+  // precision, and keeping them would make every update denser than the one
+  // before it.
+  constexpr double kDropTolerance = 1e-13;
+
+  if (leaving_row < 0 || leaving_row >= form.num_rows) {
+    if (error) *error = "pivot row out of range";
+    return false;
+  }
+  const double pivot_value = pivotal_column[sz(leaving_row)];
+  if (!(std::fabs(pivot_value) > kMinimumPivot)) {
+    if (error) {
+      *error = "pivot element " + std::to_string(pivot_value) +
+               " is too small to update the basis with";
+    }
+    return false;
+  }
+
+  Update update;
+  update.row = leaving_row;
+  update.pivot = pivot_value;
+  const double drop = kDropTolerance * std::fabs(pivot_value);
+  for (Int i = 0; i < form.num_rows; ++i) {
+    if (i == leaving_row) continue;
+    const double v = pivotal_column[sz(i)];
+    if (std::fabs(v) <= drop) continue;
+    update.rows.push_back(i);
+    update.values.push_back(v);
+  }
+
   const Int leaving = basic_[sz(leaving_row)];
   basic_[sz(leaving_row)] = entering;
   status_[sz(entering)] = VarStatus::kBasic;
   status_[sz(leaving)] = leaving_to;
 
-  // No product-form update yet, so every pivot refactorises. That is correct and
-  // slow; the update comes next, and this is the version whose answers the
-  // update will be checked against.
+  growth_ = std::fmax(growth_, 1.0 / std::fabs(pivot_value));
+  updates_list_.push_back(std::move(update));
   ++updates_;
-  if (!lu_.factorize(form.columns, basic_, LuOptions{}, error)) {
-    basic_[sz(leaving_row)] = leaving;
-    status_[sz(leaving)] = VarStatus::kBasic;
-    status_[sz(entering)] = leaving_to;
-    return false;
-  }
   return true;
+}
+
+bool SimplexBasis::pivot(const LogicalForm& form, Int leaving_row, Int entering,
+                         VarStatus leaving_to, std::string* error) {
+  std::vector<double> column;
+  ftran_column(form, entering, &column);
+  return pivot(form, leaving_row, entering, leaving_to, column, error);
 }
 
 }  // namespace sankhya
@@ -385,7 +449,7 @@ SimplexResult solve_simplex(const StandardLp& lp, const SimplexOptions& options)
       continue;
     }
 
-    if (!basis.pivot(form, leaving_row, entering, leaving_to, &error)) {
+    if (!basis.pivot(form, leaving_row, entering, leaving_to, column, &error)) {
       if (!basis.refactorize(form, &error)) {
         status = SimplexStatus::kNumericalError;
         result.message = "basis became singular: " + error;

@@ -14,6 +14,7 @@
 #include "sankhya/pdhg.hpp"
 #include "sankhya/presolve.hpp"
 #include "sankhya/qp.hpp"
+#include "sankhya/simplex.hpp"
 #include "sankhya/standard_form.hpp"
 
 namespace {
@@ -29,6 +30,7 @@ void print_usage() {
       "  sankhya solve <file.mps> [options]    solve an LP with the first-order method\n"
       "  sankhya milp <file.mps> [options]     solve a MILP by branch and bound\n"
       "  sankhya qp <file.qps> [options]       solve a convex QP by ADMM\n"
+      "  sankhya simplex <file.mps> [options]  solve an LP with the primal simplex\n"
       "  sankhya presolve <file.mps> [opts]    reduce a model and report what went\n"
       "                                        and what is left\n"
       "  sankhya backends                      report which backends this build has\n"
@@ -59,6 +61,14 @@ void print_usage() {
       "  --backend=cpu|cuda   force a backend instead of picking automatically\n"
       "  --solution=<path>    write the primal solution so it can be checked\n"
       "                       independently\n");
+}
+
+// "--tol=1e-6" -> 1e-6. Returns false when the argument is not this option at
+// all, so a chain of these reads as a list of alternatives.
+bool value_of(const std::string& arg, const std::string& prefix, double* out) {
+  if (arg.rfind(prefix, 0) != 0) return false;
+  *out = std::strtod(arg.c_str() + prefix.size(), nullptr);
+  return true;
 }
 
 int command_read(const std::vector<std::string>& args) {
@@ -304,6 +314,111 @@ int command_presolve(const std::vector<std::string>& args) {
   return 0;
 }
 
+int command_simplex(const std::vector<std::string>& args) {
+  if (args.empty()) {
+    std::fprintf(stderr, "simplex: expected a file name\n");
+    return 2;
+  }
+  bool as_json = false;
+  bool quiet = false;
+  bool use_presolve = false;
+  sankhya::SimplexOptions options;
+  for (std::size_t i = 1; i < args.size(); ++i) {
+    const std::string& a = args[i];
+    double v = 0.0;
+    if (value_of(a, "--max-iter=", &v)) {
+      options.max_iterations = static_cast<sankhya::Int>(v);
+    } else if (value_of(a, "--time-limit=", &v)) {
+      options.time_limit_seconds = v;
+    } else if (value_of(a, "--refactor=", &v)) {
+      options.refactorization_frequency = static_cast<sankhya::Int>(v);
+    } else if (value_of(a, "--primal-tol=", &v)) {
+      options.primal_tolerance = v;
+    } else if (value_of(a, "--dual-tol=", &v)) {
+      options.dual_tolerance = v;
+    } else if (a == "--presolve") {
+      use_presolve = true;
+    } else if (a == "--verbose") {
+      options.verbose = true;
+    } else if (a == "--format=json") {
+      as_json = true;
+    } else if (a == "--quiet") {
+      quiet = true;
+    } else if (a != "--format=human") {
+      std::fprintf(stderr, "simplex: unknown option \"%s\"\n", a.c_str());
+      return 2;
+    }
+  }
+
+  const sankhya::MpsReadResult read_result = sankhya::read_mps(args[0]);
+  if (!read_result.ok) {
+    std::fprintf(stderr, "error: %s\n", read_result.error.c_str());
+    return 1;
+  }
+  if (read_result.model.has_integers() && !quiet) {
+    std::fprintf(stderr,
+                 "warning: model has integer variables; solving the continuous "
+                 "relaxation\n");
+  }
+
+  sankhya::PresolveResult pre;
+  sankhya::Model solved_model = read_result.model;
+  if (use_presolve) {
+    pre = sankhya::presolve(read_result.model);
+    if (pre.status != sankhya::PresolveStatus::kReduced) {
+      std::printf("status        %s (proved by presolve, without solving)\n",
+                  sankhya::to_string(pre.status).c_str());
+      return 1;
+    }
+    if (!quiet && !as_json) std::fputs(sankhya::format_presolve(pre).c_str(), stdout);
+    solved_model = pre.reduced;
+  }
+
+  const sankhya::StandardFormResult sf = sankhya::to_standard_form(solved_model);
+  if (!sf.ok) {
+    std::fprintf(stderr, "error: %s\n", sf.error.c_str());
+    return 1;
+  }
+
+  sankhya::SimplexResult r = sankhya::solve_simplex(sf.lp, options);
+  if (use_presolve && !r.x.empty()) r.x = pre.postsolve.apply(r.x);
+  const sankhya::ModelViolation checked =
+      sankhya::measure_violation(read_result.model, r.x);
+
+  if (as_json) {
+    std::ostringstream out;
+    out.setf(std::ios::boolalpha);
+    out.precision(17);
+    out << "{\"name\":\"" << read_result.model.name << "\","
+        << "\"status\":\"" << sankhya::to_string(r.status) << "\","
+        << "\"objective\":" << r.objective << ","
+        << "\"iterations\":" << r.iterations << ","
+        << "\"phase_one_iterations\":" << r.phase_one_iterations << ","
+        << "\"refactorizations\":" << r.refactorizations << ","
+        << "\"seconds\":" << r.solve_seconds << ","
+        << "\"presolved\":" << use_presolve << ","
+        << "\"row_violation\":" << checked.row_violation << ","
+        << "\"bound_violation\":" << checked.bound_violation << ","
+        << "\"std_rows\":" << sf.lp.num_rows() << ","
+        << "\"std_cols\":" << sf.lp.num_cols() << "}\n";
+    std::fputs(out.str().c_str(), stdout);
+    return r.status == sankhya::SimplexStatus::kOptimal ? 0 : 1;
+  }
+
+  std::printf(
+      "status        %s%s%s\n"
+      "objective     %.12e\n"
+      "iterations    %d  (%d in phase one)\n"
+      "refactorized  %d times\n"
+      "time          %.3f s\n"
+      "vs original   row %.3e  bound %.3e\n",
+      sankhya::to_string(r.status).c_str(), r.message.empty() ? "" : ": ",
+      r.message.c_str(), r.objective, r.iterations, r.phase_one_iterations,
+      r.refactorizations, r.solve_seconds, checked.row_violation,
+      checked.bound_violation);
+  return r.status == sankhya::SimplexStatus::kOptimal ? 0 : 1;
+}
+
 int command_solve(const std::vector<std::string>& args) {
   bool use_presolve = false;
   sankhya::PresolveOptions presolve_options;
@@ -315,12 +430,6 @@ int command_solve(const std::vector<std::string>& args) {
   bool as_json = false;
   bool quiet = false;
   std::string solution_path;
-
-  auto value_of = [](const std::string& arg, const std::string& prefix, double* out) {
-    if (arg.rfind(prefix, 0) != 0) return false;
-    *out = std::strtod(arg.c_str() + prefix.size(), nullptr);
-    return true;
-  };
 
   for (std::size_t i = 1; i < args.size(); ++i) {
     const std::string& a = args[i];
@@ -534,12 +643,6 @@ int command_milp(const std::vector<std::string>& args) {
   options.relaxation.time_limit_seconds = 30.0;
   bool as_json = false;
 
-  auto value_of = [](const std::string& arg, const std::string& prefix, double* out) {
-    if (arg.rfind(prefix, 0) != 0) return false;
-    *out = std::strtod(arg.c_str() + prefix.size(), nullptr);
-    return true;
-  };
-
   for (std::size_t i = 1; i < args.size(); ++i) {
     const std::string& a = args[i];
     double v = 0.0;
@@ -649,12 +752,6 @@ int command_qp(const std::vector<std::string>& args) {
   }
   sankhya::QpOptions options;
   bool as_json = false;
-
-  auto value_of = [](const std::string& arg, const std::string& prefix, double* out) {
-    if (arg.rfind(prefix, 0) != 0) return false;
-    *out = std::strtod(arg.c_str() + prefix.size(), nullptr);
-    return true;
-  };
 
   for (std::size_t i = 1; i < args.size(); ++i) {
     const std::string& a = args[i];
@@ -785,6 +882,7 @@ int main(int argc, char** argv) {
   if (command == "read") return command_read(rest);
   if (command == "standard") return command_standard(rest);
   if (command == "presolve") return command_presolve(rest);
+  if (command == "simplex") return command_simplex(rest);
   if (command == "solve") return command_solve(rest);
   if (command == "milp") return command_milp(rest);
   if (command == "qp") return command_qp(rest);
