@@ -21,6 +21,7 @@ add_library(sankhya
   src/sankhya/scaling.cpp
   src/sankhya/pdhg.cpp
   src/sankhya/branch_and_bound.cpp
+  src/sankhya/qp.cpp
 )
 target_include_directories(sankhya PUBLIC src)
 

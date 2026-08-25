@@ -10,6 +10,7 @@
 #include "sankhya/mps_reader.hpp"
 #include "sankhya/branch_and_bound.hpp"
 #include "sankhya/pdhg.hpp"
+#include "sankhya/qp.hpp"
 #include "sankhya/standard_form.hpp"
 
 namespace {
@@ -24,6 +25,7 @@ void print_usage() {
       "                                        standard form, printing its shape\n"
       "  sankhya solve <file.mps> [options]    solve an LP with the first-order method\n"
       "  sankhya milp <file.mps> [options]     solve a MILP by branch and bound\n"
+      "  sankhya qp <file.qps> [options]       solve a convex QP by ADMM\n"
       "\n"
       "options:\n"
       "  --neg-up-bound=keep|minus-inf   how to read a negative UP bound with no\n"
@@ -439,6 +441,84 @@ int command_milp(const std::vector<std::string>& args) {
   return r.status == sankhya::MilpStatus::kOptimal ? 0 : 1;
 }
 
+int command_qp(const std::vector<std::string>& args) {
+  if (args.empty()) {
+    std::fprintf(stderr, "qp: expected a file name\n");
+    return 2;
+  }
+  sankhya::QpOptions options;
+  bool as_json = false;
+
+  auto value_of = [](const std::string& arg, const std::string& prefix, double* out) {
+    if (arg.rfind(prefix, 0) != 0) return false;
+    *out = std::strtod(arg.c_str() + prefix.size(), nullptr);
+    return true;
+  };
+
+  for (std::size_t i = 1; i < args.size(); ++i) {
+    const std::string& a = args[i];
+    double v = 0.0;
+    if (value_of(a, "--tol=", &v)) {
+      options.absolute_tolerance = v;
+      options.relative_tolerance = v;
+    } else if (value_of(a, "--max-iter=", &v)) {
+      options.max_iterations = static_cast<sankhya::Int>(v);
+    } else if (value_of(a, "--time-limit=", &v)) {
+      options.time_limit_seconds = v;
+    } else if (value_of(a, "--rho=", &v)) {
+      options.rho = v;
+    } else if (value_of(a, "--cg-iter=", &v)) {
+      options.cg_max_iterations = static_cast<sankhya::Int>(v);
+    } else if (a == "--no-scaling") {
+      options.scaling = false;
+    } else if (a == "--no-adaptive-rho") {
+      options.adaptive_rho = false;
+    } else if (a == "--verbose") {
+      options.verbose = true;
+    } else if (a == "--format=json") {
+      as_json = true;
+    } else if (a != "--quiet" && a != "--format=human") {
+      std::fprintf(stderr, "qp: unknown option \"%s\"\n", a.c_str());
+      return 2;
+    }
+  }
+
+  const sankhya::MpsReadResult read_result = sankhya::read_mps(args[0]);
+  if (!read_result.ok) {
+    std::fprintf(stderr, "error: %s\n", read_result.error.c_str());
+    return 1;
+  }
+  const sankhya::QpResult r = sankhya::solve_qp(read_result.model, options);
+
+  if (as_json) {
+    std::ostringstream out;
+    out.precision(17);
+    out << "{\"name\":\"" << read_result.model.name << "\","
+        << "\"status\":\"" << sankhya::to_string(r.status) << "\","
+        << "\"objective\":" << r.objective << ","
+        << "\"iterations\":" << r.iterations << ","
+        << "\"cg_iterations\":" << r.cg_iterations << ","
+        << "\"rho_updates\":" << r.rho_updates << ","
+        << "\"primal\":" << r.residual.primal << ","
+        << "\"dual\":" << r.residual.dual << ","
+        << "\"seconds\":" << r.solve_seconds << "}\n";
+    std::fputs(out.str().c_str(), stdout);
+    return r.status == sankhya::QpStatus::kOptimal ? 0 : 1;
+  }
+
+  std::printf(
+      "status        %s%s%s\n"
+      "objective     %.12e\n"
+      "iterations    %d ADMM, %d conjugate gradient   (%d rho updates)\n"
+      "residual      primal %.3e / %.3e   dual %.3e / %.3e\n"
+      "time          %.3f s\n",
+      sankhya::to_string(r.status).c_str(), r.message.empty() ? "" : ": ",
+      r.message.c_str(), r.objective, r.iterations, r.cg_iterations, r.rho_updates,
+      r.residual.primal, r.residual.primal_tolerance, r.residual.dual,
+      r.residual.dual_tolerance, r.solve_seconds);
+  return r.status == sankhya::QpStatus::kOptimal ? 0 : 1;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -453,6 +533,7 @@ int main(int argc, char** argv) {
   if (command == "standard") return command_standard(rest);
   if (command == "solve") return command_solve(rest);
   if (command == "milp") return command_milp(rest);
+  if (command == "qp") return command_qp(rest);
 
   std::fprintf(stderr, "unknown command \"%s\"\n", command.c_str());
   print_usage();
