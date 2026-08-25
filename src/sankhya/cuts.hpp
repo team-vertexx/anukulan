@@ -28,6 +28,8 @@ struct Cut {
   std::vector<double> coefficients;
   double rhs = 0.0;
   double violation = 0.0;   // how far the current point is on the wrong side
+  double efficacy = 0.0;    // violation divided by the cut's norm
+  double norm = 0.0;
   const char* family = "";
 };
 
@@ -40,6 +42,17 @@ struct CutOptions {
   double max_dynamic_range = 1e6;
   bool cover_cuts = true;
   bool mir_cuts = true;
+
+  // Cuts are ranked by efficacy - violation divided by the cut's own norm -
+  // rather than by raw violation, which just rewards large coefficients.
+  //
+  // Then a near-parallel cut is dropped in favour of the better one already
+  // selected. Two cuts pointing the same way tighten the relaxation once but
+  // cost two rows in every node below, and a first-order method pays for extra
+  // rows in every single iteration. Dumping every violated cut into the problem
+  // made p0201 go from finding the exact optimum to missing it by 9%.
+  double max_parallelism = 0.9;   // cosine similarity above this is a duplicate
+  Int max_cuts_per_round = 20;
 };
 
 // Separates violated cuts at `x`. Only rows whose integer structure supports a

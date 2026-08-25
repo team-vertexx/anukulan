@@ -8,6 +8,24 @@ namespace {
 
 double fractional_part(double v) { return v - std::floor(v); }
 
+// Column indices are kept sorted so the pairwise cosine below can walk two cuts
+// together instead of building a dense vector for each comparison.
+void sort_by_column(Cut* cut) {
+  std::vector<std::size_t> order(cut->columns.size());
+  for (std::size_t i = 0; i < order.size(); ++i) order[i] = i;
+  std::sort(order.begin(), order.end(), [&](std::size_t a, std::size_t b) {
+    return cut->columns[a] < cut->columns[b];
+  });
+  std::vector<Int> columns(cut->columns.size());
+  std::vector<double> coefficients(cut->coefficients.size());
+  for (std::size_t i = 0; i < order.size(); ++i) {
+    columns[i] = cut->columns[order[i]];
+    coefficients[i] = cut->coefficients[order[i]];
+  }
+  cut->columns.swap(columns);
+  cut->coefficients.swap(coefficients);
+}
+
 // Rejects a cut that is numerically wide, or that has collapsed to nothing.
 bool acceptable(const Cut& cut, const CutOptions& options) {
   if (cut.columns.empty()) return false;
@@ -102,6 +120,7 @@ bool mir_with_scale(const StandardLp& lp, const std::vector<Substitution>& terms
   for (double& c : out->coefficients) c = -c;
   out->rhs = -(cut_rhs + rhs_shift);
   out->family = "mir";
+  sort_by_column(out);
   return acceptable(*out, options);
 }
 
@@ -239,6 +258,7 @@ bool cover_from_row(const StandardLp& lp, const std::vector<bool>& integral,
   }
   out->rhs = rhs;
   out->family = "cover";
+  sort_by_column(out);
   return acceptable(*out, options);
 }
 
@@ -268,11 +288,52 @@ std::vector<Cut> separate_cuts(const StandardLp& lp, const std::vector<bool>& in
     }
   }
 
+  // Score by efficacy, then keep a near-orthogonal subset. This is the standard
+  // selection from the branch-and-cut literature (Wesselmann and Suhl; it is
+  // also what SCIP's default selector does): take the best remaining cut, drop
+  // everything too parallel to it, repeat.
+  for (Cut& cut : cuts) {
+    double norm_squared = 0.0;
+    for (const double c : cut.coefficients) norm_squared += c * c;
+    cut.norm = std::sqrt(norm_squared);
+    cut.efficacy = cut.norm > 1e-12 ? cut.violation / cut.norm : 0.0;
+  }
   std::sort(cuts.begin(), cuts.end(),
-            [](const Cut& a, const Cut& b) { return a.violation > b.violation; });
-  if (static_cast<Int>(cuts.size()) > options.max_cuts)
-    cuts.resize(sz(options.max_cuts));
-  return cuts;
+            [](const Cut& a, const Cut& b) { return a.efficacy > b.efficacy; });
+
+  auto cosine = [](const Cut& a, const Cut& b) {
+    if (a.norm <= 1e-12 || b.norm <= 1e-12) return 0.0;
+    // Sparse dot product over the shared columns.
+    std::size_t ia = 0;
+    std::size_t ib = 0;
+    double dot = 0.0;
+    while (ia < a.columns.size() && ib < b.columns.size()) {
+      if (a.columns[ia] == b.columns[ib]) {
+        dot += a.coefficients[ia] * b.coefficients[ib];
+        ++ia;
+        ++ib;
+      } else if (a.columns[ia] < b.columns[ib]) {
+        ++ia;
+      } else {
+        ++ib;
+      }
+    }
+    return std::fabs(dot) / (a.norm * b.norm);
+  };
+
+  std::vector<Cut> selected;
+  for (const Cut& next : cuts) {
+    if (static_cast<Int>(selected.size()) >= options.max_cuts_per_round) break;
+    bool duplicate = false;
+    for (const Cut& kept : selected) {
+      if (cosine(next, kept) > options.max_parallelism) {
+        duplicate = true;
+        break;
+      }
+    }
+    if (!duplicate) selected.push_back(next);
+  }
+  return selected;
 }
 
 StandardLp append_cuts(const StandardLp& lp, const std::vector<Cut>& cuts) {
