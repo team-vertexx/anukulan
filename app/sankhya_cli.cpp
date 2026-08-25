@@ -39,6 +39,8 @@ void print_usage() {
       "  --time-limit=<s>     wall clock limit in seconds\n"
       "  --no-scaling         turn off Ruiz and Pock-Chambolle preconditioning\n"
       "  --ruiz-only          Ruiz equilibration only, no Pock-Chambolle pass\n"
+      "  --pdlp-termination   drop the infinity-norm criteria and stop on PDLP's\n"
+      "                       2-norm ones alone\n"
       "  --no-adaptive        fixed step size\n"
       "  --no-restarts        no restarting\n"
       "  --no-primal-weight   keep the primal weight at one\n"
@@ -247,6 +249,8 @@ int command_solve(const std::vector<std::string>& args) {
       options.termination_check_frequency = static_cast<sankhya::Int>(v);
     } else if (a.rfind("--solution=", 0) == 0) {
       solution_path = a.substr(std::string("--solution=").size());
+    } else if (a == "--pdlp-termination") {
+      options.require_inf_norm_termination = false;
     } else if (a == "--ruiz-only") {
       options.scaling.pock_chambolle = false;
     } else if (a == "--no-scaling") {
@@ -319,6 +323,8 @@ int command_solve(const std::vector<std::string>& args) {
         << "\"rel_primal\":" << r.residual.relative_primal << ","
         << "\"rel_dual\":" << r.residual.relative_dual << ","
         << "\"rel_gap\":" << r.residual.relative_gap << ","
+        << "\"rel_primal_inf\":" << r.residual.relative_primal_inf << ","
+        << "\"rel_dual_inf\":" << r.residual.relative_dual_inf << ","
         << "\"abs_primal\":" << r.residual.primal_residual_inf << ","
         << "\"abs_dual\":" << r.residual.dual_residual_inf << ","
         << "\"matrix_norm\":" << r.matrix_norm_estimate << ","
@@ -336,12 +342,14 @@ int command_solve(const std::vector<std::string>& args) {
       "iterations    %d  (%d restarts)\n"
       "time          %.3f s\n"
       "relative      primal %.3e  dual %.3e  gap %.3e\n"
+      "rel inf-norm  primal %.3e  dual %.3e\n"
       "worst abs     primal %.3e  dual %.3e\n"
       "||K||         %.6e\n"
       "row spread    %.3e -> %.3e\n",
       sankhya::to_string(r.status).c_str(), r.message.empty() ? "" : ": ",
       r.message.c_str(), r.objective, r.iterations, r.restarts, r.solve_seconds,
       r.residual.relative_primal, r.residual.relative_dual, r.residual.relative_gap,
+      r.residual.relative_primal_inf, r.residual.relative_dual_inf,
       r.residual.primal_residual_inf, r.residual.dual_residual_inf,
       r.matrix_norm_estimate, r.scaling.row_spread_before, r.scaling.row_spread_after);
   return r.status == sankhya::PdhgStatus::kOptimal ? 0 : 1;

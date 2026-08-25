@@ -16,6 +16,12 @@ double dot(const std::vector<double>& a, const std::vector<double>& b) {
 
 double two_norm(const std::vector<double>& v) { return std::sqrt(dot(v, v)); }
 
+double inf_norm(const std::vector<double>& v) {
+  double m = 0.0;
+  for (const double x : v) m = std::fmax(m, std::fabs(x));
+  return m;
+}
+
 // Bound multipliers implied by a dual point: lambda = c - K' y.
 //
 // The dual is feasible when each lambda_j can be absorbed by that variable's
@@ -97,6 +103,8 @@ PdhgResidual evaluate_residual(const StandardLp& lp, const std::vector<double>& 
   // problem whose numbers are large and one whose numbers are small.
   r.relative_primal = r.primal_residual / (1.0 + two_norm(lp.q));
   r.relative_dual = r.dual_residual / (1.0 + two_norm(lp.c));
+  r.relative_primal_inf = r.primal_residual_inf / (1.0 + inf_norm(lp.q));
+  r.relative_dual_inf = r.dual_residual_inf / (1.0 + inf_norm(lp.c));
   r.relative_gap = r.absolute_gap / (1.0 + std::fabs(r.primal_objective) +
                                      std::fabs(r.dual_objective));
   return r;
@@ -240,7 +248,8 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
     result.residual = evaluate_residual(original, result.x, result.y);
     result.objective = original.model_objective(result.x);
     result.status = result.residual.converged(options.tolerance,
-                                             options.absolute_tolerance)
+                                             options.absolute_tolerance,
+                                             options.require_inf_norm_termination)
                         ? PdhgStatus::kOptimal
                         : PdhgStatus::kNumericalError;
     result.message = "no constraint matrix content";
@@ -412,7 +421,8 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
       y = cand_y;
       break;
     }
-    if (r.converged(tolerance, options.absolute_tolerance)) {
+    if (r.converged(tolerance, options.absolute_tolerance,
+                    options.require_inf_norm_termination)) {
       status = PdhgStatus::kOptimal;
       ++iteration;
       x = cand_x;

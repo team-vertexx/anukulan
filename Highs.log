@@ -6034,3 +6034,2684 @@ Objective value     :  2.5462545633e+06
 P-D objective error :  3.5661765521e-15
 HiGHS run time      :         90.55
 Writing the solution to /tmp/highs_ie.sol
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "pdlp"
+Set option time_limit to 180
+Set option kkt_tolerance to 1e-06
+LP afiro has 27 rows; 32 cols; 83 nonzeros
+Coefficient ranges:
+  Matrix  [1e-01, 2e+00]
+  Cost    [3e-01, 1e+01]
+  Bound   [0e+00, 0e+00]
+  RHS     [4e+01, 5e+02]
+Presolving model
+22 rows, 29 cols, 74 nonzeros 0s
+15 rows, 22 cols, 60 nonzeros 0s
+9 rows, 12 cols, 32 nonzeros 0s
+7 rows, 10 cols, 28 nonzeros 0s
+7 rows, 10 cols, 28 nonzeros 0s
+Presolve reductions: rows 7(-20); columns 10(-22); nonzeros 28(-55) 
+Solving the presolved LP
+WARNING: Solution optimality conditions: Before postsolve
+num/max      1 / 2.75e-05 (relative      0 / 5.49e-08) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 /        0 (relative      0 /        0)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 3.73e-14 (relative      0 / 7.45e-17) primal residual errors     (tolerance = 1e-06)
+num/max      0 / 2.96e-08 (relative      0 / 1.28e-08)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 7.85e-08  P-D objective error        (tolerance = 1e-06)
+
+Performed postsolve
+WARNING: Solution optimality conditions
+num/max      3 / 6.68e-05 (relative      0 / 1.33e-07) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 /        0 (relative      0 /        0)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 7.46e-15 (relative      0 / 1.49e-17) primal residual errors     (tolerance = 1e-06)
+num/max      0 / 2.96e-08 (relative      0 / 1.85e-08)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 7.85e-08  P-D objective error        (tolerance = 1e-06)
+
+Model name          : afiro
+Model status        : Optimal
+PDLP      iterations: 320
+Objective value     : -4.6475320583e+02
+P-D objective error :  7.8477584722e-08
+HiGHS run time      :          0.00
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "simplex"
+Set option time_limit to 180
+LP afiro has 27 rows; 32 cols; 83 nonzeros
+Coefficient ranges:
+  Matrix  [1e-01, 2e+00]
+  Cost    [3e-01, 1e+01]
+  Bound   [0e+00, 0e+00]
+  RHS     [4e+01, 5e+02]
+Presolving model
+22 rows, 29 cols, 74 nonzeros 0s
+15 rows, 22 cols, 60 nonzeros 0s
+9 rows, 12 cols, 32 nonzeros 0s
+7 rows, 10 cols, 28 nonzeros 0s
+7 rows, 10 cols, 28 nonzeros 0s
+Presolve reductions: rows 7(-20); columns 10(-22); nonzeros 28(-55) 
+Solving the presolved LP
+Using dual simplex solver
+  Iteration        Objective     Infeasibilities num(sum)
+          0    -1.9599945292e+00 Ph1: 4(4.97637); Du: 2(1.95999) 0.0s
+          6    -4.6475314286e+02 Pr: 0(0) 0.0s
+
+Performed postsolve
+Solving the original LP from the solution after postsolve
+
+Model name          : afiro
+Model status        : Optimal
+Simplex   iterations: 6
+Objective value     : -4.6475314286e+02
+P-D objective error :  0.0000000000e+00
+HiGHS run time      :          0.00
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "pdlp"
+Set option time_limit to 180
+Set option kkt_tolerance to 1e-06
+LP sc50a has 50 rows; 48 cols; 130 nonzeros
+Coefficient ranges:
+  Matrix  [1e-01, 2e+00]
+  Cost    [1e+00, 1e+00]
+  Bound   [0e+00, 0e+00]
+  RHS     [1e+02, 2e+02]
+Presolving model
+38 rows, 37 cols, 105 nonzeros 0s
+27 rows, 26 cols, 84 nonzeros 0s
+20 rows, 19 cols, 78 nonzeros 0s
+17 rows, 16 cols, 78 nonzeros 0s
+17 rows, 16 cols, 78 nonzeros 0s
+Presolve reductions: rows 17(-33); columns 16(-32); nonzeros 78(-52) 
+Solving the presolved LP
+WARNING: Solution optimality conditions: Before postsolve
+num/max      4 / 8.64e-05 (relative      0 / 5.05e-07) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 /        0 (relative      0 /        0)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 5.93e-14 (relative      0 / 3.47e-16) primal residual errors     (tolerance = 1e-06)
+num/max      0 / 2.52e-07 (relative      0 / 2.07e-07)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 2.05e-07  P-D objective error        (tolerance = 1e-06)
+
+Performed postsolve
+WARNING: Solution optimality conditions
+num/max      4 / 8.64e-05 (relative      0 / 5.05e-07) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 /        0 (relative      0 /        0)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 1.42e-14 (relative      0 / 8.31e-17) primal residual errors     (tolerance = 1e-06)
+num/max      0 / 2.52e-07 (relative      0 / 1.26e-07)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 2.05e-07  P-D objective error        (tolerance = 1e-06)
+
+Model name          : sc50a
+Model status        : Optimal
+PDLP      iterations: 480
+Objective value     : -6.4574964320e+01
+P-D objective error :  2.0549108842e-07
+HiGHS run time      :          0.00
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "simplex"
+Set option time_limit to 180
+LP sc50a has 50 rows; 48 cols; 130 nonzeros
+Coefficient ranges:
+  Matrix  [1e-01, 2e+00]
+  Cost    [1e+00, 1e+00]
+  Bound   [0e+00, 0e+00]
+  RHS     [1e+02, 2e+02]
+Presolving model
+38 rows, 37 cols, 105 nonzeros 0s
+27 rows, 26 cols, 84 nonzeros 0s
+20 rows, 19 cols, 78 nonzeros 0s
+17 rows, 16 cols, 78 nonzeros 0s
+17 rows, 16 cols, 78 nonzeros 0s
+Presolve reductions: rows 17(-33); columns 16(-32); nonzeros 78(-52) 
+Solving the presolved LP
+Using dual simplex solver
+  Iteration        Objective     Infeasibilities num(sum)
+          0    -4.3094112416e-01 Ph1: 5(3.3646); Du: 1(0.430941) 0.0s
+         18    -6.4575077059e+01 Pr: 0(0) 0.0s
+
+Performed postsolve
+Solving the original LP from the solution after postsolve
+
+Model name          : sc50a
+Model status        : Optimal
+Simplex   iterations: 18
+Objective value     : -6.4575077059e+01
+P-D objective error :  1.0918815127e-16
+HiGHS run time      :          0.00
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "pdlp"
+Set option time_limit to 180
+Set option kkt_tolerance to 1e-06
+LP adlittle has 56 rows; 97 cols; 383 nonzeros
+Coefficient ranges:
+  Matrix  [1e-03, 6e+01]
+  Cost    [2e+00, 3e+03]
+  Bound   [0e+00, 0e+00]
+  RHS     [2e+00, 2e+03]
+Presolving model
+53 rows, 95 cols, 373 nonzeros 0s
+Dependent equations search running on 14 equations with time limit of 1.80s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1.80s)
+53 rows, 95 cols, 364 nonzeros 0s
+Presolve reductions: rows 53(-3); columns 95(-2); nonzeros 364(-19) 
+Solving the presolved LP
+WARNING: Solution optimality conditions: Before postsolve
+num/max     31 / 0.000421 (relative      0 / 8.14e-07) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 /        0 (relative      0 /        0)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 5.68e-14 (relative      0 /  1.1e-16) primal residual errors     (tolerance = 1e-06)
+num/max     17 /  2.6e-05 (relative      0 / 7.85e-09)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 4.53e-07  P-D objective error        (tolerance = 1e-06)
+
+Performed postsolve
+WARNING: Solution optimality conditions
+num/max     31 /  0.00417 (relative      2 / 1.76e-06) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 /        0 (relative      0 /        0)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 1.01e-14 (relative      0 / 8.23e-18) primal residual errors     (tolerance = 1e-06)
+num/max     17 /  2.6e-05 (relative      0 / 7.85e-09)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 4.53e-07  P-D objective error        (tolerance = 1e-06)
+WARNING: LP solver claims optimality, but with
+WARNING:    num/max      2 / 1.76e-06 relative primal infeasibilities (tolerance = 1e-06)
+Model status is "Optimal" since relative violation of tolerances is no more than     1.76
+
+Model name          : adlittle
+Model status        : Optimal
+PDLP      iterations: 7240
+Objective value     :  2.2549475565e+05
+P-D objective error :  4.5302233757e-07
+HiGHS run time      :          0.02
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "simplex"
+Set option time_limit to 180
+LP adlittle has 56 rows; 97 cols; 383 nonzeros
+Coefficient ranges:
+  Matrix  [1e-03, 6e+01]
+  Cost    [2e+00, 3e+03]
+  Bound   [0e+00, 0e+00]
+  RHS     [2e+00, 2e+03]
+Presolving model
+53 rows, 95 cols, 373 nonzeros 0s
+Dependent equations search running on 14 equations with time limit of 1.80s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1.80s)
+53 rows, 95 cols, 373 nonzeros 0s
+Presolve reductions: rows 53(-3); columns 95(-2); nonzeros 373(-10) 
+Solving the presolved LP
+Using dual simplex solver
+  Iteration        Objective     Infeasibilities num(sum)
+          0    -1.1853884414e+05 Ph1: 24(125.675); Du: 22(118539) 0.0s
+         87     2.2549496316e+05 Pr: 0(0); Du: 0(1.32104e-10) 0.0s
+
+Performed postsolve
+Solving the original LP from the solution after postsolve
+
+Model name          : adlittle
+Model status        : Optimal
+Simplex   iterations: 87
+Objective value     :  2.2549496316e+05
+P-D objective error :  1.2906614638e-16
+HiGHS run time      :          0.00
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "pdlp"
+Set option time_limit to 180
+Set option kkt_tolerance to 1e-06
+LP blend has 74 rows; 83 cols; 491 nonzeros
+Coefficient ranges:
+  Matrix  [3e-03, 7e+01]
+  Cost    [4e-03, 5e+00]
+  Bound   [0e+00, 0e+00]
+  RHS     [3e+00, 3e+01]
+Presolving model
+61 rows, 72 cols, 420 nonzeros 0s
+48 rows, 56 cols, 392 nonzeros 0s
+Dependent equations search running on 18 equations with time limit of 1.80s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1.80s)
+47 rows, 55 cols, 368 nonzeros 0s
+Presolve reductions: rows 47(-27); columns 55(-28); nonzeros 368(-123) 
+Solving the presolved LP
+WARNING: Solution optimality conditions: Before postsolve
+num/max      2 / 7.78e-06 (relative      0 / 3.21e-07) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 / 6.86e-07 (relative      0 / 1.08e-07)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 1.36e-14 (relative      0 /  5.6e-16) primal residual errors     (tolerance = 1e-06)
+num/max      0 / 3.33e-07 (relative      0 / 5.24e-08)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 3.46e-07  P-D objective error        (tolerance = 1e-06)
+
+Performed postsolve
+WARNING: Solution optimality conditions
+num/max      1 / 7.78e-06 (relative      0 / 3.21e-07) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 /        0 (relative      0 /        0)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 7.11e-15 (relative      0 / 2.93e-16) primal residual errors     (tolerance = 1e-06)
+num/max      0 / 3.33e-07 (relative      0 / 5.24e-08)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 1.55e-07  P-D objective error        (tolerance = 1e-06)
+
+Model name          : blend
+Model status        : Optimal
+PDLP      iterations: 1320
+Objective value     : -3.0812166031e+01
+P-D objective error :  1.5454843383e-07
+HiGHS run time      :          0.00
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "simplex"
+Set option time_limit to 180
+LP blend has 74 rows; 83 cols; 491 nonzeros
+Coefficient ranges:
+  Matrix  [3e-03, 7e+01]
+  Cost    [4e-03, 5e+00]
+  Bound   [0e+00, 0e+00]
+  RHS     [3e+00, 3e+01]
+Presolving model
+61 rows, 72 cols, 420 nonzeros 0s
+48 rows, 56 cols, 392 nonzeros 0s
+Dependent equations search running on 18 equations with time limit of 1.80s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1.80s)
+47 rows, 55 cols, 393 nonzeros 0s
+Presolve reductions: rows 47(-27); columns 55(-28); nonzeros 393(-98) 
+Solving the presolved LP
+Using dual simplex solver
+  Iteration        Objective     Infeasibilities num(sum)
+          0    -7.3929829894e+01 Ph1: 41(287.11); Du: 32(73.9298) 0.0s
+         80    -3.0812149846e+01 Pr: 0(0); Du: 0(1.77636e-15) 0.0s
+
+Performed postsolve
+Solving the original LP from the solution after postsolve
+
+Model name          : blend
+Model status        : Optimal
+Simplex   iterations: 80
+Objective value     : -3.0812149846e+01
+P-D objective error :  0.0000000000e+00
+HiGHS run time      :          0.00
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "pdlp"
+Set option time_limit to 180
+Set option kkt_tolerance to 1e-06
+LP share1b has 117 rows; 225 cols; 1151 nonzeros
+Coefficient ranges:
+  Matrix  [1e-01, 1e+03]
+  Cost    [2e-03, 1e+02]
+  Bound   [0e+00, 0e+00]
+  RHS     [1e-04, 3e+03]
+Presolving model
+98 rows, 208 cols, 1094 nonzeros 0s
+Dependent equations search running on 66 equations with time limit of 1.80s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1.80s)
+92 rows, 202 cols, 916 nonzeros 0s
+Presolve reductions: rows 92(-25); columns 202(-23); nonzeros 916(-235) 
+Solving the presolved LP
+WARNING: Solution optimality conditions: Before postsolve
+num/max     62 /    0.153 (relative      1 / 1.24e-06) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 / 6.17e-08 (relative      0 / 5.61e-09)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 2.77e-10 (relative      0 / 2.25e-15) primal residual errors     (tolerance = 1e-06)
+num/max      4 / 2.26e-06 (relative      0 / 2.05e-07)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 9.34e-08  P-D objective error        (tolerance = 1e-06)
+WARNING: LP solver claims optimality, but with
+WARNING:    num/max      1 / 1.24e-06 relative primal infeasibilities (tolerance = 1e-06)
+Model status is "Optimal" since relative violation of tolerances is no more than     1.24
+
+Performed postsolve
+WARNING: Solution optimality conditions
+num/max     63 /    0.153 (relative     13 / 5.23e-05) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 / 6.17e-08 (relative      0 / 5.61e-09)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 1.77e-10 (relative      0 / 6.02e-14) primal residual errors     (tolerance = 1e-06)
+num/max      4 / 2.26e-06 (relative      0 / 2.05e-07)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 9.34e-08  P-D objective error        (tolerance = 1e-06)
+WARNING: LP solver claims optimality, but with
+WARNING:    num/max     13 / 5.23e-05 relative primal infeasibilities (tolerance = 1e-06)
+Model status is "Optimal" since relative violation of tolerances is no more than     52.3
+
+Model name          : share1b
+Model status        : Optimal
+PDLP      iterations: 18480
+Objective value     : -7.6589233418e+04
+P-D objective error :  9.3355639686e-08
+HiGHS run time      :          0.08
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "simplex"
+Set option time_limit to 180
+LP share1b has 117 rows; 225 cols; 1151 nonzeros
+Coefficient ranges:
+  Matrix  [1e-01, 1e+03]
+  Cost    [2e-03, 1e+02]
+  Bound   [0e+00, 0e+00]
+  RHS     [1e-04, 3e+03]
+Presolving model
+98 rows, 208 cols, 1094 nonzeros 0s
+Dependent equations search running on 66 equations with time limit of 1.80s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1.80s)
+92 rows, 202 cols, 1049 nonzeros 0s
+Presolve reductions: rows 92(-25); columns 202(-23); nonzeros 1049(-102) 
+Solving the presolved LP
+Using dual simplex solver
+  Iteration        Objective     Infeasibilities num(sum)
+          0    -6.5999390531e+00 Ph1: 42(96.3641); Du: 6(6.59994) 0.0s
+        160    -7.6589318579e+04 Pr: 0(0) 0.0s
+
+Performed postsolve
+Solving the original LP from the solution after postsolve
+
+Model name          : share1b
+Model status        : Optimal
+Simplex   iterations: 160
+Objective value     : -7.6589318579e+04
+P-D objective error :  5.6999411273e-16
+HiGHS run time      :          0.00
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "pdlp"
+Set option time_limit to 180
+Set option kkt_tolerance to 1e-06
+LP stocfor1 has 117 rows; 111 cols; 447 nonzeros
+Coefficient ranges:
+  Matrix  [6e-02, 3e+02]
+  Cost    [5e-01, 3e+02]
+  Bound   [0e+00, 0e+00]
+  RHS     [1e-01, 6e+01]
+Presolving model
+81 rows, 83 cols, 346 nonzeros 0s
+49 rows, 56 cols, 321 nonzeros 0s
+Dependent equations search running on 8 equations with time limit of 1.80s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1.80s)
+48 rows, 56 cols, 310 nonzeros 0s
+Presolve reductions: rows 48(-69); columns 56(-55); nonzeros 310(-137) 
+Solving the presolved LP
+WARNING: Solution optimality conditions: Before postsolve
+num/max     13 / 1.59e-05 (relative      0 / 2.09e-07) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 /        0 (relative      0 /        0)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 2.38e-12 (relative      0 / 3.14e-14) primal residual errors     (tolerance = 1e-06)
+num/max      5 /  0.00134 (relative      3 / 3.16e-06)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 3.53e-08  P-D objective error        (tolerance = 1e-06)
+WARNING: LP solver claims optimality, but with
+WARNING:    num/max      3 / 3.16e-06 relative   dual residual errors (tolerance = 1e-06)
+Model status is "Optimal" since relative violation of tolerances is no more than     3.16
+
+Performed postsolve
+WARNING: Solution optimality conditions
+num/max     13 / 1.59e-05 (relative      0 / 2.53e-07) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 /        0 (relative      0 /        0)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 4.55e-13 (relative      0 / 7.22e-15) primal residual errors     (tolerance = 1e-06)
+num/max      5 /  0.00134 (relative      3 / 4.49e-06)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 3.53e-08  P-D objective error        (tolerance = 1e-06)
+WARNING: LP solver claims optimality, but with
+WARNING:    num/max      3 / 4.49e-06 relative   dual residual errors (tolerance = 1e-06)
+Model status is "Optimal" since relative violation of tolerances is no more than     4.49
+
+Model name          : stocfor1
+Model status        : Optimal
+PDLP      iterations: 5360
+Objective value     : -4.1131980034e+04
+P-D objective error :  3.5287955350e-08
+HiGHS run time      :          0.01
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "simplex"
+Set option time_limit to 180
+LP stocfor1 has 117 rows; 111 cols; 447 nonzeros
+Coefficient ranges:
+  Matrix  [6e-02, 3e+02]
+  Cost    [5e-01, 3e+02]
+  Bound   [0e+00, 0e+00]
+  RHS     [1e-01, 6e+01]
+Presolving model
+81 rows, 83 cols, 346 nonzeros 0s
+49 rows, 56 cols, 321 nonzeros 0s
+Dependent equations search running on 8 equations with time limit of 1.80s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1.80s)
+48 rows, 56 cols, 319 nonzeros 0s
+Presolve reductions: rows 48(-69); columns 56(-55); nonzeros 319(-128) 
+Solving the presolved LP
+Using dual simplex solver
+  Iteration        Objective     Infeasibilities num(sum)
+          0    -1.7477856586e+03 Ph1: 43(162.904); Du: 31(1747.79) 0.0s
+         53    -4.1131976219e+04 Pr: 0(0) 0.0s
+
+Performed postsolve
+Solving the original LP from the solution after postsolve
+
+Model name          : stocfor1
+Model status        : Optimal
+Simplex   iterations: 53
+Objective value     : -4.1131976219e+04
+P-D objective error :  8.8445412031e-17
+HiGHS run time      :          0.00
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "pdlp"
+Set option time_limit to 180
+Set option kkt_tolerance to 1e-06
+LP sctap1 has 300 rows; 480 cols; 1692 nonzeros
+Coefficient ranges:
+  Matrix  [1e+00, 8e+01]
+  Cost    [1e+00, 8e+01]
+  Bound   [0e+00, 0e+00]
+  RHS     [1e+00, 4e+01]
+Presolving model
+278 rows, 455 cols, 1584 nonzeros 0s
+Dependent equations search running on 113 equations with time limit of 1.80s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1.80s)
+269 rows, 452 cols, 1557 nonzeros 0s
+Presolve reductions: rows 269(-31); columns 452(-28); nonzeros 1557(-135) 
+Solving the presolved LP
+WARNING: Solution optimality conditions: Before postsolve
+num/max      9 / 1.84e-06 (relative      0 / 4.48e-08) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 /        0 (relative      0 /        0)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 2.84e-14 (relative      0 / 6.93e-16) primal residual errors     (tolerance = 1e-06)
+num/max     15 / 0.000109 (relative      1 / 1.34e-06)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 4.33e-08  P-D objective error        (tolerance = 1e-06)
+WARNING: LP solver claims optimality, but with
+WARNING:    num/max      1 / 1.34e-06 relative   dual residual errors (tolerance = 1e-06)
+Model status is "Optimal" since relative violation of tolerances is no more than     1.34
+
+Performed postsolve
+WARNING: Solution optimality conditions
+num/max      9 / 1.84e-06 (relative      0 / 4.48e-08) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 /        0 (relative      0 /        0)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 1.42e-14 (relative      0 / 3.47e-16) primal residual errors     (tolerance = 1e-06)
+num/max     15 / 0.000109 (relative      1 / 1.34e-06)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 4.33e-08  P-D objective error        (tolerance = 1e-06)
+WARNING: LP solver claims optimality, but with
+WARNING:    num/max      1 / 1.34e-06 relative   dual residual errors (tolerance = 1e-06)
+Model status is "Optimal" since relative violation of tolerances is no more than     1.34
+
+Model name          : sctap1
+Model status        : Optimal
+PDLP      iterations: 2200
+Objective value     :  1.4122498305e+03
+P-D objective error :  4.3271711769e-08
+HiGHS run time      :          0.02
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "simplex"
+Set option time_limit to 180
+LP sctap1 has 300 rows; 480 cols; 1692 nonzeros
+Coefficient ranges:
+  Matrix  [1e+00, 8e+01]
+  Cost    [1e+00, 8e+01]
+  Bound   [0e+00, 0e+00]
+  RHS     [1e+00, 4e+01]
+Presolving model
+278 rows, 455 cols, 1584 nonzeros 0s
+Dependent equations search running on 113 equations with time limit of 1.80s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1.80s)
+269 rows, 452 cols, 1557 nonzeros 0s
+Presolve reductions: rows 269(-31); columns 452(-28); nonzeros 1557(-135) 
+Solving the presolved LP
+Using dual simplex solver
+  Iteration        Objective     Infeasibilities num(sum)
+          0     0.0000000000e+00 Pr: 147(859.875) 0.0s
+        323     1.4122500000e+03 Pr: 0(0); Du: 0(1.33227e-13) 0.0s
+
+Performed postsolve
+Solving the original LP from the solution after postsolve
+
+Model name          : sctap1
+Model status        : Optimal
+Simplex   iterations: 323
+Objective value     :  1.4122500000e+03
+P-D objective error :  0.0000000000e+00
+HiGHS run time      :          0.01
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "pdlp"
+Set option time_limit to 180
+Set option kkt_tolerance to 1e-06
+LP scfxm1 has 330 rows; 457 cols; 2589 nonzeros
+Coefficient ranges:
+  Matrix  [5e-04, 1e+02]
+  Cost    [1e+00, 1e+01]
+  Bound   [0e+00, 0e+00]
+  RHS     [8e-01, 2e+03]
+Presolving model
+263 rows, 419 cols, 2261 nonzeros 0s
+Dependent equations search running on 116 equations with time limit of 1.80s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1.80s)
+220 rows, 372 cols, 2150 nonzeros 0s
+Presolve reductions: rows 220(-110); columns 372(-85); nonzeros 2150(-439) 
+Solving the presolved LP
+WARNING: Solution optimality conditions: Before postsolve
+num/max     18 / 0.000248 (relative      0 / 2.07e-07) primal infeasibilities     (tolerance = 1e-06)
+num/max      1 / 1.26e-06 (relative      0 / 1.72e-07)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 6.02e-12 (relative      0 / 5.01e-15) primal residual errors     (tolerance = 1e-06)
+num/max      2 / 3.13e-05 (relative      1 / 4.29e-06)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 5.14e-07  P-D objective error        (tolerance = 1e-06)
+WARNING: LP solver claims optimality, but with
+WARNING:    num/max      1 / 4.29e-06 relative   dual residual errors (tolerance = 1e-06)
+Model status is "Optimal" since relative violation of tolerances is no more than     4.29
+
+Performed postsolve
+WARNING: Solution optimality conditions
+num/max     31 /  0.00162 (relative      2 / 1.35e-06) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 / 4.92e-09 (relative      0 / 2.46e-09)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 5.36e-13 (relative      0 / 4.47e-16) primal residual errors     (tolerance = 1e-06)
+num/max      2 / 3.13e-05 (relative      2 / 1.57e-05)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 5.76e-07  P-D objective error        (tolerance = 1e-06)
+WARNING: LP solver claims optimality, but with
+WARNING:    num/max      2 / 1.35e-06 relative primal infeasibilities (tolerance = 1e-06)
+WARNING:    num/max      2 / 1.57e-05 relative   dual residual errors (tolerance = 1e-06)
+Model status is "Optimal" since relative violation of tolerances is no more than     15.7
+
+Model name          : scfxm1
+Model status        : Optimal
+PDLP      iterations: 12640
+Objective value     :  1.8416781357e+04
+P-D objective error :  5.7550910054e-07
+HiGHS run time      :          0.12
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "simplex"
+Set option time_limit to 180
+LP scfxm1 has 330 rows; 457 cols; 2589 nonzeros
+Coefficient ranges:
+  Matrix  [5e-04, 1e+02]
+  Cost    [1e+00, 1e+01]
+  Bound   [0e+00, 0e+00]
+  RHS     [8e-01, 2e+03]
+Presolving model
+263 rows, 419 cols, 2261 nonzeros 0s
+Dependent equations search running on 120 equations with time limit of 1.80s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1.80s)
+224 rows, 376 cols, 2221 nonzeros 0s
+Presolve reductions: rows 224(-106); columns 376(-81); nonzeros 2221(-368) 
+Solving the presolved LP
+Using dual simplex solver
+  Iteration        Objective     Infeasibilities num(sum)
+          0    -4.2787412252e+01 Ph1: 85(8964.82); Du: 22(42.7874) 0.0s
+        375     1.8416759028e+04 Pr: 0(0) 0.0s
+
+Performed postsolve
+Solving the original LP from the solution after postsolve
+
+Model name          : scfxm1
+Model status        : Optimal
+Simplex   iterations: 375
+Objective value     :  1.8416759028e+04
+P-D objective error :  0.0000000000e+00
+HiGHS run time      :          0.01
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "pdlp"
+Set option time_limit to 180
+Set option kkt_tolerance to 1e-06
+LP bandm has 305 rows; 472 cols; 2494 nonzeros
+Coefficient ranges:
+  Matrix  [1e-03, 2e+02]
+  Cost    [1e-04, 1e+01]
+  Bound   [0e+00, 0e+00]
+  RHS     [1e-01, 7e+01]
+Presolving model
+193 rows, 348 cols, 1698 nonzeros 0s
+Dependent equations search running on 165 equations with time limit of 1.80s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1.80s)
+165 rows, 320 cols, 1458 nonzeros 0s
+Presolve reductions: rows 165(-140); columns 320(-152); nonzeros 1458(-1036) 
+Solving the presolved LP
+WARNING: Solution optimality conditions: Before postsolve
+num/max     75 / 9.15e-05 (relative      0 / 7.97e-08) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 / 3.09e-07 (relative      0 / 4.46e-08)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 2.84e-13 (relative      0 / 2.48e-16) primal residual errors     (tolerance = 1e-06)
+num/max      2 / 1.97e-06 (relative      0 / 2.84e-07)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 3.46e-07  P-D objective error        (tolerance = 1e-06)
+
+Performed postsolve
+WARNING: Solution optimality conditions
+num/max     87 / 9.15e-05 (relative      1 / 1.38e-06) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 / 1.51e-09 (relative      0 / 1.96e-10)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 5.42e-14 (relative      0 / 8.17e-16) primal residual errors     (tolerance = 1e-06)
+num/max      2 / 1.97e-06 (relative      0 / 2.56e-07)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 3.56e-07  P-D objective error        (tolerance = 1e-06)
+WARNING: LP solver claims optimality, but with
+WARNING:    num/max      1 / 1.38e-06 relative primal infeasibilities (tolerance = 1e-06)
+Model status is "Optimal" since relative violation of tolerances is no more than     1.38
+
+Model name          : bandm
+Model status        : Optimal
+PDLP      iterations: 22400
+Objective value     : -1.5862788577e+02
+P-D objective error :  3.5608157356e-07
+HiGHS run time      :          0.16
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "simplex"
+Set option time_limit to 180
+LP bandm has 305 rows; 472 cols; 2494 nonzeros
+Coefficient ranges:
+  Matrix  [1e-03, 2e+02]
+  Cost    [1e-04, 1e+01]
+  Bound   [0e+00, 0e+00]
+  RHS     [1e-01, 7e+01]
+Presolving model
+193 rows, 348 cols, 1698 nonzeros 0s
+Dependent equations search running on 166 equations with time limit of 1.80s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1.80s)
+166 rows, 321 cols, 1563 nonzeros 0s
+Presolve reductions: rows 166(-139); columns 321(-151); nonzeros 1563(-931) 
+Solving the presolved LP
+Using dual simplex solver
+  Iteration        Objective     Infeasibilities num(sum)
+          0    -1.8845862057e+02 Ph1: 115(519.13); Du: 66(188.459) 0.0s
+        382    -1.5862801845e+02 Pr: 0(0) 0.0s
+
+Performed postsolve
+Solving the original LP from the solution after postsolve
+
+Model name          : bandm
+Model status        : Optimal
+Simplex   iterations: 382
+Objective value     : -1.5862801845e+02
+P-D objective error :  3.5721816569e-16
+HiGHS run time      :          0.01
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "pdlp"
+Set option time_limit to 180
+Set option kkt_tolerance to 1e-06
+LP degen2 has 444 rows; 534 cols; 3978 nonzeros
+Coefficient ranges:
+  Matrix  [1e+00, 1e+00]
+  Cost    [1e-02, 5e+01]
+  Bound   [0e+00, 0e+00]
+  RHS     [1e+00, 4e+01]
+Presolving model
+381 rows, 473 cols, 3850 nonzeros 0s
+Dependent equations search running on 160 equations with time limit of 1.80s
+Dependent equations search removed 2 rows and 54 nonzeros in 0.00s (limit = 1.80s)
+376 rows, 471 cols, 3773 nonzeros 0s
+Presolve reductions: rows 376(-68); columns 471(-63); nonzeros 3773(-205) 
+Solving the presolved LP
+WARNING: Solution optimality conditions: Before postsolve
+num/max     22 / 9.79e-06 (relative      0 / 4.26e-07) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 / 5.91e-07 (relative      0 / 1.22e-08)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 3.55e-15 (relative      0 / 1.54e-16) primal residual errors     (tolerance = 1e-06)
+num/max      2 / 1.02e-06 (relative      0 /  2.1e-08)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 4.39e-08  P-D objective error        (tolerance = 1e-06)
+
+Performed postsolve
+WARNING: Solution optimality conditions
+num/max     23 / 1.01e-05 (relative      0 /  2.6e-07) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 /        0 (relative      0 /        0)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 /        0 (relative      0 /        0) primal residual errors     (tolerance = 1e-06)
+num/max      2 / 1.02e-06 (relative      0 /  2.1e-08)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 4.35e-08  P-D objective error        (tolerance = 1e-06)
+
+Model name          : degen2
+Model status        : Optimal
+PDLP      iterations: 3040
+Objective value     : -1.4351781288e+03
+P-D objective error :  4.3463999496e-08
+HiGHS run time      :          0.05
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "simplex"
+Set option time_limit to 180
+LP degen2 has 444 rows; 534 cols; 3978 nonzeros
+Coefficient ranges:
+  Matrix  [1e+00, 1e+00]
+  Cost    [1e-02, 5e+01]
+  Bound   [0e+00, 0e+00]
+  RHS     [1e+00, 4e+01]
+Presolving model
+381 rows, 473 cols, 3850 nonzeros 0s
+Dependent equations search running on 160 equations with time limit of 1.80s
+Dependent equations search removed 2 rows and 54 nonzeros in 0.00s (limit = 1.80s)
+378 rows, 473 cols, 3793 nonzeros 0s
+Presolve reductions: rows 378(-66); columns 473(-61); nonzeros 3793(-185) 
+Solving the presolved LP
+Using dual simplex solver
+  Iteration        Objective     Infeasibilities num(sum)
+          0    -2.3126389875e+03 Ph1: 240(639); Du: 315(2312.64) 0.0s
+        458    -1.4351780000e+03 Pr: 0(0) 0.0s
+
+Performed postsolve
+Solving the original LP from the solution after postsolve
+
+Model name          : degen2
+Model status        : Optimal
+Simplex   iterations: 458
+Objective value     : -1.4351780000e+03
+P-D objective error :  3.9593431717e-16
+HiGHS run time      :          0.01
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "pdlp"
+Set option time_limit to 180
+Set option kkt_tolerance to 1e-06
+LP fit1p has 627 rows; 1677 cols; 9868 nonzeros
+Coefficient ranges:
+  Matrix  [1e-02, 2e+03]
+  Cost    [1e+00, 3e+00]
+  Bound   [8e+01, 1e+03]
+  RHS     [1e+01, 2e+02]
+Presolving model
+627 rows, 1677 cols, 9868 nonzeros 0s
+Dependent equations search running on 627 equations with time limit of 1.80s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1.80s)
+627 rows, 1677 cols, 9868 nonzeros 0s
+Presolve reductions: rows 627(-0); columns 1677(-0); nonzeros 9868(-0) - Not reduced
+Problem not reduced by presolve: solving the LP
+WARNING: Solution optimality conditions
+num/max     12 / 3.01e-05 (relative      0 / 1.39e-07) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 /    1e-08 (relative      0 /  2.5e-09)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 8.53e-14 (relative      0 / 3.93e-16) primal residual errors     (tolerance = 1e-06)
+num/max      4 /    1e-05 (relative      2 /  2.5e-06)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 5.33e-09  P-D objective error        (tolerance = 1e-06)
+WARNING: LP solver claims optimality, but with
+WARNING:    num/max      2 /  2.5e-06 relative   dual residual errors (tolerance = 1e-06)
+Model status is "Optimal" since relative violation of tolerances is no more than      2.5
+
+Model name          : fit1p
+Model status        : Optimal
+PDLP      iterations: 28680
+Objective value     :  9.1463780214e+03
+P-D objective error :  5.3267624846e-09
+HiGHS run time      :          1.15
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "simplex"
+Set option time_limit to 180
+LP fit1p has 627 rows; 1677 cols; 9868 nonzeros
+Coefficient ranges:
+  Matrix  [1e-02, 2e+03]
+  Cost    [1e+00, 3e+00]
+  Bound   [8e+01, 1e+03]
+  RHS     [1e+01, 2e+02]
+Presolving model
+627 rows, 1677 cols, 9868 nonzeros 0s
+Dependent equations search running on 627 equations with time limit of 1.80s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1.80s)
+627 rows, 1677 cols, 9868 nonzeros 0s
+Presolve reductions: rows 627(-0); columns 1677(-0); nonzeros 9868(-0) - Not reduced
+Problem not reduced by presolve: solving the LP
+Using dual simplex solver
+  Iteration        Objective     Infeasibilities num(sum)
+          0     0.0000000000e+00 Pr: 627(19524.1) 0.0s
+        860     9.1463780924e+03 Pr: 0(0) 0.0s
+
+Model name          : fit1p
+Model status        : Optimal
+Simplex   iterations: 860
+Objective value     :  9.1463780924e+03
+P-D objective error :  3.9772901424e-16
+HiGHS run time      :          0.05
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "pdlp"
+Set option time_limit to 180
+Set option kkt_tolerance to 1e-06
+LP 25fv47 has 821 rows; 1571 cols; 10400 nonzeros
+Coefficient ranges:
+  Matrix  [2e-04, 2e+02]
+  Cost    [1e-03, 1e+02]
+  Bound   [0e+00, 0e+00]
+  RHS     [2e-01, 2e+03]
+Presolving model
+723 rows, 1490 cols, 10097 nonzeros 0s
+Dependent equations search running on 384 equations with time limit of 1.80s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1.80s)
+666 rows, 1434 cols, 9659 nonzeros 0s
+Presolve reductions: rows 666(-155); columns 1434(-137); nonzeros 9659(-741) 
+Solving the presolved LP
+WARNING: Solution optimality conditions: Before postsolve
+num/max    392 /  0.00302 (relative      2 / 1.53e-06) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 / 4.76e-08 (relative      0 / 2.14e-09)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 1.07e-12 (relative      0 /  5.4e-16) primal residual errors     (tolerance = 1e-06)
+num/max     66 / 7.58e-05 (relative      4 / 3.41e-06)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 4.23e-07  P-D objective error        (tolerance = 1e-06)
+WARNING: LP solver claims optimality, but with
+WARNING:    num/max      2 / 1.53e-06 relative primal infeasibilities (tolerance = 1e-06)
+WARNING:    num/max      4 / 3.41e-06 relative   dual residual errors (tolerance = 1e-06)
+Model status is "Optimal" since relative violation of tolerances is no more than     3.41
+
+Performed postsolve
+WARNING: Solution optimality conditions
+num/max    399 /  0.00302 (relative      3 / 1.53e-06) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 / 3.59e-08 (relative      0 / 1.64e-09)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 4.55e-13 (relative      0 /  2.3e-16) primal residual errors     (tolerance = 1e-06)
+num/max     66 / 7.58e-05 (relative      4 / 3.47e-06)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 4.23e-07  P-D objective error        (tolerance = 1e-06)
+WARNING: LP solver claims optimality, but with
+WARNING:    num/max      3 / 1.53e-06 relative primal infeasibilities (tolerance = 1e-06)
+WARNING:    num/max      4 / 3.47e-06 relative   dual residual errors (tolerance = 1e-06)
+Model status is "Optimal" since relative violation of tolerances is no more than     3.47
+
+Model name          : 25fv47
+Model status        : Optimal
+PDLP      iterations: 48840
+Objective value     :  5.5018392650e+03
+P-D objective error :  4.2324372393e-07
+HiGHS run time      :          1.71
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "simplex"
+Set option time_limit to 180
+LP 25fv47 has 821 rows; 1571 cols; 10400 nonzeros
+Coefficient ranges:
+  Matrix  [2e-04, 2e+02]
+  Cost    [1e-03, 1e+02]
+  Bound   [0e+00, 0e+00]
+  RHS     [2e-01, 2e+03]
+Presolving model
+723 rows, 1490 cols, 10097 nonzeros 0s
+Dependent equations search running on 389 equations with time limit of 1.80s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1.80s)
+673 rows, 1439 cols, 9926 nonzeros 0s
+Presolve reductions: rows 673(-148); columns 1439(-132); nonzeros 9926(-474) 
+Solving the presolved LP
+Using dual simplex solver
+  Iteration        Objective     Infeasibilities num(sum)
+          0    -1.1311156094e+02 Ph1: 95(426.55); Du: 36(113.112) 0.0s
+       2583     5.5018458883e+03 Pr: 0(0); Du: 0(3.86029e-14) 0.2s
+       2583     5.5018458883e+03 Pr: 0(0); Du: 0(3.86029e-14) 0.2s
+
+Performed postsolve
+Solving the original LP from the solution after postsolve
+
+Model name          : 25fv47
+Model status        : Optimal
+Simplex   iterations: 2583
+Objective value     :  5.5018458883e+03
+P-D objective error :  3.3058434356e-16
+HiGHS run time      :          0.15
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "pdlp"
+Set option time_limit to 180
+Set option kkt_tolerance to 1e-06
+LP woodw has 1098 rows; 8405 cols; 37474 nonzeros
+Coefficient ranges:
+  Matrix  [1e-02, 1e+03]
+  Cost    [1e+00, 1e+00]
+  Bound   [0e+00, 0e+00]
+  RHS     [1e-02, 8e-01]
+Presolving model
+703 rows, 5347 cols, 19727 nonzeros 0s
+557 rows, 4137 cols, 15865 nonzeros 0s
+Dependent equations search running on 545 equations with time limit of 1.80s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1.80s)
+557 rows, 4083 cols, 15797 nonzeros 0s
+Presolve reductions: rows 557(-541); columns 4083(-4322); nonzeros 15797(-21677) 
+Solving the presolved LP
+WARNING: Solution optimality conditions: Before postsolve
+num/max    183 / 6.11e-05 (relative      2 / 1.19e-06) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 / 6.41e-10 (relative      0 / 2.45e-10)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 8.98e-14 (relative      0 / 1.75e-15) primal residual errors     (tolerance = 1e-06)
+num/max     11 / 1.66e-05 (relative      5 / 6.32e-06)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 1.86e-08  P-D objective error        (tolerance = 1e-06)
+WARNING: LP solver claims optimality, but with
+WARNING:    num/max      2 / 1.19e-06 relative primal infeasibilities (tolerance = 1e-06)
+WARNING:    num/max      5 / 6.32e-06 relative   dual residual errors (tolerance = 1e-06)
+Model status is "Optimal" since relative violation of tolerances is no more than     6.32
+
+Performed postsolve
+WARNING: Solution optimality conditions
+num/max    183 / 6.11e-05 (relative     84 / 3.94e-05) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 / 3.24e-08 (relative      0 / 1.62e-08)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 1.71e-14 (relative      0 /  1.1e-14) primal residual errors     (tolerance = 1e-06)
+num/max     11 / 1.66e-05 (relative      6 / 8.28e-06)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 1.86e-08  P-D objective error        (tolerance = 1e-06)
+WARNING: LP solver claims optimality, but with
+WARNING:    num/max     84 / 3.94e-05 relative primal infeasibilities (tolerance = 1e-06)
+WARNING:    num/max      6 / 8.28e-06 relative   dual residual errors (tolerance = 1e-06)
+Model status is "Optimal" since relative violation of tolerances is no more than     39.4
+
+Model name          : woodw
+Model status        : Optimal
+PDLP      iterations: 11600
+Objective value     :  1.3044760119e+00
+P-D objective error :  1.8598699313e-08
+HiGHS run time      :          0.98
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "simplex"
+Set option time_limit to 180
+LP woodw has 1098 rows; 8405 cols; 37474 nonzeros
+Coefficient ranges:
+  Matrix  [1e-02, 1e+03]
+  Cost    [1e+00, 1e+00]
+  Bound   [0e+00, 0e+00]
+  RHS     [1e-02, 8e-01]
+Presolving model
+703 rows, 5347 cols, 19727 nonzeros 0s
+557 rows, 4137 cols, 15865 nonzeros 0s
+Dependent equations search running on 545 equations with time limit of 1.80s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1.80s)
+557 rows, 4083 cols, 15811 nonzeros 0s
+Presolve reductions: rows 557(-541); columns 4083(-4322); nonzeros 15811(-21663) 
+Solving the presolved LP
+Using dual simplex solver
+  Iteration        Objective     Infeasibilities num(sum)
+          0     0.0000000000e+00 Pr: 81(3.02105) 0.0s
+        793     1.3044763331e+00 Pr: 0(0) 0.1s
+
+Performed postsolve
+Solving the original LP from the solution after postsolve
+
+Model name          : woodw
+Model status        : Optimal
+Simplex   iterations: 793
+Objective value     :  1.3044763331e+00
+P-D objective error :  0.0000000000e+00
+HiGHS run time      :          0.07
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "pdlp"
+Set option time_limit to 180
+Set option kkt_tolerance to 1e-06
+LP degen3 has 1503 rows; 1818 cols; 24646 nonzeros
+Coefficient ranges:
+  Matrix  [1e+00, 1e+00]
+  Cost    [1e-02, 2e+01]
+  Bound   [0e+00, 0e+00]
+  RHS     [1e+00, 5e+01]
+Presolving model
+1412 rows, 1727 cols, 24464 nonzeros 0s
+Dependent equations search running on 621 equations with time limit of 1.80s
+Dependent equations search removed 2 rows and 298 nonzeros in 0.00s (limit = 1.80s)
+1399 rows, 1720 cols, 23619 nonzeros 0s
+Presolve reductions: rows 1399(-104); columns 1720(-98); nonzeros 23619(-1027) 
+Solving the presolved LP
+WARNING: Solution optimality conditions: Before postsolve
+num/max    119 / 5.89e-05 (relative      3 / 1.25e-06) primal infeasibilities     (tolerance = 1e-06)
+num/max      7 / 1.52e-05 (relative      1 / 1.21e-06)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 2.13e-14 (relative      0 / 4.54e-16) primal residual errors     (tolerance = 1e-06)
+num/max     38 / 2.35e-05 (relative     11 / 1.88e-06)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 3.03e-07  P-D objective error        (tolerance = 1e-06)
+WARNING: LP solver claims optimality, but with
+WARNING:    num/max      3 / 1.25e-06 relative primal infeasibilities (tolerance = 1e-06)
+WARNING:    num/max      1 / 1.21e-06 relative   dual infeasibilities (tolerance = 1e-06)
+WARNING:    num/max     11 / 1.88e-06 relative   dual residual errors (tolerance = 1e-06)
+Model status is "Optimal" since relative violation of tolerances is no more than     1.88
+
+Performed postsolve
+WARNING: Solution optimality conditions
+num/max    122 / 0.000204 (relative      5 / 4.25e-06) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 /        0 (relative      0 /        0)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 /        0 (relative      0 /        0) primal residual errors     (tolerance = 1e-06)
+num/max     38 / 2.35e-05 (relative      2 /  1.2e-06)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 3.33e-07  P-D objective error        (tolerance = 1e-06)
+WARNING: LP solver claims optimality, but with
+WARNING:    num/max      5 / 4.25e-06 relative primal infeasibilities (tolerance = 1e-06)
+WARNING:    num/max      2 /  1.2e-06 relative   dual residual errors (tolerance = 1e-06)
+Model status is "Optimal" since relative violation of tolerances is no more than     4.25
+
+Model name          : degen3
+Model status        : Optimal
+PDLP      iterations: 20000
+Objective value     : -9.8729342174e+02
+P-D objective error :  3.3325651008e-07
+HiGHS run time      :          1.24
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "simplex"
+Set option time_limit to 180
+LP degen3 has 1503 rows; 1818 cols; 24646 nonzeros
+Coefficient ranges:
+  Matrix  [1e+00, 1e+00]
+  Cost    [1e-02, 2e+01]
+  Bound   [0e+00, 0e+00]
+  RHS     [1e+00, 5e+01]
+Presolving model
+1412 rows, 1727 cols, 24464 nonzeros 0s
+Dependent equations search running on 621 equations with time limit of 1.80s
+Dependent equations search removed 2 rows and 335 nonzeros in 0.00s (limit = 1.80s)
+1405 rows, 1722 cols, 24139 nonzeros 0s
+Presolve reductions: rows 1405(-98); columns 1722(-96); nonzeros 24139(-507) 
+Solving the presolved LP
+Using dual simplex solver
+  Iteration        Objective     Infeasibilities num(sum)
+          0    -2.3914600946e+03 Ph1: 910(3337); Du: 1093(2391.46) 0.0s
+       2159    -9.8729400000e+02 Pr: 0(0); Du: 0(1.2013e-13) 0.2s
+
+Performed postsolve
+Solving the original LP from the solution after postsolve
+
+Model name          : degen3
+Model status        : Optimal
+Simplex   iterations: 2159
+Objective value     : -9.8729400000e+02
+P-D objective error :  6.9054987814e-16
+HiGHS run time      :          0.18
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "pdlp"
+Set option time_limit to 180
+Set option kkt_tolerance to 1e-06
+LP stocfor2 has 2157 rows; 2031 cols; 8343 nonzeros
+Coefficient ranges:
+  Matrix  [2e-01, 3e+02]
+  Cost    [5e-04, 3e+01]
+  Bound   [0e+00, 0e+00]
+  RHS     [1e-01, 6e+01]
+Presolving model
+1800 rows, 1686 cols, 7016 nonzeros 0s
+1196 rows, 1115 cols, 5897 nonzeros 0s
+Dependent equations search running on 85 equations with time limit of 1.80s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1.80s)
+1049 rows, 973 cols, 6230 nonzeros 0s
+Presolve reductions: rows 1049(-1108); columns 973(-1058); nonzeros 6230(-2113) 
+Solving the presolved LP
+WARNING: Solution optimality conditions: Before postsolve
+num/max     63 / 0.000134 (relative      2 / 1.46e-06) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 /        0 (relative      0 /        0)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 2.61e-12 (relative      0 / 2.84e-14) primal residual errors     (tolerance = 1e-06)
+num/max    102 / 0.000184 (relative      0 /    6e-07)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 1.93e-08  P-D objective error        (tolerance = 1e-06)
+WARNING: LP solver claims optimality, but with
+WARNING:    num/max      2 / 1.46e-06 relative primal infeasibilities (tolerance = 1e-06)
+Model status is "Optimal" since relative violation of tolerances is no more than     1.46
+
+Performed postsolve
+WARNING: Solution optimality conditions
+num/max     66 / 0.000134 (relative      3 / 2.13e-06) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 /        0 (relative      0 /        0)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 4.55e-13 (relative      0 / 7.22e-15) primal residual errors     (tolerance = 1e-06)
+num/max    102 / 0.000184 (relative     32 / 5.53e-06)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 1.93e-08  P-D objective error        (tolerance = 1e-06)
+WARNING: LP solver claims optimality, but with
+WARNING:    num/max      3 / 2.13e-06 relative primal infeasibilities (tolerance = 1e-06)
+WARNING:    num/max     32 / 5.53e-06 relative   dual residual errors (tolerance = 1e-06)
+Model status is "Optimal" since relative violation of tolerances is no more than     5.53
+
+Model name          : stocfor2
+Model status        : Optimal
+PDLP      iterations: 29360
+Objective value     : -3.9024409817e+04
+P-D objective error :  1.9316174970e-08
+HiGHS run time      :          1.31
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "simplex"
+Set option time_limit to 180
+LP stocfor2 has 2157 rows; 2031 cols; 8343 nonzeros
+Coefficient ranges:
+  Matrix  [2e-01, 3e+02]
+  Cost    [5e-04, 3e+01]
+  Bound   [0e+00, 0e+00]
+  RHS     [1e-01, 6e+01]
+Presolving model
+1800 rows, 1686 cols, 7016 nonzeros 0s
+1196 rows, 1115 cols, 5897 nonzeros 0s
+Dependent equations search running on 88 equations with time limit of 1.80s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1.80s)
+1052 rows, 976 cols, 6285 nonzeros 0s
+Presolve reductions: rows 1052(-1105); columns 976(-1055); nonzeros 6285(-2058) 
+Solving the presolved LP
+Using dual simplex solver
+  Iteration        Objective     Infeasibilities num(sum)
+          0    -3.9541086266e+02 Ph1: 724(3684.57); Du: 353(395.411) 0.0s
+        820    -3.9024408538e+04 Pr: 0(0) 0.0s
+
+Performed postsolve
+Solving the original LP from the solution after postsolve
+
+Model name          : stocfor2
+Model status        : Optimal
+Simplex   iterations: 820
+Objective value     : -3.9024408538e+04
+P-D objective error :  1.0254416571e-15
+HiGHS run time      :          0.03
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "pdlp"
+Set option time_limit to 180
+Set option kkt_tolerance to 1e-06
+LP greenbea has 2392 rows; 5405 cols; 30877 nonzeros
+Coefficient ranges:
+  Matrix  [6e-05, 1e+02]
+  Cost    [6e-02, 1e+02]
+  Bound   [1e+00, 1e+04]
+  RHS     [0e+00, 0e+00]
+Presolving model
+1790 rows, 4292 cols, 26165 nonzeros 0s
+1047 rows, 3218 cols, 24875 nonzeros 0s
+Dependent equations search running on 778 equations with time limit of 1.80s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1.80s)
+945 rows, 2983 cols, 23015 nonzeros 0s
+Presolve reductions: rows 945(-1447); columns 2983(-2422); nonzeros 23015(-7862) 
+Solving the presolved LP
+Model name          : greenbea
+Model status        : Time limit reached
+PDLP      iterations: 2395352
+Objective value     :  0.0000000000e+00
+HiGHS run time      :        180.87
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "simplex"
+Set option time_limit to 180
+LP greenbea has 2392 rows; 5405 cols; 30877 nonzeros
+Coefficient ranges:
+  Matrix  [6e-05, 1e+02]
+  Cost    [6e-02, 1e+02]
+  Bound   [1e+00, 1e+04]
+  RHS     [0e+00, 0e+00]
+Presolving model
+1790 rows, 4292 cols, 26165 nonzeros 0s
+1047 rows, 3218 cols, 24875 nonzeros 0s
+Dependent equations search running on 784 equations with time limit of 1.80s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1.80s)
+951 rows, 2989 cols, 23458 nonzeros 0s
+Presolve reductions: rows 951(-1441); columns 2989(-2416); nonzeros 23458(-7419) 
+Solving the presolved LP
+Using dual simplex solver
+  Iteration        Objective     Infeasibilities num(sum)
+          0    -1.0489204210e+02 Ph1: 36(8468.18); Du: 9(104.892) 0.0s
+       2530    -7.2555248130e+07 Pr: 0(0); Du: 0(1.35097e-09) 0.2s
+       2530    -7.2555248130e+07 Pr: 0(0); Du: 0(1.35097e-09) 0.2s
+
+Performed postsolve
+Solving the original LP from the solution after postsolve
+
+Model name          : greenbea
+Model status        : Optimal
+Simplex   iterations: 2530
+Objective value     : -7.2555248130e+07
+P-D objective error :  3.0806512572e-16
+HiGHS run time      :          0.24
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "pdlp"
+Set option time_limit to 120
+Set option kkt_tolerance to 1e-06
+LP afiro has 27 rows; 32 cols; 83 nonzeros
+Coefficient ranges:
+  Matrix  [1e-01, 2e+00]
+  Cost    [3e-01, 1e+01]
+  Bound   [0e+00, 0e+00]
+  RHS     [4e+01, 5e+02]
+Presolving model
+22 rows, 29 cols, 74 nonzeros 0s
+15 rows, 22 cols, 60 nonzeros 0s
+9 rows, 12 cols, 32 nonzeros 0s
+7 rows, 10 cols, 28 nonzeros 0s
+7 rows, 10 cols, 28 nonzeros 0s
+Presolve reductions: rows 7(-20); columns 10(-22); nonzeros 28(-55) 
+Solving the presolved LP
+WARNING: Solution optimality conditions: Before postsolve
+num/max      1 / 2.75e-05 (relative      0 / 5.49e-08) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 /        0 (relative      0 /        0)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 3.73e-14 (relative      0 / 7.45e-17) primal residual errors     (tolerance = 1e-06)
+num/max      0 / 2.96e-08 (relative      0 / 1.28e-08)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 7.85e-08  P-D objective error        (tolerance = 1e-06)
+
+Performed postsolve
+WARNING: Solution optimality conditions
+num/max      3 / 6.68e-05 (relative      0 / 1.33e-07) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 /        0 (relative      0 /        0)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 7.46e-15 (relative      0 / 1.49e-17) primal residual errors     (tolerance = 1e-06)
+num/max      0 / 2.96e-08 (relative      0 / 1.85e-08)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 7.85e-08  P-D objective error        (tolerance = 1e-06)
+
+Model name          : afiro
+Model status        : Optimal
+PDLP      iterations: 320
+Objective value     : -4.6475320583e+02
+P-D objective error :  7.8477584722e-08
+HiGHS run time      :          0.00
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "simplex"
+Set option time_limit to 120
+LP afiro has 27 rows; 32 cols; 83 nonzeros
+Coefficient ranges:
+  Matrix  [1e-01, 2e+00]
+  Cost    [3e-01, 1e+01]
+  Bound   [0e+00, 0e+00]
+  RHS     [4e+01, 5e+02]
+Presolving model
+22 rows, 29 cols, 74 nonzeros 0s
+15 rows, 22 cols, 60 nonzeros 0s
+9 rows, 12 cols, 32 nonzeros 0s
+7 rows, 10 cols, 28 nonzeros 0s
+7 rows, 10 cols, 28 nonzeros 0s
+Presolve reductions: rows 7(-20); columns 10(-22); nonzeros 28(-55) 
+Solving the presolved LP
+Using dual simplex solver
+  Iteration        Objective     Infeasibilities num(sum)
+          0    -1.9599945292e+00 Ph1: 4(4.97637); Du: 2(1.95999) 0.0s
+          6    -4.6475314286e+02 Pr: 0(0) 0.0s
+
+Performed postsolve
+Solving the original LP from the solution after postsolve
+
+Model name          : afiro
+Model status        : Optimal
+Simplex   iterations: 6
+Objective value     : -4.6475314286e+02
+P-D objective error :  0.0000000000e+00
+HiGHS run time      :          0.00
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "pdlp"
+Set option time_limit to 120
+Set option kkt_tolerance to 1e-06
+LP sc50a has 50 rows; 48 cols; 130 nonzeros
+Coefficient ranges:
+  Matrix  [1e-01, 2e+00]
+  Cost    [1e+00, 1e+00]
+  Bound   [0e+00, 0e+00]
+  RHS     [1e+02, 2e+02]
+Presolving model
+38 rows, 37 cols, 105 nonzeros 0s
+27 rows, 26 cols, 84 nonzeros 0s
+20 rows, 19 cols, 78 nonzeros 0s
+17 rows, 16 cols, 78 nonzeros 0s
+17 rows, 16 cols, 78 nonzeros 0s
+Presolve reductions: rows 17(-33); columns 16(-32); nonzeros 78(-52) 
+Solving the presolved LP
+WARNING: Solution optimality conditions: Before postsolve
+num/max      4 / 8.64e-05 (relative      0 / 5.05e-07) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 /        0 (relative      0 /        0)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 5.93e-14 (relative      0 / 3.47e-16) primal residual errors     (tolerance = 1e-06)
+num/max      0 / 2.52e-07 (relative      0 / 2.07e-07)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 2.05e-07  P-D objective error        (tolerance = 1e-06)
+
+Performed postsolve
+WARNING: Solution optimality conditions
+num/max      4 / 8.64e-05 (relative      0 / 5.05e-07) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 /        0 (relative      0 /        0)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 1.42e-14 (relative      0 / 8.31e-17) primal residual errors     (tolerance = 1e-06)
+num/max      0 / 2.52e-07 (relative      0 / 1.26e-07)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 2.05e-07  P-D objective error        (tolerance = 1e-06)
+
+Model name          : sc50a
+Model status        : Optimal
+PDLP      iterations: 480
+Objective value     : -6.4574964320e+01
+P-D objective error :  2.0549108842e-07
+HiGHS run time      :          0.00
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "simplex"
+Set option time_limit to 120
+LP sc50a has 50 rows; 48 cols; 130 nonzeros
+Coefficient ranges:
+  Matrix  [1e-01, 2e+00]
+  Cost    [1e+00, 1e+00]
+  Bound   [0e+00, 0e+00]
+  RHS     [1e+02, 2e+02]
+Presolving model
+38 rows, 37 cols, 105 nonzeros 0s
+27 rows, 26 cols, 84 nonzeros 0s
+20 rows, 19 cols, 78 nonzeros 0s
+17 rows, 16 cols, 78 nonzeros 0s
+17 rows, 16 cols, 78 nonzeros 0s
+Presolve reductions: rows 17(-33); columns 16(-32); nonzeros 78(-52) 
+Solving the presolved LP
+Using dual simplex solver
+  Iteration        Objective     Infeasibilities num(sum)
+          0    -4.3094112416e-01 Ph1: 5(3.3646); Du: 1(0.430941) 0.0s
+         18    -6.4575077059e+01 Pr: 0(0) 0.0s
+
+Performed postsolve
+Solving the original LP from the solution after postsolve
+
+Model name          : sc50a
+Model status        : Optimal
+Simplex   iterations: 18
+Objective value     : -6.4575077059e+01
+P-D objective error :  1.0918815127e-16
+HiGHS run time      :          0.00
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "pdlp"
+Set option time_limit to 120
+Set option kkt_tolerance to 1e-06
+LP adlittle has 56 rows; 97 cols; 383 nonzeros
+Coefficient ranges:
+  Matrix  [1e-03, 6e+01]
+  Cost    [2e+00, 3e+03]
+  Bound   [0e+00, 0e+00]
+  RHS     [2e+00, 2e+03]
+Presolving model
+53 rows, 95 cols, 373 nonzeros 0s
+Dependent equations search running on 14 equations with time limit of 1.20s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1.20s)
+53 rows, 95 cols, 364 nonzeros 0s
+Presolve reductions: rows 53(-3); columns 95(-2); nonzeros 364(-19) 
+Solving the presolved LP
+WARNING: Solution optimality conditions: Before postsolve
+num/max     31 / 0.000421 (relative      0 / 8.14e-07) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 /        0 (relative      0 /        0)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 5.68e-14 (relative      0 /  1.1e-16) primal residual errors     (tolerance = 1e-06)
+num/max     17 /  2.6e-05 (relative      0 / 7.85e-09)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 4.53e-07  P-D objective error        (tolerance = 1e-06)
+
+Performed postsolve
+WARNING: Solution optimality conditions
+num/max     31 /  0.00417 (relative      2 / 1.76e-06) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 /        0 (relative      0 /        0)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 1.01e-14 (relative      0 / 8.23e-18) primal residual errors     (tolerance = 1e-06)
+num/max     17 /  2.6e-05 (relative      0 / 7.85e-09)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 4.53e-07  P-D objective error        (tolerance = 1e-06)
+WARNING: LP solver claims optimality, but with
+WARNING:    num/max      2 / 1.76e-06 relative primal infeasibilities (tolerance = 1e-06)
+Model status is "Optimal" since relative violation of tolerances is no more than     1.76
+
+Model name          : adlittle
+Model status        : Optimal
+PDLP      iterations: 7240
+Objective value     :  2.2549475565e+05
+P-D objective error :  4.5302233757e-07
+HiGHS run time      :          0.02
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "simplex"
+Set option time_limit to 120
+LP adlittle has 56 rows; 97 cols; 383 nonzeros
+Coefficient ranges:
+  Matrix  [1e-03, 6e+01]
+  Cost    [2e+00, 3e+03]
+  Bound   [0e+00, 0e+00]
+  RHS     [2e+00, 2e+03]
+Presolving model
+53 rows, 95 cols, 373 nonzeros 0s
+Dependent equations search running on 14 equations with time limit of 1.20s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1.20s)
+53 rows, 95 cols, 373 nonzeros 0s
+Presolve reductions: rows 53(-3); columns 95(-2); nonzeros 373(-10) 
+Solving the presolved LP
+Using dual simplex solver
+  Iteration        Objective     Infeasibilities num(sum)
+          0    -1.1853884414e+05 Ph1: 24(125.675); Du: 22(118539) 0.0s
+         87     2.2549496316e+05 Pr: 0(0); Du: 0(1.32104e-10) 0.0s
+
+Performed postsolve
+Solving the original LP from the solution after postsolve
+
+Model name          : adlittle
+Model status        : Optimal
+Simplex   iterations: 87
+Objective value     :  2.2549496316e+05
+P-D objective error :  1.2906614638e-16
+HiGHS run time      :          0.00
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "pdlp"
+Set option time_limit to 120
+Set option kkt_tolerance to 1e-06
+LP blend has 74 rows; 83 cols; 491 nonzeros
+Coefficient ranges:
+  Matrix  [3e-03, 7e+01]
+  Cost    [4e-03, 5e+00]
+  Bound   [0e+00, 0e+00]
+  RHS     [3e+00, 3e+01]
+Presolving model
+61 rows, 72 cols, 420 nonzeros 0s
+48 rows, 56 cols, 392 nonzeros 0s
+Dependent equations search running on 18 equations with time limit of 1.20s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1.20s)
+47 rows, 55 cols, 368 nonzeros 0s
+Presolve reductions: rows 47(-27); columns 55(-28); nonzeros 368(-123) 
+Solving the presolved LP
+WARNING: Solution optimality conditions: Before postsolve
+num/max      2 / 7.78e-06 (relative      0 / 3.21e-07) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 / 6.86e-07 (relative      0 / 1.08e-07)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 1.36e-14 (relative      0 /  5.6e-16) primal residual errors     (tolerance = 1e-06)
+num/max      0 / 3.33e-07 (relative      0 / 5.24e-08)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 3.46e-07  P-D objective error        (tolerance = 1e-06)
+
+Performed postsolve
+WARNING: Solution optimality conditions
+num/max      1 / 7.78e-06 (relative      0 / 3.21e-07) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 /        0 (relative      0 /        0)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 7.11e-15 (relative      0 / 2.93e-16) primal residual errors     (tolerance = 1e-06)
+num/max      0 / 3.33e-07 (relative      0 / 5.24e-08)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 1.55e-07  P-D objective error        (tolerance = 1e-06)
+
+Model name          : blend
+Model status        : Optimal
+PDLP      iterations: 1320
+Objective value     : -3.0812166031e+01
+P-D objective error :  1.5454843383e-07
+HiGHS run time      :          0.00
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "simplex"
+Set option time_limit to 120
+LP blend has 74 rows; 83 cols; 491 nonzeros
+Coefficient ranges:
+  Matrix  [3e-03, 7e+01]
+  Cost    [4e-03, 5e+00]
+  Bound   [0e+00, 0e+00]
+  RHS     [3e+00, 3e+01]
+Presolving model
+61 rows, 72 cols, 420 nonzeros 0s
+48 rows, 56 cols, 392 nonzeros 0s
+Dependent equations search running on 18 equations with time limit of 1.20s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1.20s)
+47 rows, 55 cols, 393 nonzeros 0s
+Presolve reductions: rows 47(-27); columns 55(-28); nonzeros 393(-98) 
+Solving the presolved LP
+Using dual simplex solver
+  Iteration        Objective     Infeasibilities num(sum)
+          0    -7.3929829894e+01 Ph1: 41(287.11); Du: 32(73.9298) 0.0s
+         80    -3.0812149846e+01 Pr: 0(0); Du: 0(1.77636e-15) 0.0s
+
+Performed postsolve
+Solving the original LP from the solution after postsolve
+
+Model name          : blend
+Model status        : Optimal
+Simplex   iterations: 80
+Objective value     : -3.0812149846e+01
+P-D objective error :  0.0000000000e+00
+HiGHS run time      :          0.00
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "pdlp"
+Set option time_limit to 120
+Set option kkt_tolerance to 1e-06
+LP share1b has 117 rows; 225 cols; 1151 nonzeros
+Coefficient ranges:
+  Matrix  [1e-01, 1e+03]
+  Cost    [2e-03, 1e+02]
+  Bound   [0e+00, 0e+00]
+  RHS     [1e-04, 3e+03]
+Presolving model
+98 rows, 208 cols, 1094 nonzeros 0s
+Dependent equations search running on 66 equations with time limit of 1.20s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1.20s)
+92 rows, 202 cols, 916 nonzeros 0s
+Presolve reductions: rows 92(-25); columns 202(-23); nonzeros 916(-235) 
+Solving the presolved LP
+WARNING: Solution optimality conditions: Before postsolve
+num/max     62 /    0.153 (relative      1 / 1.24e-06) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 / 6.17e-08 (relative      0 / 5.61e-09)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 2.77e-10 (relative      0 / 2.25e-15) primal residual errors     (tolerance = 1e-06)
+num/max      4 / 2.26e-06 (relative      0 / 2.05e-07)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 9.34e-08  P-D objective error        (tolerance = 1e-06)
+WARNING: LP solver claims optimality, but with
+WARNING:    num/max      1 / 1.24e-06 relative primal infeasibilities (tolerance = 1e-06)
+Model status is "Optimal" since relative violation of tolerances is no more than     1.24
+
+Performed postsolve
+WARNING: Solution optimality conditions
+num/max     63 /    0.153 (relative     13 / 5.23e-05) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 / 6.17e-08 (relative      0 / 5.61e-09)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 1.77e-10 (relative      0 / 6.02e-14) primal residual errors     (tolerance = 1e-06)
+num/max      4 / 2.26e-06 (relative      0 / 2.05e-07)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 9.34e-08  P-D objective error        (tolerance = 1e-06)
+WARNING: LP solver claims optimality, but with
+WARNING:    num/max     13 / 5.23e-05 relative primal infeasibilities (tolerance = 1e-06)
+Model status is "Optimal" since relative violation of tolerances is no more than     52.3
+
+Model name          : share1b
+Model status        : Optimal
+PDLP      iterations: 18480
+Objective value     : -7.6589233418e+04
+P-D objective error :  9.3355639686e-08
+HiGHS run time      :          0.08
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "simplex"
+Set option time_limit to 120
+LP share1b has 117 rows; 225 cols; 1151 nonzeros
+Coefficient ranges:
+  Matrix  [1e-01, 1e+03]
+  Cost    [2e-03, 1e+02]
+  Bound   [0e+00, 0e+00]
+  RHS     [1e-04, 3e+03]
+Presolving model
+98 rows, 208 cols, 1094 nonzeros 0s
+Dependent equations search running on 66 equations with time limit of 1.20s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1.20s)
+92 rows, 202 cols, 1049 nonzeros 0s
+Presolve reductions: rows 92(-25); columns 202(-23); nonzeros 1049(-102) 
+Solving the presolved LP
+Using dual simplex solver
+  Iteration        Objective     Infeasibilities num(sum)
+          0    -6.5999390531e+00 Ph1: 42(96.3641); Du: 6(6.59994) 0.0s
+        160    -7.6589318579e+04 Pr: 0(0) 0.0s
+
+Performed postsolve
+Solving the original LP from the solution after postsolve
+
+Model name          : share1b
+Model status        : Optimal
+Simplex   iterations: 160
+Objective value     : -7.6589318579e+04
+P-D objective error :  5.6999411273e-16
+HiGHS run time      :          0.00
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "pdlp"
+Set option time_limit to 120
+Set option kkt_tolerance to 1e-06
+LP stocfor1 has 117 rows; 111 cols; 447 nonzeros
+Coefficient ranges:
+  Matrix  [6e-02, 3e+02]
+  Cost    [5e-01, 3e+02]
+  Bound   [0e+00, 0e+00]
+  RHS     [1e-01, 6e+01]
+Presolving model
+81 rows, 83 cols, 346 nonzeros 0s
+49 rows, 56 cols, 321 nonzeros 0s
+Dependent equations search running on 8 equations with time limit of 1.20s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1.20s)
+48 rows, 56 cols, 310 nonzeros 0s
+Presolve reductions: rows 48(-69); columns 56(-55); nonzeros 310(-137) 
+Solving the presolved LP
+WARNING: Solution optimality conditions: Before postsolve
+num/max     13 / 1.59e-05 (relative      0 / 2.09e-07) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 /        0 (relative      0 /        0)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 2.38e-12 (relative      0 / 3.14e-14) primal residual errors     (tolerance = 1e-06)
+num/max      5 /  0.00134 (relative      3 / 3.16e-06)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 3.53e-08  P-D objective error        (tolerance = 1e-06)
+WARNING: LP solver claims optimality, but with
+WARNING:    num/max      3 / 3.16e-06 relative   dual residual errors (tolerance = 1e-06)
+Model status is "Optimal" since relative violation of tolerances is no more than     3.16
+
+Performed postsolve
+WARNING: Solution optimality conditions
+num/max     13 / 1.59e-05 (relative      0 / 2.53e-07) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 /        0 (relative      0 /        0)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 4.55e-13 (relative      0 / 7.22e-15) primal residual errors     (tolerance = 1e-06)
+num/max      5 /  0.00134 (relative      3 / 4.49e-06)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 3.53e-08  P-D objective error        (tolerance = 1e-06)
+WARNING: LP solver claims optimality, but with
+WARNING:    num/max      3 / 4.49e-06 relative   dual residual errors (tolerance = 1e-06)
+Model status is "Optimal" since relative violation of tolerances is no more than     4.49
+
+Model name          : stocfor1
+Model status        : Optimal
+PDLP      iterations: 5360
+Objective value     : -4.1131980034e+04
+P-D objective error :  3.5287955350e-08
+HiGHS run time      :          0.01
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "simplex"
+Set option time_limit to 120
+LP stocfor1 has 117 rows; 111 cols; 447 nonzeros
+Coefficient ranges:
+  Matrix  [6e-02, 3e+02]
+  Cost    [5e-01, 3e+02]
+  Bound   [0e+00, 0e+00]
+  RHS     [1e-01, 6e+01]
+Presolving model
+81 rows, 83 cols, 346 nonzeros 0s
+49 rows, 56 cols, 321 nonzeros 0s
+Dependent equations search running on 8 equations with time limit of 1.20s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1.20s)
+48 rows, 56 cols, 319 nonzeros 0s
+Presolve reductions: rows 48(-69); columns 56(-55); nonzeros 319(-128) 
+Solving the presolved LP
+Using dual simplex solver
+  Iteration        Objective     Infeasibilities num(sum)
+          0    -1.7477856586e+03 Ph1: 43(162.904); Du: 31(1747.79) 0.0s
+         53    -4.1131976219e+04 Pr: 0(0) 0.0s
+
+Performed postsolve
+Solving the original LP from the solution after postsolve
+
+Model name          : stocfor1
+Model status        : Optimal
+Simplex   iterations: 53
+Objective value     : -4.1131976219e+04
+P-D objective error :  8.8445412031e-17
+HiGHS run time      :          0.00
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "pdlp"
+Set option time_limit to 120
+Set option kkt_tolerance to 1e-06
+LP sctap1 has 300 rows; 480 cols; 1692 nonzeros
+Coefficient ranges:
+  Matrix  [1e+00, 8e+01]
+  Cost    [1e+00, 8e+01]
+  Bound   [0e+00, 0e+00]
+  RHS     [1e+00, 4e+01]
+Presolving model
+278 rows, 455 cols, 1584 nonzeros 0s
+Dependent equations search running on 113 equations with time limit of 1.20s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1.20s)
+269 rows, 452 cols, 1557 nonzeros 0s
+Presolve reductions: rows 269(-31); columns 452(-28); nonzeros 1557(-135) 
+Solving the presolved LP
+WARNING: Solution optimality conditions: Before postsolve
+num/max      9 / 1.84e-06 (relative      0 / 4.48e-08) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 /        0 (relative      0 /        0)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 2.84e-14 (relative      0 / 6.93e-16) primal residual errors     (tolerance = 1e-06)
+num/max     15 / 0.000109 (relative      1 / 1.34e-06)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 4.33e-08  P-D objective error        (tolerance = 1e-06)
+WARNING: LP solver claims optimality, but with
+WARNING:    num/max      1 / 1.34e-06 relative   dual residual errors (tolerance = 1e-06)
+Model status is "Optimal" since relative violation of tolerances is no more than     1.34
+
+Performed postsolve
+WARNING: Solution optimality conditions
+num/max      9 / 1.84e-06 (relative      0 / 4.48e-08) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 /        0 (relative      0 /        0)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 1.42e-14 (relative      0 / 3.47e-16) primal residual errors     (tolerance = 1e-06)
+num/max     15 / 0.000109 (relative      1 / 1.34e-06)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 4.33e-08  P-D objective error        (tolerance = 1e-06)
+WARNING: LP solver claims optimality, but with
+WARNING:    num/max      1 / 1.34e-06 relative   dual residual errors (tolerance = 1e-06)
+Model status is "Optimal" since relative violation of tolerances is no more than     1.34
+
+Model name          : sctap1
+Model status        : Optimal
+PDLP      iterations: 2200
+Objective value     :  1.4122498305e+03
+P-D objective error :  4.3271711769e-08
+HiGHS run time      :          0.02
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "simplex"
+Set option time_limit to 120
+LP sctap1 has 300 rows; 480 cols; 1692 nonzeros
+Coefficient ranges:
+  Matrix  [1e+00, 8e+01]
+  Cost    [1e+00, 8e+01]
+  Bound   [0e+00, 0e+00]
+  RHS     [1e+00, 4e+01]
+Presolving model
+278 rows, 455 cols, 1584 nonzeros 0s
+Dependent equations search running on 113 equations with time limit of 1.20s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1.20s)
+269 rows, 452 cols, 1557 nonzeros 0s
+Presolve reductions: rows 269(-31); columns 452(-28); nonzeros 1557(-135) 
+Solving the presolved LP
+Using dual simplex solver
+  Iteration        Objective     Infeasibilities num(sum)
+          0     0.0000000000e+00 Pr: 147(859.875) 0.0s
+        323     1.4122500000e+03 Pr: 0(0); Du: 0(1.33227e-13) 0.0s
+
+Performed postsolve
+Solving the original LP from the solution after postsolve
+
+Model name          : sctap1
+Model status        : Optimal
+Simplex   iterations: 323
+Objective value     :  1.4122500000e+03
+P-D objective error :  0.0000000000e+00
+HiGHS run time      :          0.01
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "pdlp"
+Set option time_limit to 120
+Set option kkt_tolerance to 1e-06
+LP scfxm1 has 330 rows; 457 cols; 2589 nonzeros
+Coefficient ranges:
+  Matrix  [5e-04, 1e+02]
+  Cost    [1e+00, 1e+01]
+  Bound   [0e+00, 0e+00]
+  RHS     [8e-01, 2e+03]
+Presolving model
+263 rows, 419 cols, 2261 nonzeros 0s
+Dependent equations search running on 116 equations with time limit of 1.20s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1.20s)
+220 rows, 372 cols, 2150 nonzeros 0s
+Presolve reductions: rows 220(-110); columns 372(-85); nonzeros 2150(-439) 
+Solving the presolved LP
+WARNING: Solution optimality conditions: Before postsolve
+num/max     18 / 0.000248 (relative      0 / 2.07e-07) primal infeasibilities     (tolerance = 1e-06)
+num/max      1 / 1.26e-06 (relative      0 / 1.72e-07)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 6.02e-12 (relative      0 / 5.01e-15) primal residual errors     (tolerance = 1e-06)
+num/max      2 / 3.13e-05 (relative      1 / 4.29e-06)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 5.14e-07  P-D objective error        (tolerance = 1e-06)
+WARNING: LP solver claims optimality, but with
+WARNING:    num/max      1 / 4.29e-06 relative   dual residual errors (tolerance = 1e-06)
+Model status is "Optimal" since relative violation of tolerances is no more than     4.29
+
+Performed postsolve
+WARNING: Solution optimality conditions
+num/max     31 /  0.00162 (relative      2 / 1.35e-06) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 / 4.92e-09 (relative      0 / 2.46e-09)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 5.36e-13 (relative      0 / 4.47e-16) primal residual errors     (tolerance = 1e-06)
+num/max      2 / 3.13e-05 (relative      2 / 1.57e-05)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 5.76e-07  P-D objective error        (tolerance = 1e-06)
+WARNING: LP solver claims optimality, but with
+WARNING:    num/max      2 / 1.35e-06 relative primal infeasibilities (tolerance = 1e-06)
+WARNING:    num/max      2 / 1.57e-05 relative   dual residual errors (tolerance = 1e-06)
+Model status is "Optimal" since relative violation of tolerances is no more than     15.7
+
+Model name          : scfxm1
+Model status        : Optimal
+PDLP      iterations: 12640
+Objective value     :  1.8416781357e+04
+P-D objective error :  5.7550910054e-07
+HiGHS run time      :          0.12
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "simplex"
+Set option time_limit to 120
+LP scfxm1 has 330 rows; 457 cols; 2589 nonzeros
+Coefficient ranges:
+  Matrix  [5e-04, 1e+02]
+  Cost    [1e+00, 1e+01]
+  Bound   [0e+00, 0e+00]
+  RHS     [8e-01, 2e+03]
+Presolving model
+263 rows, 419 cols, 2261 nonzeros 0s
+Dependent equations search running on 120 equations with time limit of 1.20s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1.20s)
+224 rows, 376 cols, 2221 nonzeros 0s
+Presolve reductions: rows 224(-106); columns 376(-81); nonzeros 2221(-368) 
+Solving the presolved LP
+Using dual simplex solver
+  Iteration        Objective     Infeasibilities num(sum)
+          0    -4.2787412252e+01 Ph1: 85(8964.82); Du: 22(42.7874) 0.0s
+        375     1.8416759028e+04 Pr: 0(0) 0.0s
+
+Performed postsolve
+Solving the original LP from the solution after postsolve
+
+Model name          : scfxm1
+Model status        : Optimal
+Simplex   iterations: 375
+Objective value     :  1.8416759028e+04
+P-D objective error :  0.0000000000e+00
+HiGHS run time      :          0.01
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "pdlp"
+Set option time_limit to 120
+Set option kkt_tolerance to 1e-06
+LP bandm has 305 rows; 472 cols; 2494 nonzeros
+Coefficient ranges:
+  Matrix  [1e-03, 2e+02]
+  Cost    [1e-04, 1e+01]
+  Bound   [0e+00, 0e+00]
+  RHS     [1e-01, 7e+01]
+Presolving model
+193 rows, 348 cols, 1698 nonzeros 0s
+Dependent equations search running on 165 equations with time limit of 1.20s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1.20s)
+165 rows, 320 cols, 1458 nonzeros 0s
+Presolve reductions: rows 165(-140); columns 320(-152); nonzeros 1458(-1036) 
+Solving the presolved LP
+WARNING: Solution optimality conditions: Before postsolve
+num/max     75 / 9.15e-05 (relative      0 / 7.97e-08) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 / 3.09e-07 (relative      0 / 4.46e-08)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 2.84e-13 (relative      0 / 2.48e-16) primal residual errors     (tolerance = 1e-06)
+num/max      2 / 1.97e-06 (relative      0 / 2.84e-07)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 3.46e-07  P-D objective error        (tolerance = 1e-06)
+
+Performed postsolve
+WARNING: Solution optimality conditions
+num/max     87 / 9.15e-05 (relative      1 / 1.38e-06) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 / 1.51e-09 (relative      0 / 1.96e-10)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 5.42e-14 (relative      0 / 8.17e-16) primal residual errors     (tolerance = 1e-06)
+num/max      2 / 1.97e-06 (relative      0 / 2.56e-07)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 3.56e-07  P-D objective error        (tolerance = 1e-06)
+WARNING: LP solver claims optimality, but with
+WARNING:    num/max      1 / 1.38e-06 relative primal infeasibilities (tolerance = 1e-06)
+Model status is "Optimal" since relative violation of tolerances is no more than     1.38
+
+Model name          : bandm
+Model status        : Optimal
+PDLP      iterations: 22400
+Objective value     : -1.5862788577e+02
+P-D objective error :  3.5608157356e-07
+HiGHS run time      :          0.16
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "simplex"
+Set option time_limit to 120
+LP bandm has 305 rows; 472 cols; 2494 nonzeros
+Coefficient ranges:
+  Matrix  [1e-03, 2e+02]
+  Cost    [1e-04, 1e+01]
+  Bound   [0e+00, 0e+00]
+  RHS     [1e-01, 7e+01]
+Presolving model
+193 rows, 348 cols, 1698 nonzeros 0s
+Dependent equations search running on 166 equations with time limit of 1.20s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1.20s)
+166 rows, 321 cols, 1563 nonzeros 0s
+Presolve reductions: rows 166(-139); columns 321(-151); nonzeros 1563(-931) 
+Solving the presolved LP
+Using dual simplex solver
+  Iteration        Objective     Infeasibilities num(sum)
+          0    -1.8845862057e+02 Ph1: 115(519.13); Du: 66(188.459) 0.0s
+        382    -1.5862801845e+02 Pr: 0(0) 0.0s
+
+Performed postsolve
+Solving the original LP from the solution after postsolve
+
+Model name          : bandm
+Model status        : Optimal
+Simplex   iterations: 382
+Objective value     : -1.5862801845e+02
+P-D objective error :  3.5721816569e-16
+HiGHS run time      :          0.01
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "pdlp"
+Set option time_limit to 120
+Set option kkt_tolerance to 1e-06
+LP degen2 has 444 rows; 534 cols; 3978 nonzeros
+Coefficient ranges:
+  Matrix  [1e+00, 1e+00]
+  Cost    [1e-02, 5e+01]
+  Bound   [0e+00, 0e+00]
+  RHS     [1e+00, 4e+01]
+Presolving model
+381 rows, 473 cols, 3850 nonzeros 0s
+Dependent equations search running on 160 equations with time limit of 1.20s
+Dependent equations search removed 2 rows and 54 nonzeros in 0.00s (limit = 1.20s)
+376 rows, 471 cols, 3773 nonzeros 0s
+Presolve reductions: rows 376(-68); columns 471(-63); nonzeros 3773(-205) 
+Solving the presolved LP
+WARNING: Solution optimality conditions: Before postsolve
+num/max     22 / 9.79e-06 (relative      0 / 4.26e-07) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 / 5.91e-07 (relative      0 / 1.22e-08)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 3.55e-15 (relative      0 / 1.54e-16) primal residual errors     (tolerance = 1e-06)
+num/max      2 / 1.02e-06 (relative      0 /  2.1e-08)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 4.39e-08  P-D objective error        (tolerance = 1e-06)
+
+Performed postsolve
+WARNING: Solution optimality conditions
+num/max     23 / 1.01e-05 (relative      0 /  2.6e-07) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 /        0 (relative      0 /        0)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 /        0 (relative      0 /        0) primal residual errors     (tolerance = 1e-06)
+num/max      2 / 1.02e-06 (relative      0 /  2.1e-08)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 4.35e-08  P-D objective error        (tolerance = 1e-06)
+
+Model name          : degen2
+Model status        : Optimal
+PDLP      iterations: 3040
+Objective value     : -1.4351781288e+03
+P-D objective error :  4.3463999496e-08
+HiGHS run time      :          0.05
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "simplex"
+Set option time_limit to 120
+LP degen2 has 444 rows; 534 cols; 3978 nonzeros
+Coefficient ranges:
+  Matrix  [1e+00, 1e+00]
+  Cost    [1e-02, 5e+01]
+  Bound   [0e+00, 0e+00]
+  RHS     [1e+00, 4e+01]
+Presolving model
+381 rows, 473 cols, 3850 nonzeros 0s
+Dependent equations search running on 160 equations with time limit of 1.20s
+Dependent equations search removed 2 rows and 54 nonzeros in 0.00s (limit = 1.20s)
+378 rows, 473 cols, 3793 nonzeros 0s
+Presolve reductions: rows 378(-66); columns 473(-61); nonzeros 3793(-185) 
+Solving the presolved LP
+Using dual simplex solver
+  Iteration        Objective     Infeasibilities num(sum)
+          0    -2.3126389875e+03 Ph1: 240(639); Du: 315(2312.64) 0.0s
+        458    -1.4351780000e+03 Pr: 0(0) 0.0s
+
+Performed postsolve
+Solving the original LP from the solution after postsolve
+
+Model name          : degen2
+Model status        : Optimal
+Simplex   iterations: 458
+Objective value     : -1.4351780000e+03
+P-D objective error :  3.9593431717e-16
+HiGHS run time      :          0.02
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "pdlp"
+Set option time_limit to 120
+Set option kkt_tolerance to 1e-06
+LP fit1p has 627 rows; 1677 cols; 9868 nonzeros
+Coefficient ranges:
+  Matrix  [1e-02, 2e+03]
+  Cost    [1e+00, 3e+00]
+  Bound   [8e+01, 1e+03]
+  RHS     [1e+01, 2e+02]
+Presolving model
+627 rows, 1677 cols, 9868 nonzeros 0s
+Dependent equations search running on 627 equations with time limit of 1.20s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1.20s)
+627 rows, 1677 cols, 9868 nonzeros 0s
+Presolve reductions: rows 627(-0); columns 1677(-0); nonzeros 9868(-0) - Not reduced
+Problem not reduced by presolve: solving the LP
+WARNING: Solution optimality conditions
+num/max     12 / 3.01e-05 (relative      0 / 1.39e-07) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 /    1e-08 (relative      0 /  2.5e-09)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 8.53e-14 (relative      0 / 3.93e-16) primal residual errors     (tolerance = 1e-06)
+num/max      4 /    1e-05 (relative      2 /  2.5e-06)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 5.33e-09  P-D objective error        (tolerance = 1e-06)
+WARNING: LP solver claims optimality, but with
+WARNING:    num/max      2 /  2.5e-06 relative   dual residual errors (tolerance = 1e-06)
+Model status is "Optimal" since relative violation of tolerances is no more than      2.5
+
+Model name          : fit1p
+Model status        : Optimal
+PDLP      iterations: 28680
+Objective value     :  9.1463780214e+03
+P-D objective error :  5.3267624846e-09
+HiGHS run time      :          1.42
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "simplex"
+Set option time_limit to 120
+LP fit1p has 627 rows; 1677 cols; 9868 nonzeros
+Coefficient ranges:
+  Matrix  [1e-02, 2e+03]
+  Cost    [1e+00, 3e+00]
+  Bound   [8e+01, 1e+03]
+  RHS     [1e+01, 2e+02]
+Presolving model
+627 rows, 1677 cols, 9868 nonzeros 0s
+Dependent equations search running on 627 equations with time limit of 1.20s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1.20s)
+627 rows, 1677 cols, 9868 nonzeros 0s
+Presolve reductions: rows 627(-0); columns 1677(-0); nonzeros 9868(-0) - Not reduced
+Problem not reduced by presolve: solving the LP
+Using dual simplex solver
+  Iteration        Objective     Infeasibilities num(sum)
+          0     0.0000000000e+00 Pr: 627(19524.1) 0.0s
+        860     9.1463780924e+03 Pr: 0(0) 0.1s
+
+Model name          : fit1p
+Model status        : Optimal
+Simplex   iterations: 860
+Objective value     :  9.1463780924e+03
+P-D objective error :  3.9772901424e-16
+HiGHS run time      :          0.12
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "pdlp"
+Set option time_limit to 120
+Set option kkt_tolerance to 1e-06
+LP 25fv47 has 821 rows; 1571 cols; 10400 nonzeros
+Coefficient ranges:
+  Matrix  [2e-04, 2e+02]
+  Cost    [1e-03, 1e+02]
+  Bound   [0e+00, 0e+00]
+  RHS     [2e-01, 2e+03]
+Presolving model
+723 rows, 1490 cols, 10097 nonzeros 0s
+Dependent equations search running on 384 equations with time limit of 1.20s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1.20s)
+666 rows, 1434 cols, 9659 nonzeros 0s
+Presolve reductions: rows 666(-155); columns 1434(-137); nonzeros 9659(-741) 
+Solving the presolved LP
+WARNING: Solution optimality conditions: Before postsolve
+num/max    392 /  0.00302 (relative      2 / 1.53e-06) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 / 4.76e-08 (relative      0 / 2.14e-09)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 1.07e-12 (relative      0 /  5.4e-16) primal residual errors     (tolerance = 1e-06)
+num/max     66 / 7.58e-05 (relative      4 / 3.41e-06)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 4.23e-07  P-D objective error        (tolerance = 1e-06)
+WARNING: LP solver claims optimality, but with
+WARNING:    num/max      2 / 1.53e-06 relative primal infeasibilities (tolerance = 1e-06)
+WARNING:    num/max      4 / 3.41e-06 relative   dual residual errors (tolerance = 1e-06)
+Model status is "Optimal" since relative violation of tolerances is no more than     3.41
+
+Performed postsolve
+WARNING: Solution optimality conditions
+num/max    399 /  0.00302 (relative      3 / 1.53e-06) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 / 3.59e-08 (relative      0 / 1.64e-09)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 4.55e-13 (relative      0 /  2.3e-16) primal residual errors     (tolerance = 1e-06)
+num/max     66 / 7.58e-05 (relative      4 / 3.47e-06)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 4.23e-07  P-D objective error        (tolerance = 1e-06)
+WARNING: LP solver claims optimality, but with
+WARNING:    num/max      3 / 1.53e-06 relative primal infeasibilities (tolerance = 1e-06)
+WARNING:    num/max      4 / 3.47e-06 relative   dual residual errors (tolerance = 1e-06)
+Model status is "Optimal" since relative violation of tolerances is no more than     3.47
+
+Model name          : 25fv47
+Model status        : Optimal
+PDLP      iterations: 48840
+Objective value     :  5.5018392650e+03
+P-D objective error :  4.2324372393e-07
+HiGHS run time      :          1.94
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "simplex"
+Set option time_limit to 120
+LP 25fv47 has 821 rows; 1571 cols; 10400 nonzeros
+Coefficient ranges:
+  Matrix  [2e-04, 2e+02]
+  Cost    [1e-03, 1e+02]
+  Bound   [0e+00, 0e+00]
+  RHS     [2e-01, 2e+03]
+Presolving model
+723 rows, 1490 cols, 10097 nonzeros 0s
+Dependent equations search running on 389 equations with time limit of 1.20s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1.20s)
+673 rows, 1439 cols, 9926 nonzeros 0s
+Presolve reductions: rows 673(-148); columns 1439(-132); nonzeros 9926(-474) 
+Solving the presolved LP
+Using dual simplex solver
+  Iteration        Objective     Infeasibilities num(sum)
+          0    -1.1311156094e+02 Ph1: 95(426.55); Du: 36(113.112) 0.0s
+       2583     5.5018458883e+03 Pr: 0(0); Du: 0(3.86029e-14) 0.2s
+       2583     5.5018458883e+03 Pr: 0(0); Du: 0(3.86029e-14) 0.2s
+
+Performed postsolve
+Solving the original LP from the solution after postsolve
+
+Model name          : 25fv47
+Model status        : Optimal
+Simplex   iterations: 2583
+Objective value     :  5.5018458883e+03
+P-D objective error :  3.3058434356e-16
+HiGHS run time      :          0.19
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "pdlp"
+Set option time_limit to 120
+Set option kkt_tolerance to 1e-06
+LP woodw has 1098 rows; 8405 cols; 37474 nonzeros
+Coefficient ranges:
+  Matrix  [1e-02, 1e+03]
+  Cost    [1e+00, 1e+00]
+  Bound   [0e+00, 0e+00]
+  RHS     [1e-02, 8e-01]
+Presolving model
+703 rows, 5347 cols, 19727 nonzeros 0s
+557 rows, 4137 cols, 15865 nonzeros 0s
+Dependent equations search running on 545 equations with time limit of 1.20s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1.20s)
+557 rows, 4083 cols, 15797 nonzeros 0s
+Presolve reductions: rows 557(-541); columns 4083(-4322); nonzeros 15797(-21677) 
+Solving the presolved LP
+WARNING: Solution optimality conditions: Before postsolve
+num/max    183 / 6.11e-05 (relative      2 / 1.19e-06) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 / 6.41e-10 (relative      0 / 2.45e-10)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 8.98e-14 (relative      0 / 1.75e-15) primal residual errors     (tolerance = 1e-06)
+num/max     11 / 1.66e-05 (relative      5 / 6.32e-06)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 1.86e-08  P-D objective error        (tolerance = 1e-06)
+WARNING: LP solver claims optimality, but with
+WARNING:    num/max      2 / 1.19e-06 relative primal infeasibilities (tolerance = 1e-06)
+WARNING:    num/max      5 / 6.32e-06 relative   dual residual errors (tolerance = 1e-06)
+Model status is "Optimal" since relative violation of tolerances is no more than     6.32
+
+Performed postsolve
+WARNING: Solution optimality conditions
+num/max    183 / 6.11e-05 (relative     84 / 3.94e-05) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 / 3.24e-08 (relative      0 / 1.62e-08)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 1.71e-14 (relative      0 /  1.1e-14) primal residual errors     (tolerance = 1e-06)
+num/max     11 / 1.66e-05 (relative      6 / 8.28e-06)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 1.86e-08  P-D objective error        (tolerance = 1e-06)
+WARNING: LP solver claims optimality, but with
+WARNING:    num/max     84 / 3.94e-05 relative primal infeasibilities (tolerance = 1e-06)
+WARNING:    num/max      6 / 8.28e-06 relative   dual residual errors (tolerance = 1e-06)
+Model status is "Optimal" since relative violation of tolerances is no more than     39.4
+
+Model name          : woodw
+Model status        : Optimal
+PDLP      iterations: 11600
+Objective value     :  1.3044760119e+00
+P-D objective error :  1.8598699313e-08
+HiGHS run time      :          1.07
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "simplex"
+Set option time_limit to 120
+LP woodw has 1098 rows; 8405 cols; 37474 nonzeros
+Coefficient ranges:
+  Matrix  [1e-02, 1e+03]
+  Cost    [1e+00, 1e+00]
+  Bound   [0e+00, 0e+00]
+  RHS     [1e-02, 8e-01]
+Presolving model
+703 rows, 5347 cols, 19727 nonzeros 0s
+557 rows, 4137 cols, 15865 nonzeros 0s
+Dependent equations search running on 545 equations with time limit of 1.20s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1.20s)
+557 rows, 4083 cols, 15811 nonzeros 0s
+Presolve reductions: rows 557(-541); columns 4083(-4322); nonzeros 15811(-21663) 
+Solving the presolved LP
+Using dual simplex solver
+  Iteration        Objective     Infeasibilities num(sum)
+          0     0.0000000000e+00 Pr: 81(3.02105) 0.0s
+        793     1.3044763331e+00 Pr: 0(0) 0.1s
+
+Performed postsolve
+Solving the original LP from the solution after postsolve
+
+Model name          : woodw
+Model status        : Optimal
+Simplex   iterations: 793
+Objective value     :  1.3044763331e+00
+P-D objective error :  0.0000000000e+00
+HiGHS run time      :          0.08
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "pdlp"
+Set option time_limit to 120
+Set option kkt_tolerance to 1e-06
+LP degen3 has 1503 rows; 1818 cols; 24646 nonzeros
+Coefficient ranges:
+  Matrix  [1e+00, 1e+00]
+  Cost    [1e-02, 2e+01]
+  Bound   [0e+00, 0e+00]
+  RHS     [1e+00, 5e+01]
+Presolving model
+1412 rows, 1727 cols, 24464 nonzeros 0s
+Dependent equations search running on 621 equations with time limit of 1.20s
+Dependent equations search removed 2 rows and 298 nonzeros in 0.00s (limit = 1.20s)
+1399 rows, 1720 cols, 23619 nonzeros 0s
+Presolve reductions: rows 1399(-104); columns 1720(-98); nonzeros 23619(-1027) 
+Solving the presolved LP
+WARNING: Solution optimality conditions: Before postsolve
+num/max    119 / 5.89e-05 (relative      3 / 1.25e-06) primal infeasibilities     (tolerance = 1e-06)
+num/max      7 / 1.52e-05 (relative      1 / 1.21e-06)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 2.13e-14 (relative      0 / 4.54e-16) primal residual errors     (tolerance = 1e-06)
+num/max     38 / 2.35e-05 (relative     11 / 1.88e-06)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 3.03e-07  P-D objective error        (tolerance = 1e-06)
+WARNING: LP solver claims optimality, but with
+WARNING:    num/max      3 / 1.25e-06 relative primal infeasibilities (tolerance = 1e-06)
+WARNING:    num/max      1 / 1.21e-06 relative   dual infeasibilities (tolerance = 1e-06)
+WARNING:    num/max     11 / 1.88e-06 relative   dual residual errors (tolerance = 1e-06)
+Model status is "Optimal" since relative violation of tolerances is no more than     1.88
+
+Performed postsolve
+WARNING: Solution optimality conditions
+num/max    122 / 0.000204 (relative      5 / 4.25e-06) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 /        0 (relative      0 /        0)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 /        0 (relative      0 /        0) primal residual errors     (tolerance = 1e-06)
+num/max     38 / 2.35e-05 (relative      2 /  1.2e-06)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 3.33e-07  P-D objective error        (tolerance = 1e-06)
+WARNING: LP solver claims optimality, but with
+WARNING:    num/max      5 / 4.25e-06 relative primal infeasibilities (tolerance = 1e-06)
+WARNING:    num/max      2 /  1.2e-06 relative   dual residual errors (tolerance = 1e-06)
+Model status is "Optimal" since relative violation of tolerances is no more than     4.25
+
+Model name          : degen3
+Model status        : Optimal
+PDLP      iterations: 20000
+Objective value     : -9.8729342174e+02
+P-D objective error :  3.3325651008e-07
+HiGHS run time      :          1.45
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "simplex"
+Set option time_limit to 120
+LP degen3 has 1503 rows; 1818 cols; 24646 nonzeros
+Coefficient ranges:
+  Matrix  [1e+00, 1e+00]
+  Cost    [1e-02, 2e+01]
+  Bound   [0e+00, 0e+00]
+  RHS     [1e+00, 5e+01]
+Presolving model
+1412 rows, 1727 cols, 24464 nonzeros 0s
+Dependent equations search running on 621 equations with time limit of 1.20s
+Dependent equations search removed 2 rows and 335 nonzeros in 0.00s (limit = 1.20s)
+1405 rows, 1722 cols, 24139 nonzeros 0s
+Presolve reductions: rows 1405(-98); columns 1722(-96); nonzeros 24139(-507) 
+Solving the presolved LP
+Using dual simplex solver
+  Iteration        Objective     Infeasibilities num(sum)
+          0    -2.3914600946e+03 Ph1: 910(3337); Du: 1093(2391.46) 0.0s
+       2159    -9.8729400000e+02 Pr: 0(0); Du: 0(1.2013e-13) 0.2s
+
+Performed postsolve
+Solving the original LP from the solution after postsolve
+
+Model name          : degen3
+Model status        : Optimal
+Simplex   iterations: 2159
+Objective value     : -9.8729400000e+02
+P-D objective error :  6.9054987814e-16
+HiGHS run time      :          0.22
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "pdlp"
+Set option time_limit to 120
+Set option kkt_tolerance to 1e-06
+LP stocfor2 has 2157 rows; 2031 cols; 8343 nonzeros
+Coefficient ranges:
+  Matrix  [2e-01, 3e+02]
+  Cost    [5e-04, 3e+01]
+  Bound   [0e+00, 0e+00]
+  RHS     [1e-01, 6e+01]
+Presolving model
+1800 rows, 1686 cols, 7016 nonzeros 0s
+1196 rows, 1115 cols, 5897 nonzeros 0s
+Dependent equations search running on 85 equations with time limit of 1.20s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1.20s)
+1049 rows, 973 cols, 6230 nonzeros 0s
+Presolve reductions: rows 1049(-1108); columns 973(-1058); nonzeros 6230(-2113) 
+Solving the presolved LP
+WARNING: Solution optimality conditions: Before postsolve
+num/max     63 / 0.000134 (relative      2 / 1.46e-06) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 /        0 (relative      0 /        0)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 2.61e-12 (relative      0 / 2.84e-14) primal residual errors     (tolerance = 1e-06)
+num/max    102 / 0.000184 (relative      0 /    6e-07)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 1.93e-08  P-D objective error        (tolerance = 1e-06)
+WARNING: LP solver claims optimality, but with
+WARNING:    num/max      2 / 1.46e-06 relative primal infeasibilities (tolerance = 1e-06)
+Model status is "Optimal" since relative violation of tolerances is no more than     1.46
+
+Performed postsolve
+WARNING: Solution optimality conditions
+num/max     66 / 0.000134 (relative      3 / 2.13e-06) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 /        0 (relative      0 /        0)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 4.55e-13 (relative      0 / 7.22e-15) primal residual errors     (tolerance = 1e-06)
+num/max    102 / 0.000184 (relative     32 / 5.53e-06)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 1.93e-08  P-D objective error        (tolerance = 1e-06)
+WARNING: LP solver claims optimality, but with
+WARNING:    num/max      3 / 2.13e-06 relative primal infeasibilities (tolerance = 1e-06)
+WARNING:    num/max     32 / 5.53e-06 relative   dual residual errors (tolerance = 1e-06)
+Model status is "Optimal" since relative violation of tolerances is no more than     5.53
+
+Model name          : stocfor2
+Model status        : Optimal
+PDLP      iterations: 29360
+Objective value     : -3.9024409817e+04
+P-D objective error :  1.9316174970e-08
+HiGHS run time      :          0.85
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "simplex"
+Set option time_limit to 120
+LP stocfor2 has 2157 rows; 2031 cols; 8343 nonzeros
+Coefficient ranges:
+  Matrix  [2e-01, 3e+02]
+  Cost    [5e-04, 3e+01]
+  Bound   [0e+00, 0e+00]
+  RHS     [1e-01, 6e+01]
+Presolving model
+1800 rows, 1686 cols, 7016 nonzeros 0s
+1196 rows, 1115 cols, 5897 nonzeros 0s
+Dependent equations search running on 88 equations with time limit of 1.20s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1.20s)
+1052 rows, 976 cols, 6285 nonzeros 0s
+Presolve reductions: rows 1052(-1105); columns 976(-1055); nonzeros 6285(-2058) 
+Solving the presolved LP
+Using dual simplex solver
+  Iteration        Objective     Infeasibilities num(sum)
+          0    -3.9541086266e+02 Ph1: 724(3684.57); Du: 353(395.411) 0.0s
+        820    -3.9024408538e+04 Pr: 0(0) 0.0s
+
+Performed postsolve
+Solving the original LP from the solution after postsolve
+
+Model name          : stocfor2
+Model status        : Optimal
+Simplex   iterations: 820
+Objective value     : -3.9024408538e+04
+P-D objective error :  1.0254416571e-15
+HiGHS run time      :          0.03
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "pdlp"
+Set option time_limit to 180
+Set option kkt_tolerance to 1e-06
+LP pilot87 has 2030 rows; 4883 cols; 73152 nonzeros
+Coefficient ranges:
+  Matrix  [1e-06, 1e+03]
+  Cost    [1e-06, 3e+00]
+  Bound   [2e-02, 2e+04]
+  RHS     [1e-02, 6e+03]
+WARNING: Problem has some excessively small costs
+Presolving model
+1980 rows, 4605 cols, 70440 nonzeros 0s
+Dependent equations search running on 102 equations with time limit of 1.80s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1.80s)
+1700 rows, 4310 cols, 69849 nonzeros 0s
+Presolve reductions: rows 1700(-330); columns 4310(-573); nonzeros 69849(-3303) 
+Solving the presolved LP
+WARNING: Solution optimality conditions: Before postsolve
+num/max    504 /    0.021 (relative      1 / 1.28e-06) primal infeasibilities     (tolerance = 1e-06)
+num/max      5 / 6.06e-06 (relative      2 / 1.41e-06)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 1.73e-11 (relative      0 / 1.05e-15) primal residual errors     (tolerance = 1e-06)
+num/max      9 / 3.13e-06 (relative      0 / 7.29e-07)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 7.13e-07  P-D objective error        (tolerance = 1e-06)
+WARNING: LP solver claims optimality, but with
+WARNING:    num/max      1 / 1.28e-06 relative primal infeasibilities (tolerance = 1e-06)
+WARNING:    num/max      2 / 1.41e-06 relative   dual infeasibilities (tolerance = 1e-06)
+Model status is "Optimal" since relative violation of tolerances is no more than     1.41
+
+Performed postsolve
+WARNING: Solution optimality conditions
+num/max    509 /    0.021 (relative      1 / 1.28e-06) primal infeasibilities     (tolerance = 1e-06)
+num/max      5 / 6.06e-06 (relative      2 / 1.41e-06)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 9.09e-13 (relative      0 / 5.52e-17) primal residual errors     (tolerance = 1e-06)
+num/max      9 / 3.13e-06 (relative      0 / 7.29e-07)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 7.13e-07  P-D objective error        (tolerance = 1e-06)
+WARNING: LP solver claims optimality, but with
+WARNING:    num/max      1 / 1.28e-06 relative primal infeasibilities (tolerance = 1e-06)
+WARNING:    num/max      2 / 1.41e-06 relative   dual infeasibilities (tolerance = 1e-06)
+Model status is "Optimal" since relative violation of tolerances is no more than     1.41
+
+Model name          : pilot87
+Model status        : Optimal
+PDLP      iterations: 168360
+Objective value     :  3.0171592827e+02
+P-D objective error :  7.1342802024e-07
+HiGHS run time      :         32.69
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "simplex"
+Set option time_limit to 180
+LP pilot87 has 2030 rows; 4883 cols; 73152 nonzeros
+Coefficient ranges:
+  Matrix  [1e-06, 1e+03]
+  Cost    [1e-06, 3e+00]
+  Bound   [2e-02, 2e+04]
+  RHS     [1e-02, 6e+03]
+WARNING: Problem has some excessively small costs
+Presolving model
+1980 rows, 4605 cols, 70440 nonzeros 0s
+Dependent equations search running on 102 equations with time limit of 1.80s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1.80s)
+1700 rows, 4310 cols, 69850 nonzeros 0s
+Presolve reductions: rows 1700(-330); columns 4310(-573); nonzeros 69850(-3302) 
+Solving the presolved LP
+Using dual simplex solver
+  Iteration        Objective     Infeasibilities num(sum)
+          0    -1.9013963147e+01 Ph1: 609(60514.1); Du: 360(19.014) 0.1s
+       8956     3.0171034734e+02 Pr: 0(0); Du: 0(5.3322e-11) 4.6s
+       8956     3.0171034734e+02 Pr: 0(0); Du: 0(5.3322e-11) 4.6s
+
+Performed postsolve
+Solving the original LP from the solution after postsolve
+
+Model name          : pilot87
+Model status        : Optimal
+Simplex   iterations: 8956
+Objective value     :  3.0171034733e+02
+P-D objective error :  1.4106917424e-15
+HiGHS run time      :          4.61
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "pdlp"
+Set option time_limit to 180
+Set option kkt_tolerance to 1e-06
+LP maros-r7 has 3136 rows; 9408 cols; 144848 nonzeros
+Coefficient ranges:
+  Matrix  [2e-03, 1e+00]
+  Cost    [1e+00, 1e+00]
+  Bound   [0e+00, 0e+00]
+  RHS     [1e+00, 3e+04]
+Presolving model
+2152 rows, 7440 cols, 100486 nonzeros 0s
+Dependent equations search running on 2152 equations with time limit of 1.80s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1.80s)
+2152 rows, 6605 cols, 80194 nonzeros 0s
+Presolve reductions: rows 2152(-984); columns 6605(-2803); nonzeros 80194(-64654) 
+Solving the presolved LP
+WARNING: Solution optimality conditions: Before postsolve
+num/max   1166 /    0.203 (relative      3 / 6.48e-06) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 /        0 (relative      0 /        0)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 2.18e-11 (relative      0 / 6.95e-16) primal residual errors     (tolerance = 1e-06)
+num/max     22 / 6.84e-05 (relative     10 / 2.94e-05)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 5.02e-08  P-D objective error        (tolerance = 1e-06)
+WARNING: LP solver claims optimality, but with
+WARNING:    num/max      3 / 6.48e-06 relative primal infeasibilities (tolerance = 1e-06)
+WARNING:    num/max     10 / 2.94e-05 relative   dual residual errors (tolerance = 1e-06)
+Model status is "Optimal" since relative violation of tolerances is no more than     29.4
+
+Performed postsolve
+WARNING: Solution optimality conditions
+num/max   1166 /    0.203 (relative      3 / 6.48e-06) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 /        0 (relative      0 /        0)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 3.64e-12 (relative      0 / 1.16e-16) primal residual errors     (tolerance = 1e-06)
+num/max     22 / 6.84e-05 (relative     12 / 3.42e-05)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 5.02e-08  P-D objective error        (tolerance = 1e-06)
+WARNING: LP solver claims optimality, but with
+WARNING:    num/max      3 / 6.48e-06 relative primal infeasibilities (tolerance = 1e-06)
+WARNING:    num/max     12 / 3.42e-05 relative   dual residual errors (tolerance = 1e-06)
+Model status is "Optimal" since relative violation of tolerances is no more than     34.2
+
+Model name          : maros-r7
+Model status        : Optimal
+PDLP      iterations: 3720
+Objective value     :  1.4971848615e+06
+P-D objective error :  5.0172949766e-08
+HiGHS run time      :          0.85
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "simplex"
+Set option time_limit to 180
+LP maros-r7 has 3136 rows; 9408 cols; 144848 nonzeros
+Coefficient ranges:
+  Matrix  [2e-03, 1e+00]
+  Cost    [1e+00, 1e+00]
+  Bound   [0e+00, 0e+00]
+  RHS     [1e+00, 3e+04]
+Presolving model
+2152 rows, 7440 cols, 100486 nonzeros 0s
+Dependent equations search running on 2152 equations with time limit of 1.80s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1.80s)
+2152 rows, 6605 cols, 80194 nonzeros 0s
+Presolve reductions: rows 2152(-984); columns 6605(-2803); nonzeros 80194(-64654) 
+Solving the presolved LP
+Using dual simplex solver
+  Iteration        Objective     Infeasibilities num(sum)
+          0     8.0359900000e+05 Pr: 2152(1.03012e+07) 0.1s
+       2498     1.4971851665e+06 Pr: 0(0) 0.6s
+
+Performed postsolve
+Solving the original LP from the solution after postsolve
+
+Model name          : maros-r7
+Model status        : Optimal
+Simplex   iterations: 2498
+Objective value     :  1.4971851665e+06
+P-D objective error :  6.9980492059e-16
+HiGHS run time      :          0.57
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "pdlp"
+Set option time_limit to 120
+Set option kkt_tolerance to 1e-06
+LP pilot87 has 2030 rows; 4883 cols; 73152 nonzeros
+Coefficient ranges:
+  Matrix  [1e-06, 1e+03]
+  Cost    [1e-06, 3e+00]
+  Bound   [2e-02, 2e+04]
+  RHS     [1e-02, 6e+03]
+WARNING: Problem has some excessively small costs
+Presolving model
+1980 rows, 4605 cols, 70440 nonzeros 0s
+Dependent equations search running on 102 equations with time limit of 1.20s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1.20s)
+1700 rows, 4310 cols, 69849 nonzeros 0s
+Presolve reductions: rows 1700(-330); columns 4310(-573); nonzeros 69849(-3303) 
+Solving the presolved LP
+WARNING: Solution optimality conditions: Before postsolve
+num/max    504 /    0.021 (relative      1 / 1.28e-06) primal infeasibilities     (tolerance = 1e-06)
+num/max      5 / 6.06e-06 (relative      2 / 1.41e-06)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 1.73e-11 (relative      0 / 1.05e-15) primal residual errors     (tolerance = 1e-06)
+num/max      9 / 3.13e-06 (relative      0 / 7.29e-07)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 7.13e-07  P-D objective error        (tolerance = 1e-06)
+WARNING: LP solver claims optimality, but with
+WARNING:    num/max      1 / 1.28e-06 relative primal infeasibilities (tolerance = 1e-06)
+WARNING:    num/max      2 / 1.41e-06 relative   dual infeasibilities (tolerance = 1e-06)
+Model status is "Optimal" since relative violation of tolerances is no more than     1.41
+
+Performed postsolve
+WARNING: Solution optimality conditions
+num/max    509 /    0.021 (relative      1 / 1.28e-06) primal infeasibilities     (tolerance = 1e-06)
+num/max      5 / 6.06e-06 (relative      2 / 1.41e-06)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 9.09e-13 (relative      0 / 5.52e-17) primal residual errors     (tolerance = 1e-06)
+num/max      9 / 3.13e-06 (relative      0 / 7.29e-07)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 7.13e-07  P-D objective error        (tolerance = 1e-06)
+WARNING: LP solver claims optimality, but with
+WARNING:    num/max      1 / 1.28e-06 relative primal infeasibilities (tolerance = 1e-06)
+WARNING:    num/max      2 / 1.41e-06 relative   dual infeasibilities (tolerance = 1e-06)
+Model status is "Optimal" since relative violation of tolerances is no more than     1.41
+
+Model name          : pilot87
+Model status        : Optimal
+PDLP      iterations: 168360
+Objective value     :  3.0171592827e+02
+P-D objective error :  7.1342802024e-07
+HiGHS run time      :         28.26
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "simplex"
+Set option time_limit to 120
+LP pilot87 has 2030 rows; 4883 cols; 73152 nonzeros
+Coefficient ranges:
+  Matrix  [1e-06, 1e+03]
+  Cost    [1e-06, 3e+00]
+  Bound   [2e-02, 2e+04]
+  RHS     [1e-02, 6e+03]
+WARNING: Problem has some excessively small costs
+Presolving model
+1980 rows, 4605 cols, 70440 nonzeros 0s
+Dependent equations search running on 102 equations with time limit of 1.20s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1.20s)
+1700 rows, 4310 cols, 69850 nonzeros 0s
+Presolve reductions: rows 1700(-330); columns 4310(-573); nonzeros 69850(-3302) 
+Solving the presolved LP
+Using dual simplex solver
+  Iteration        Objective     Infeasibilities num(sum)
+          0    -1.9013963147e+01 Ph1: 609(60514.1); Du: 360(19.014) 0.1s
+       8956     3.0171034734e+02 Pr: 0(0); Du: 0(5.3322e-11) 4.0s
+       8956     3.0171034734e+02 Pr: 0(0); Du: 0(5.3322e-11) 4.0s
+
+Performed postsolve
+Solving the original LP from the solution after postsolve
+
+Model name          : pilot87
+Model status        : Optimal
+Simplex   iterations: 8956
+Objective value     :  3.0171034733e+02
+P-D objective error :  1.4106917424e-15
+HiGHS run time      :          3.99
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "pdlp"
+Set option time_limit to 120
+Set option kkt_tolerance to 1e-06
+LP maros-r7 has 3136 rows; 9408 cols; 144848 nonzeros
+Coefficient ranges:
+  Matrix  [2e-03, 1e+00]
+  Cost    [1e+00, 1e+00]
+  Bound   [0e+00, 0e+00]
+  RHS     [1e+00, 3e+04]
+Presolving model
+2152 rows, 7440 cols, 100486 nonzeros 0s
+Dependent equations search running on 2152 equations with time limit of 1.20s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1.20s)
+2152 rows, 6605 cols, 80194 nonzeros 0s
+Presolve reductions: rows 2152(-984); columns 6605(-2803); nonzeros 80194(-64654) 
+Solving the presolved LP
+WARNING: Solution optimality conditions: Before postsolve
+num/max   1166 /    0.203 (relative      3 / 6.48e-06) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 /        0 (relative      0 /        0)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 2.18e-11 (relative      0 / 6.95e-16) primal residual errors     (tolerance = 1e-06)
+num/max     22 / 6.84e-05 (relative     10 / 2.94e-05)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 5.02e-08  P-D objective error        (tolerance = 1e-06)
+WARNING: LP solver claims optimality, but with
+WARNING:    num/max      3 / 6.48e-06 relative primal infeasibilities (tolerance = 1e-06)
+WARNING:    num/max     10 / 2.94e-05 relative   dual residual errors (tolerance = 1e-06)
+Model status is "Optimal" since relative violation of tolerances is no more than     29.4
+
+Performed postsolve
+WARNING: Solution optimality conditions
+num/max   1166 /    0.203 (relative      3 / 6.48e-06) primal infeasibilities     (tolerance = 1e-06)
+num/max      0 /        0 (relative      0 /        0)   dual infeasibilities     (tolerance = 1e-06)
+num/max      0 / 3.64e-12 (relative      0 / 1.16e-16) primal residual errors     (tolerance = 1e-06)
+num/max     22 / 6.84e-05 (relative     12 / 3.42e-05)   dual residual errors     (tolerance = 1e-06)
+                                         0 / 5.02e-08  P-D objective error        (tolerance = 1e-06)
+WARNING: LP solver claims optimality, but with
+WARNING:    num/max      3 / 6.48e-06 relative primal infeasibilities (tolerance = 1e-06)
+WARNING:    num/max     12 / 3.42e-05 relative   dual residual errors (tolerance = 1e-06)
+Model status is "Optimal" since relative violation of tolerances is no more than     34.2
+
+Model name          : maros-r7
+Model status        : Optimal
+PDLP      iterations: 3720
+Objective value     :  1.4971848615e+06
+P-D objective error :  5.0172949766e-08
+HiGHS run time      :          1.09
+Running HiGHS 1.15.1 (git hash: n/a): Copyright (c) 2026 under MIT licence terms
+Includes third-party software components, see THIRD_PARTY_NOTICES.md for full details
+Command line parsed using CLI11 2.5.0: Copyright (c) 2017-2025 University of Cincinnati
+Set option solver to "simplex"
+Set option time_limit to 120
+LP maros-r7 has 3136 rows; 9408 cols; 144848 nonzeros
+Coefficient ranges:
+  Matrix  [2e-03, 1e+00]
+  Cost    [1e+00, 1e+00]
+  Bound   [0e+00, 0e+00]
+  RHS     [1e+00, 3e+04]
+Presolving model
+2152 rows, 7440 cols, 100486 nonzeros 0s
+Dependent equations search running on 2152 equations with time limit of 1.20s
+Dependent equations search removed 0 rows and 0 nonzeros in 0.00s (limit = 1.20s)
+2152 rows, 6605 cols, 80194 nonzeros 0s
+Presolve reductions: rows 2152(-984); columns 6605(-2803); nonzeros 80194(-64654) 
+Solving the presolved LP
+Using dual simplex solver
+  Iteration        Objective     Infeasibilities num(sum)
+          0     8.0359900000e+05 Pr: 2152(1.03012e+07) 0.1s
+       2498     1.4971851665e+06 Pr: 0(0) 0.6s
+
+Performed postsolve
+Solving the original LP from the solution after postsolve
+
+Model name          : maros-r7
+Model status        : Optimal
+Simplex   iterations: 2498
+Objective value     :  1.4971851665e+06
+P-D objective error :  6.9980492059e-16
+HiGHS run time      :          0.58

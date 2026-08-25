@@ -33,6 +33,12 @@ struct PdhgOptions {
   // the relative 2-norm criterion alone lets real violations through.
   double absolute_tolerance = 0.0;
 
+  // Require the infinity-norm relative criteria as well as PDLP's 2-norm ones.
+  // On by default: the 2-norm form on its own reported "optimal" on
+  // irish-electricity at a point whose objective was 3.6% wrong. Turn it off to
+  // reproduce plain PDLP behaviour.
+  bool require_inf_norm_termination = true;
+
   // Each of these is a separate piece of machinery, kept switchable so their
   // effect can be measured one at a time rather than asserted.
   bool adaptive_step_size = true;
@@ -75,15 +81,30 @@ struct PdhgResidual {
   double relative_dual = 0.0;
   double relative_gap = 0.0;
 
+  // The same two residuals measured in the infinity norm and normalised by the
+  // infinity norm of the data. PDLP uses the 2-norm form above; HiGHS and OSQP
+  // use this one. The difference matters on tall problems: a 2-norm residual
+  // divided by ||q||_2 accumulates the right-hand side over a hundred thousand
+  // rows, so a single genuinely violated constraint disappears into the
+  // denominator. The infinity-norm form cannot hide one bad row.
+  double relative_primal_inf = 0.0;
+  double relative_dual_inf = 0.0;
+
   // `absolute_tolerance` of 0 keeps the pure PDLP behaviour; anything positive
   // additionally demands that no single row or reduced cost is out by more than
   // that much, which is what HiGHS and OSQP do.
-  bool converged(double tolerance, double absolute_tolerance = 0.0) const {
-    const bool relative_ok = relative_primal <= tolerance &&
-                             relative_dual <= tolerance && relative_gap <= tolerance;
-    if (absolute_tolerance <= 0.0) return relative_ok;
-    return relative_ok && primal_residual_inf <= absolute_tolerance &&
+  bool converged(double tolerance, double absolute_tolerance = 0.0,
+                 bool require_inf_norm = true) const {
+    bool ok = relative_primal <= tolerance && relative_dual <= tolerance &&
+              relative_gap <= tolerance;
+    if (require_inf_norm) {
+      ok = ok && relative_primal_inf <= tolerance && relative_dual_inf <= tolerance;
+    }
+    if (absolute_tolerance > 0.0) {
+      ok = ok && primal_residual_inf <= absolute_tolerance &&
            dual_residual_inf <= absolute_tolerance;
+    }
+    return ok;
   }
 };
 
