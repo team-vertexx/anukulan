@@ -1,5 +1,7 @@
 #include "sankhya/pdhg.hpp"
 
+#include "sankhya/backend.hpp"
+
 #include <chrono>
 #include <cmath>
 #include <algorithm>
@@ -144,12 +146,6 @@ double estimate_matrix_norm(const StandardLp& lp, int iterations, double toleran
 
 namespace {
 
-// The weighted norm PDLP works in: ||(x, y)||_omega^2 = omega ||x||^2 + ||y||^2 / omega.
-double weighted_norm_squared(const std::vector<double>& dx, const std::vector<double>& dy,
-                             double omega) {
-  return omega * dot(dx, dx) + dot(dy, dy) / omega;
-}
-
 // The restart criterion. PDLP restarts on a normalized duality gap, which needs a
 // trust-region subproblem; cuPDLP replaces it with this weighted KKT error
 // because it is a handful of reductions and so suits a GPU. Same three terms:
@@ -221,6 +217,7 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
 
   // Everything below runs on a scaled copy; convergence is judged on the
   // original, because that is the problem that was asked about.
+  const LinAlgBackend& backend = cpu_backend();
   StandardLp lp = original;
   result.scaling = scale_lp(&lp, options.scaling);
 
@@ -289,7 +286,7 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
   std::vector<double> dy(sz(m), 0.0);
   std::vector<double> k_dx(sz(m), 0.0);
 
-  lp.k.multiply(x.data(), k_x.data());
+  backend.multiply(lp.k, x.data(), k_x.data());
 
   // Running average over the current restart period, weighted by step size, and
   // the anchors the restart rules compare against.
@@ -318,7 +315,7 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
   PdhgStatus status = PdhgStatus::kIterationLimit;
 
   for (; iteration < options.max_iterations; ++iteration) {
-    lp.kt.multiply(y.data(), kt_y.data());
+    backend.multiply_transpose(lp.kt, y.data(), kt_y.data());
 
     // One PDHG step, retried at a smaller step size if the adaptive rule rejects
     // it. Rejected trials cost one matrix-vector product each.
@@ -326,28 +323,15 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
       const double tau = eta / omega;
       const double sigma = eta * omega;
 
-      for (Int j = 0; j < n; ++j) {
-        const std::size_t sj = sz(j);
-        double v = x[sj] - tau * (lp.c[sj] - kt_y[sj]);
-        if (v < lp.lower[sj]) v = lp.lower[sj];
-        if (v > lp.upper[sj]) v = lp.upper[sj];
-        x_next[sj] = v;
-        dx[sj] = v - x[sj];
-        x_bar[sj] = v + dx[sj];  // 2 x_next - x, the extrapolated point
-      }
+      backend.primal_step(n, tau, x.data(), lp.c.data(), kt_y.data(),
+                          lp.lower.data(), lp.upper.data(), x_next.data(),
+                          dx.data(), x_bar.data());
 
-      lp.k.multiply(x_bar.data(), k_x_bar.data());
+      backend.multiply(lp.k, x_bar.data(), k_x_bar.data());
 
-      for (Int i = 0; i < m; ++i) {
-        const std::size_t si = sz(i);
-        double v = y[si] + sigma * (lp.q[si] - k_x_bar[si]);
-        if (i >= lp.num_equalities && v < 0.0) v = 0.0;
-        y_next[si] = v;
-        dy[si] = v - y[si];
-        // K x_bar = 2 K x_next - K x, so K (x_next - x) comes out of the two
-        // products already computed - no extra matrix-vector product needed.
-        k_dx[si] = 0.5 * (k_x_bar[si] - k_x[si]);
-      }
+      backend.dual_step(m, lp.num_equalities, sigma, y.data(), lp.q.data(),
+                        k_x_bar.data(), k_x.data(), y_next.data(), dy.data(),
+                        k_dx.data());
 
       if (!options.adaptive_step_size) break;
 
@@ -357,8 +341,10 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
       // eta * |dy' K dx| stays under half the weighted movement. Dropping the
       // absolute value here lets eta grow without bound whenever the
       // interaction happens to be negative, and the iterates blow up.
-      const double interaction = std::fabs(dot(dy, k_dx));
-      const double movement = weighted_norm_squared(dx, dy, omega);
+      const double interaction =
+          std::fabs(backend.dot(dy.data(), k_dx.data(), m));
+      const double movement =
+          backend.weighted_norm_squared(n, m, dx.data(), dy.data(), omega);
       double eta_bar = kInf;
       if (interaction > 0.0) eta_bar = movement / (2.0 * interaction);
 
@@ -378,14 +364,14 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
       if (attempt > 60) break;  // give up rejecting and take the step
     }
 
-    for (Int i = 0; i < m; ++i) k_x[sz(i)] = 0.5 * (k_x_bar[sz(i)] + k_x[sz(i)]);
+    backend.advance_kx(m, k_x_bar.data(), k_x.data());
     x.swap(x_next);
     y.swap(y_next);
     ++iterations_since_restart;
 
     if (options.restarts) {
-      for (Int j = 0; j < n; ++j) sum_x[sz(j)] += eta * x[sz(j)];
-      for (Int i = 0; i < m; ++i) sum_y[sz(i)] += eta * y[sz(i)];
+      backend.accumulate(n, eta, x.data(), sum_x.data());
+      backend.accumulate(m, eta, y.data(), sum_y.data());
       sum_weight += eta;
     }
 
@@ -398,8 +384,8 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
     bool use_average = false;
     double candidate_kkt = current_kkt;
     if (options.restarts && sum_weight > 0.0) {
-      for (Int j = 0; j < n; ++j) avg_x[sz(j)] = sum_x[sz(j)] / sum_weight;
-      for (Int i = 0; i < m; ++i) avg_y[sz(i)] = sum_y[sz(i)] / sum_weight;
+      backend.scale_into(n, sum_weight, sum_x.data(), avg_x.data());
+      backend.scale_into(m, sum_weight, sum_y.data(), avg_y.data());
       const double average_kkt = weighted_kkt_error(lp, avg_x, avg_y, omega, &kkt_work);
       if (average_kkt < current_kkt) {
         use_average = true;
@@ -457,7 +443,7 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
 
     x = cand_x;
     y = cand_y;
-    lp.k.multiply(x.data(), k_x.data());
+    backend.multiply(lp.k, x.data(), k_x.data());
 
     if (options.primal_weight_updates && have_previous_restart) {
       // Exponential smoothing in log space, theta = 0.5, so the new weight is

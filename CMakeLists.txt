@@ -14,6 +14,7 @@ option(SANKHYA_WERROR "Treat warnings as errors" ON)
 
 add_library(sankhya
   src/sankhya/sparse.cpp
+  src/sankhya/backend.cpp
   src/sankhya/model.cpp
   src/sankhya/mps_reader.cpp
   src/sankhya/standard_form.cpp
