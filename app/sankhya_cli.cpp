@@ -340,6 +340,10 @@ int command_simplex(const std::vector<std::string>& args) {
       options.primal_tolerance = v;
     } else if (value_of(a, "--dual-tol=", &v)) {
       options.dual_tolerance = v;
+    } else if (a == "--dantzig") {
+      options.pricing = sankhya::SimplexOptions::Pricing::kDantzig;
+    } else if (a == "--devex") {
+      options.pricing = sankhya::SimplexOptions::Pricing::kDevex;
     } else if (a == "--presolve") {
       use_presolve = true;
     } else if (a == "--verbose") {
@@ -402,6 +406,7 @@ int command_simplex(const std::vector<std::string>& args) {
         << "\"bland_switches\":" << r.bland_switches << ","
         << "\"worst_update_growth\":" << r.worst_update_growth << ","
         << "\"rollbacks\":" << r.rollbacks << ","
+        << "\"devex_resets\":" << r.devex_resets << ","
         << "\"seconds\":" << r.solve_seconds << ","
         << "\"presolved\":" << use_presolve << ","
         << "\"row_violation\":" << checked.row_violation << ","

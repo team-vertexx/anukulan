@@ -191,6 +191,14 @@ void SimplexBasis::compute_duals(const LogicalForm& form, std::vector<double>* d
   }
 }
 
+void SimplexBasis::pivot_row(const LogicalForm& form, Int row,
+                             std::vector<double>* rho) const {
+  rho->assign(sz(form.num_rows), 0.0);
+  if (row < 0 || row >= form.num_rows) return;
+  (*rho)[sz(row)] = 1.0;
+  btran(rho);
+}
+
 void SimplexBasis::ftran_column(const LogicalForm& form, Int column,
                                 std::vector<double>* out) const {
   out->assign(sz(form.num_rows), 0.0);
@@ -334,6 +342,12 @@ SimplexResult solve_simplex(const StandardLp& lp, const SimplexOptions& options)
   // Two ratios counting as equal, for the tie-break Bland's rule needs.
   constexpr double kRatioTie = 1e-9;
   Int degenerate_run = 0;
+
+  // Devex reference weights. One per column; the reference framework is the
+  // nonbasic set at the moment they were last all set to one.
+  std::vector<double> weight(sz(columns), 1.0);
+  std::vector<double> pivot_row_work;
+  std::vector<double> rho;
   bool bland = false;
 
   for (; iteration < options.max_iterations; ++iteration) {
@@ -400,7 +414,7 @@ SimplexResult solve_simplex(const StandardLp& lp, const SimplexOptions& options)
     // anti-cycling guarantee that lives here; the other half is in the ratio
     // test below. Both ends have to follow it for the guarantee to hold.
     Int entering = -1;
-    double best = options.dual_tolerance;
+    double best = 0.0;
     bool increase = true;
     for (Int j = 0; j < columns; ++j) {
       const VarStatus st = basis.status()[sz(j)];
@@ -418,18 +432,31 @@ SimplexResult solve_simplex(const StandardLp& lp, const SimplexOptions& options)
         }
         continue;
       }
-      if (st == VarStatus::kAtLower && -d > best) {
-        best = -d;
+      // Eligibility is on the reduced cost itself; only the ranking is
+      // normalised. A column that does not improve the objective must never be
+      // made attractive by a small weight.
+      double magnitude = 0.0;
+      bool up = true;
+      if (st == VarStatus::kAtLower && d < -options.dual_tolerance) {
+        magnitude = -d;
+        up = true;
+      } else if (st == VarStatus::kAtUpper && d > options.dual_tolerance) {
+        magnitude = d;
+        up = false;
+      } else if (st == VarStatus::kFree && std::fabs(d) > options.dual_tolerance) {
+        magnitude = std::fabs(d);
+        up = d < 0.0;
+      } else {
+        continue;
+      }
+
+      const double score = options.pricing == SimplexOptions::Pricing::kDevex
+                               ? magnitude * magnitude / std::fmax(weight[sz(j)], 1e-12)
+                               : magnitude;
+      if (score > best) {
+        best = score;
         entering = j;
-        increase = true;
-      } else if (st == VarStatus::kAtUpper && d > best) {
-        best = d;
-        entering = j;
-        increase = false;
-      } else if (st == VarStatus::kFree && std::fabs(d) > best) {
-        best = std::fabs(d);
-        entering = j;
-        increase = d < 0.0;
+        increase = up;
       }
     }
 
@@ -539,6 +566,51 @@ SimplexResult solve_simplex(const StandardLp& lp, const SimplexOptions& options)
       basis.status()[sz(entering)] = increase ? VarStatus::kAtUpper
                                               : VarStatus::kAtLower;
       continue;
+    }
+
+    // Devex update, before the basis changes, because the pivot row it needs is
+    // a row of the current basis inverse.
+    //
+    //   w_j  <- max(w_j, (alpha_rj / alpha_r)^2 * w_q)   for nonbasic j
+    //   w_r  <- max(w_q / alpha_r^2, 1)                  for the one leaving
+    //
+    // alpha_rj is the pivot row of the tableau, rho' a_j, and alpha_r is the
+    // pivot itself. The weights only ever rise within a framework, which is
+    // what keeps the estimate an upper bound on the true edge norm and what
+    // makes the reset below necessary.
+    if (options.pricing == SimplexOptions::Pricing::kDevex) {
+      const double alpha_r = column[sz(leaving_row)];
+      if (std::fabs(alpha_r) > 1e-12) {
+        basis.pivot_row(form, leaving_row, &rho);
+        const double wq = std::fmax(weight[sz(entering)], 1.0);
+        const double inv = 1.0 / alpha_r;
+        double largest = 0.0;
+        for (Int j = 0; j < columns; ++j) {
+          if (j == entering) continue;
+          if (basis.status()[sz(j)] == VarStatus::kBasic) continue;
+          double alpha_rj = 0.0;
+          for (Int e = form.columns.row_begin(j); e < form.columns.row_end(j); ++e) {
+            alpha_rj += form.columns.value()[sz(e)] *
+                        rho[sz(form.columns.index()[sz(e)])];
+          }
+          if (alpha_rj == 0.0) continue;
+          const double ratio = alpha_rj * inv;
+          const double candidate = ratio * ratio * wq;
+          if (candidate > weight[sz(j)]) weight[sz(j)] = candidate;
+          largest = std::fmax(largest, weight[sz(j)]);
+        }
+        const double leaving_weight = std::fmax(wq * inv * inv, 1.0);
+        weight[sz(basis.basic()[sz(leaving_row)])] = leaving_weight;
+        weight[sz(entering)] = 1.0;
+        largest = std::fmax(largest, leaving_weight);
+
+        // Past the threshold the estimates have drifted too far from the true
+        // norms to rank anything usefully, so the framework restarts here.
+        if (largest > options.devex_reset_weight) {
+          std::fill(weight.begin(), weight.end(), 1.0);
+          ++result.devex_resets;
+        }
+      }
     }
 
     if (step > options.degenerate_step) {
