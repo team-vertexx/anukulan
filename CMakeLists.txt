@@ -35,6 +35,7 @@ add_library(sankhya
   src/sankhya/qp.cpp
   src/sankhya/cuts.cpp
   src/sankhya/lu.cpp
+  src/sankhya/simplex.cpp
 )
 target_include_directories(sankhya PUBLIC src)
 
