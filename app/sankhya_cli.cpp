@@ -340,6 +340,8 @@ int command_simplex(const std::vector<std::string>& args) {
       options.primal_tolerance = v;
     } else if (value_of(a, "--dual-tol=", &v)) {
       options.dual_tolerance = v;
+    } else if (a == "--piecewise-phase-one") {
+      options.piecewise_phase_one = true;
     } else if (a == "--dantzig") {
       options.pricing = sankhya::SimplexOptions::Pricing::kDantzig;
     } else if (a == "--devex") {

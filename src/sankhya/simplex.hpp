@@ -146,13 +146,18 @@ struct SimplexOptions {
 
   Int max_iterations = 200000;
   double time_limit_seconds = 300.0;
-  // Measured, not chosen. Over sixteen Netlib instances the product form stays
-  // trustworthy up to 20 pivots between factorisations and stops at 25, where
-  // brandy reports a feasible model infeasible. A wrong answer is a worse
-  // failure than a slow one, so the default sits below the cliff rather than on
-  // it. Above 20 the extra speed is real - degen2 halves - and it is not worth
-  // having on a number that turns into a false infeasibility just past it.
-  Int refactorization_frequency = 15;
+  // Measured, and measured twice, because the first answer stopped being true.
+  //
+  // With a linear phase one ratio test the product form stayed trustworthy to
+  // 20 pivots between factorisations and broke at 25, where brandy reported a
+  // feasible model infeasible, so this sat at 15 to keep a margin below the
+  // cliff. The piecewise phase one removed the cliff rather than moving it:
+  // every frequency from 15 to 200 now solves all sixteen instances, and the
+  // whole set takes 2.71s at 15, 1.21s at 50 and 2.20s at 200.
+  //
+  // So a number chosen to survive a failure that no longer happens was costing
+  // more than twice the time. 50 is the bottom of that curve.
+  Int refactorization_frequency = 50;
 
   // Refactorising is driven by a count. A growth-based trigger was tried first
   // - refactorise once the largest 1/|pivot| since the last factorisation
@@ -180,6 +185,32 @@ struct SimplexOptions {
   // A step below this counts as degenerate for the purpose above.
   double degenerate_step = 1e-9;
 
+  // Walk phase one's breakpoints and stop where the slope of the sum of
+  // infeasibilities turns non-negative, instead of at the first blocking row.
+  // Phase one only - in phase two the objective really is linear and the
+  // ordinary test is right.
+  //
+  // Measured over sixteen Netlib instances: 16/16 either way, 32% fewer phase
+  // one iterations geomean, and the whole set in 1.46s against 1.60s. The
+  // averages undersell it, because what it really did was remove the reasons
+  // for three other things:
+  //
+  //   brandy goes from 20,109 iterations to 839, and from 0.61s to 0.03s. It
+  //     stops needing Bland's rule at all - 26 switches to none - so its
+  //     cycling was a symptom of stopping at the first breakpoint, not
+  //     something intrinsic to the model;
+  //   brandy also stops caring about the refactorisation frequency, solving at
+  //     15, 25, 50 and 100 where before it produced a false infeasibility past
+  //     20;
+  //   fit1p under Devex goes from "infeasible" to the published optimum. That
+  //     was the defect this was written for: a variable heading back into its
+  //     bounds with an infinite opposite bound blocked on nothing, and the step
+  //     came out unbounded. Here the slope turns at the violated bound whether
+  //     or not the far one exists, so the case cannot arise.
+  //
+  // fit1p under Dantzig is the one that got worse, 3260 iterations to 6747.
+  bool piecewise_phase_one = true;
+
   bool verbose = false;
   Int log_frequency = 1000;
 
@@ -193,30 +224,24 @@ struct SimplexOptions {
   // forward and corrected at each pivot, for one extra BTRAN and one extra pass
   // over the columns per iteration.
   //
-  // Dantzig is the default, and that is a measurement rather than a preference.
-  // Over sixteen Netlib instances Devex takes 1.13x fewer iterations geomean
-  // and 1.01x the wall clock - the per-iteration cost eats the saving almost
-  // exactly. It is well ahead on some (fit1p 3.0x fewer iterations, israel
-  // 1.95x, degen2 1.75x) and well behind on others (brandy 0.25x), which is
-  // what an average of 1.13 is made of rather than a uniform small win.
+  // Devex is the default, and that reverses an earlier decision made on an
+  // earlier measurement. Against a linear phase one ratio test it took 1.13x
+  // fewer iterations for 1.01x the wall clock - the extra BTRAN and column pass
+  // ate the saving exactly - and it failed fit1p outright, so Dantzig kept the
+  // default. With the piecewise phase one it takes 0.79x the iterations and
+  // solves all sixteen instances in 0.76s against Dantzig's 1.25s.
   //
-  // Worth being precise about what it did not do. Pricing only decides which
-  // improving column to take; every column it can pick still has a favourable
-  // reduced cost and the ratio test is untouched, so it cannot make an answer
-  // wrong. What it did was walk a different path, and on fit1p that path ends
-  // where brandy's used to: phase one at a point where no column improves the
-  // current sum of infeasibilities while the point is still infeasible, and the
-  // solver says "infeasible" about a feasible model.
+  // Neither number was wrong when it was taken. The ground moved: most of what
+  // Devex was buying was being spent again in a phase one that stopped at the
+  // first breakpoint, and its one failure was that phase one's hole rather than
+  // anything about pricing.
   //
-  // That is the phase one method's weakness, not Devex's. Minimising a sum of
-  // bound violations rebuilds its objective every iteration, and a vertex can
-  // be a local minimum of the current linearisation without the infeasibility
-  // being zero. The fix is a ratio test that lets a returning basic variable
-  // pass through its bound and takes the breakpoint that minimises the
-  // piecewise-linear objective, instead of blocking at the first arrival. That
-  // is the next thing worth doing here, and it is worth more than pricing.
+  // What pricing can and cannot do is worth keeping straight. It only decides
+  // which improving column to take; every column it may pick still has a
+  // favourable reduced cost, and the ratio test is untouched. A wrong weight
+  // makes the solver slower, never wrong.
   enum class Pricing { kDantzig, kDevex };
-  Pricing pricing = Pricing::kDantzig;
+  Pricing pricing = Pricing::kDevex;
 
   // The weights drift away from the true edge norms as the reference framework
   // ages. Past this the framework is reset to the current nonbasic set and
