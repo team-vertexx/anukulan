@@ -7,3 +7,4 @@ data/maros/
 *.o
 data/reference/_scratch/
 data/refinery/*.mps
+*.zip
