@@ -92,6 +92,19 @@ struct ModelViolation {
   Int worst_row = -1;
   Int worst_col = -1;
 
+  // The same row violation divided by 1 + the largest finite row bound, which
+  // is the normalisation the first-order method judges its own residuals by.
+  //
+  // Both numbers are here because comparing the wrong one to the wrong
+  // tolerance is a mistake this already made once. graph40-40 presolved missed
+  // a row by 1.34e-04 and was called a numerical error; unpresolved it missed
+  // one by 1.21e-04 and was called optimal. Same model, same answer of -300,
+  // same size of violation, opposite verdicts - because the absolute number was
+  // being held against --tol, which is a relative tolerance. An absolute
+  // violation belongs against --abs-tol and nothing else.
+  double relative_row_violation = 0.0;
+  double row_scale = 1.0;  // 1 + max |finite row bound|
+
   double worst() const {
     return row_violation > bound_violation ? row_violation : bound_violation;
   }

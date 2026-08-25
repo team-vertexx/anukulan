@@ -92,6 +92,16 @@ ModelViolation measure_violation(const Model& model, const std::vector<double>& 
       out.worst_row = i;
     }
   }
+
+  double largest_bound = 0.0;
+  for (Int i = 0; i < model.num_rows(); ++i) {
+    if (std::isfinite(model.row_lower[sz(i)]))
+      largest_bound = std::fmax(largest_bound, std::fabs(model.row_lower[sz(i)]));
+    if (std::isfinite(model.row_upper[sz(i)]))
+      largest_bound = std::fmax(largest_bound, std::fabs(model.row_upper[sz(i)]));
+  }
+  out.row_scale = 1.0 + largest_bound;
+  out.relative_row_violation = out.row_violation / out.row_scale;
   return out;
 }
 

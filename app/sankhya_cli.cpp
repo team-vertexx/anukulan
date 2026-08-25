@@ -558,16 +558,30 @@ int command_solve(const std::vector<std::string>& args) {
   // violation that survives them is PDLP's documented relative behaviour, which
   // --abs-tol exists to override. With presolve they describe the reduced model
   // instead, so nothing has checked the original unless this does.
+  // Which number is checked follows which tolerance was asked for. With
+  // --abs-tol the caller wants an absolute guarantee, so the absolute violation
+  // is what gets tested. Without it they asked for PDLP's relative criterion,
+  // and the honest comparison is the relative violation against the same --tol
+  // the unpresolved path is judged by. Holding the absolute number against a
+  // relative tolerance failed graph40-40 for a violation the unpresolved run
+  // was passing.
   bool violates_cap = false;
   if (use_presolve && r.status == sankhya::PdhgStatus::kOptimal) {
-    const double cap = options.absolute_tolerance > 0.0 ? options.absolute_tolerance
-                                                        : options.tolerance;
-    if (checked.worst() > cap) {
+    const bool absolute = options.absolute_tolerance > 0.0;
+    const double measured =
+        absolute ? checked.worst() : checked.relative_row_violation;
+    const double cap =
+        absolute ? options.absolute_tolerance : options.tolerance;
+    if (measured > cap) {
       violates_cap = true;
       r.status = sankhya::PdhgStatus::kNumericalError;
       r.message =
-          "solved the reduced model, but the point it maps back to misses the "
-          "original model's rows by more than the tolerance allows";
+          "the reduced model met the tolerance and the original does not. "
+          "presolve removes rows, and the rows it removes are often the ones "
+          "with the largest right-hand sides, which are what the relative "
+          "criterion divides by - so the same --tol is a stricter absolute "
+          "requirement on the model you handed in than on the one that was "
+          "solved. re-run with --abs-tol, or a tighter --tol";
     }
   }
 
@@ -598,6 +612,8 @@ int command_solve(const std::vector<std::string>& args) {
         << "\"objective\":" << r.objective << ","
         << "\"presolved\":" << use_presolve << ","
         << "\"original_row_violation\":" << checked.row_violation << ","
+        << "\"original_row_violation_relative\":"
+        << checked.relative_row_violation << ","
         << "\"original_bound_violation\":" << checked.bound_violation << ","
         << "\"iterations\":" << r.iterations << ","
         << "\"restarts\":" << r.restarts << ","

@@ -173,10 +173,17 @@ model means fewer nonzeros per kernel, and a GPU that was already underfed may
 not care. Step 6 of the script runs every large instance four ways, CPU and GPU
 crossed with presolve on and off, and writes `results/gpu_matrix.csv`.
 
-One thing to check rather than assume: presolve reports a `vs original` line
-now. If it says `<- over the tolerance`, the reduced model was solved to its
-own tolerance but the point that maps back misses the original model's rows.
-Re-run that instance with `--abs-tol=1e-8` and it should come out clean.
+Presolve reports a `vs original` line now, with both an absolute and a relative
+figure. If it says `<- over the tolerance`, the reduced model met the tolerance
+and the original does not, and the reason is worth knowing rather than working
+around: presolve removes rows, the rows it removes are often the ones carrying
+the largest right-hand sides, and those right-hand sides are what the relative
+criterion divides by. Take them out and the same `--tol` becomes a stricter
+absolute requirement on the model you handed in than on the one that was solved.
+
+Re-run that instance with `--abs-tol=1e-8`. On Netlib's share1b that takes the
+worst row violation from 4.2e-02 to 9.7e-09; on bandm and scfxm1 the objective
+error drops to 2.7e-10 and 2.0e-11.
 
 ---
 

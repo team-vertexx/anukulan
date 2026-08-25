@@ -41,9 +41,12 @@ def published_optima(path):
     return out
 
 
-def solve(binary, model, presolve, tol, time_limit, max_iter, solution=None):
+def solve(binary, model, presolve, tol, time_limit, max_iter, solution=None,
+          abs_tol=None):
     cmd = [binary, "solve", model, "--quiet", "--format=json",
            f"--tol={tol}", f"--time-limit={time_limit}", f"--max-iter={max_iter}"]
+    if abs_tol:
+        cmd.append(f"--abs-tol={abs_tol}")
     if presolve:
         cmd.append("--presolve")
     if solution:
@@ -81,6 +84,9 @@ def main():
                     default=os.path.join(ROOT, "data", "reference", "netlib.csv"))
     ap.add_argument("--instances", nargs="*", default=None)
     ap.add_argument("--tol", default="1e-6")
+    ap.add_argument("--abs-tol", default=None,
+                    help="also require no row of the original model violated by "
+                         "more than this in absolute terms")
     ap.add_argument("--time-limit", default="300")
     ap.add_argument("--max-iter", default="1000000")
     ap.add_argument("--tolerance", type=float, default=1e-5,
@@ -104,9 +110,11 @@ def main():
         target = optima.get(name)
         if target is None or not os.path.exists(model):
             continue
-        plain = solve(args.binary, model, False, args.tol, args.time_limit, args.max_iter)
+        plain = solve(args.binary, model, False, args.tol, args.time_limit,
+                      args.max_iter, abs_tol=args.abs_tol)
         sol = os.path.join("/tmp", f"presolved_{name}.sol") if args.check_feasibility else None
-        pre = solve(args.binary, model, True, args.tol, args.time_limit, args.max_iter, sol)
+        pre = solve(args.binary, model, True, args.tol, args.time_limit,
+                    args.max_iter, sol, abs_tol=args.abs_tol)
         if plain is None or pre is None:
             print(f"{name:12s} did not produce a result")
             continue
@@ -123,7 +131,17 @@ def main():
 
         note = ""
         if not good:
-            note = "  <-- wrong" if err_pre >= args.tolerance else "  <-- did not converge"
+            if err_pre >= args.tolerance:
+                note = "  <-- wrong"
+            elif pre.get("original_row_violation_relative", 0.0) > float(args.tol):
+                # Right objective, but the point misses the original model's
+                # rows by more than the relative tolerance allows once the
+                # large right-hand sides presolve removed are out of the
+                # normaliser. Its own category: not a wrong answer, not a
+                # failure to converge.
+                note = "  <-- needs --abs-tol"
+            else:
+                note = "  <-- did not converge"
         elif pre["seconds"] > 1.5 * plain["seconds"] and plain["seconds"] > 0.05:
             note = "  <-- slower"
 
@@ -151,6 +169,12 @@ def main():
     print(f"\nreached the published optimum with presolve on: {agreed}/{compared}")
     if regressed:
         print(f"stopped converging once presolved: {regressed}")
+    needs_abs = sum(1 for r in rows
+                    if r["presolved_status"] != "optimal"
+                    and r["presolved_error"] < args.tolerance)
+    if needs_abs:
+        print(f"right objective, point outside the relative tolerance on the "
+              f"original model: {needs_abs} - re-run those with --abs-tol")
     if speedups:
         geo = math.exp(sum(math.log(s) for s in speedups) / len(speedups))
         print(f"geomean wall-clock speedup: {geo:.2f}x over {len(speedups)} instances "
