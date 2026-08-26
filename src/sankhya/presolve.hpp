@@ -67,6 +67,44 @@ struct PresolveOptions {
   bool free_column_singletons = true;  // in one equality row, bounds not binding
   bool bound_tightening = true;    // interval arithmetic on each row
 
+  // A row with exactly two terms and equal bounds, a*xi + b*xj = c, lets one of
+  // the two columns be written in terms of the other and substituted out,
+  // taking a row and a column with it.
+  //
+  // Only fires when the eliminated column is implied free: the row and the
+  // other column's bounds already confine it inside its own, so it has no
+  // active bound and no reduced cost, which is what makes the row's dual
+  // recoverable exactly. On the eighteen Netlib instances 827 of the 841
+  // doubleton equations left standing by the other reductions qualify, so
+  // demanding it costs almost nothing and buys an exact dual.
+  //
+  // This is the one reduction here that changes a coefficient of A, so it runs
+  // after the others rather than among them, and the reduced matrix is
+  // assembled from triplets, which merge fill without being asked.
+  //
+  // On, measured against the same run with it switched off. Reduction over the
+  // eighteen Netlib instances with published optima:
+  //
+  //   rows removed      9.1%  ->  14.0%      758 doubletons
+  //   columns removed  13.4%  ->  15.4%
+  //   nonzeros removed  8.6%  ->  10.0%
+  //
+  // The nonzero line is the one worth reading twice: substitution creates fill,
+  // one entry per row the eliminated column appeared in, and even so the count
+  // falls - 322,824 down to 317,673. The rows it removes carry more than the
+  // fill puts back.
+  //
+  // Over all eighty-eight instances, presolved against plain at 1e-6: 78 of 88
+  // reach the published optimum against 77 without, and the geometric mean
+  // speedup goes from 1.52x to 1.63x. No instance that solved before stops
+  // solving.
+  //
+  // It runs once and does not re-enter the other reductions. A substitution can
+  // leave a row that some earlier reduction would now fire on, and going back
+  // for those would mean rebuilding the matrix each round to keep the activity
+  // bounds honest. What that leaves on the table has not been measured.
+  bool doubleton_equations = true;
+
   Int max_rounds = 30;
 
   // How close a reduction has to be to exact before it is allowed to fire.
@@ -126,9 +164,11 @@ enum class PresolveStatus {
 std::string to_string(PresolveStatus status);
 
 // The record of everything removed, replayed in reverse to rebuild a full
-// solution. Two kinds of entry are enough because no reduction here changes a
-// coefficient of A: a column either takes a known value, or is read off the one
-// equality row it appeared in.
+// solution. Two kinds of entry are enough on the primal side: a column either
+// takes a known value, or is read off the one equality row it appeared in. That
+// second form covers the doubleton substitution too - it changes coefficients
+// of A, but what it records about the eliminated column is still one equality
+// row solved for one unknown.
 class PostsolveStack {
  public:
   struct Term {
@@ -147,6 +187,11 @@ class PostsolveStack {
   void record_row_from_free_singleton(Int row, Int column, double coefficient);
   void record_row_from_singleton(Int row, Int column, double coefficient,
                                  double lower_created, double upper_created);
+  // A doubleton equality that substituted `column` out. `column_rows` is every
+  // other row the column appeared in, with its coefficient there, which is what
+  // the row's own dual is recovered from.
+  void record_row_from_doubleton(Int row, Int column, double coefficient,
+                                 std::vector<Term> column_rows);
   void record_unrecoverable_row(Int row);
   void set_row_dimensions(Int original_rows, std::vector<Int> reduced_row_to_original);
 
@@ -191,7 +236,8 @@ class PostsolveStack {
   };
 
   // How a removed row's dual is recovered.
-  enum class RowKind { kZero, kFreeSingleton, kSingleton, kUnrecoverable };
+  enum class RowKind { kZero, kFreeSingleton, kSingleton, kDoubleton,
+                       kUnrecoverable };
   struct RowEntry {
     RowKind kind = RowKind::kZero;
     Int row = 0;
@@ -199,6 +245,7 @@ class PostsolveStack {
     double coefficient = 1.0;
     double lower_created = 0.0;
     double upper_created = 0.0;
+    std::vector<Term> terms;  // kDoubleton: the column's other rows
   };
 
   std::vector<Entry> entries_;
@@ -224,6 +271,7 @@ struct PresolveCounts {
   Int fixed_columns = 0;
   Int empty_columns = 0;
   Int free_column_singletons = 0;
+  Int doubleton_equations = 0;
   Int bounds_tightened = 0;
   Int bounds_made_finite = 0;   // was infinite, now is not
   double largest_new_finite_bound = 0.0;

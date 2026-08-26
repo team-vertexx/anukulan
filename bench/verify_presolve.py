@@ -16,6 +16,10 @@ Only then is the timing worth reading.
 """
 
 import argparse
+
+# Extra flags applied to the presolved run only, so one reduction can be
+# switched off and the two sides compared on the same harness.
+EXTRA = []
 import csv
 import json
 import math
@@ -49,6 +53,7 @@ def solve(binary, model, presolve, tol, time_limit, max_iter, solution=None,
         cmd.append(f"--abs-tol={abs_tol}")
     if presolve:
         cmd.append("--presolve")
+        cmd.extend(EXTRA)
     if solution:
         cmd.append(f"--solution={solution}")
     done = subprocess.run(cmd, capture_output=True, text=True)
@@ -94,6 +99,8 @@ def main():
     ap.add_argument("--max-iter", default="1000000")
     ap.add_argument("--tolerance", type=float, default=1e-5,
                     help="relative objective error allowed against the published optimum")
+    ap.add_argument("--extra", default="",
+                    help="extra flags for the presolved run, space separated")
     ap.add_argument("--check-feasibility", action="store_true")
     ap.add_argument("--csv", default=None)
     args = ap.parse_args()
@@ -112,6 +119,8 @@ def main():
             return 2
         print(f"using {args.binary}")
 
+    global EXTRA
+    EXTRA = args.extra.split() if args.extra else []
     optima = published_optima(args.reference)
     names = args.instances
     if not names:

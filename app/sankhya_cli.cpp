@@ -279,6 +279,8 @@ int command_presolve(const std::vector<std::string>& args) {
       options.forcing_rows = false;
     } else if (a == "--no-column-singletons") {
       options.free_column_singletons = false;
+    } else if (a == "--no-doubletons") {
+      options.doubleton_equations = false;
     } else if (a == "--rows-only") {
       options.fixed_columns = false;
       options.empty_columns = false;
@@ -320,6 +322,7 @@ int command_presolve(const std::vector<std::string>& args) {
         << "\"fixed_columns\":" << c.fixed_columns << ","
         << "\"empty_columns\":" << c.empty_columns << ","
         << "\"free_column_singletons\":" << c.free_column_singletons << ","
+        << "\"doubleton_equations\":" << c.doubleton_equations << ","
         << "\"bounds_tightened\":" << c.bounds_tightened << ","
         << "\"rounds\":" << c.rounds << ","
         << "\"seconds\":" << r.seconds << "}\n";
@@ -540,6 +543,9 @@ int command_solve(const std::vector<std::string>& args) {
       presolve_options.fixed_columns = false;
       presolve_options.empty_columns = false;
       presolve_options.free_column_singletons = false;
+    } else if (a == "--presolve-no-doubletons") {
+      use_presolve = true;
+      presolve_options.doubleton_equations = false;
     } else if (a == "--presolve-no-forcing") {
       use_presolve = true;
       presolve_options.forcing_rows = false;

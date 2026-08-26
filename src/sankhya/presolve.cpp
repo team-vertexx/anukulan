@@ -95,6 +95,18 @@ void PostsolveStack::record_row_from_singleton(Int row, Int column,
   row_entries_.push_back(e);
 }
 
+void PostsolveStack::record_row_from_doubleton(Int row, Int column,
+                                              double coefficient,
+                                              std::vector<Term> column_rows) {
+  RowEntry e;
+  e.kind = RowKind::kDoubleton;
+  e.row = row;
+  e.column = column;
+  e.coefficient = coefficient;
+  e.terms = std::move(column_rows);
+  row_entries_.push_back(std::move(e));
+}
+
 void PostsolveStack::record_unrecoverable_row(Int row) {
   RowEntry e;
   e.kind = RowKind::kUnrecoverable;
@@ -158,6 +170,22 @@ std::vector<double> PostsolveStack::apply_dual(
             std::fabs(entry.coefficient) > 1e-12 ? c / entry.coefficient : 0.0;
         break;
       }
+      case RowKind::kDoubleton: {
+        // The eliminated column was implied free, so its reduced cost is zero
+        // and stationarity reads
+        //     c_i = a * y_r + sum over the column's other rows of A_ki y_k
+        // with one unknown left. Those other rows survive into the reduced
+        // model - substitution changes their coefficients but not their duals -
+        // so their y is already in place by the time this runs.
+        const std::size_t j = sz(entry.column);
+        const double c = j < original_cost.size() ? original_cost[j] : 0.0;
+        double rest = 0.0;
+        for (const Term& t : entry.terms) rest += t.coefficient * y[sz(t.col)];
+        y[sz(entry.row)] =
+            std::fabs(entry.coefficient) > 1e-12 ? (c - rest) / entry.coefficient
+                                                 : 0.0;
+        break;
+      }
       case RowKind::kSingleton: {
         // The row became a bound on one column. In the reduced model that bound
         // carries the column's reduced cost; in the original there is no such
@@ -191,6 +219,19 @@ struct Workspace {
   std::vector<double> cost;  // in the minimise direction
   std::vector<char> integral;
   double cost_offset = 0.0;  // also in the minimise direction
+
+  // Doubleton substitutions, the one reduction that rewrites A. Recorded here
+  // and applied when the reduced matrix is assembled, because that is built
+  // from triplets and so absorbs both the changed coefficients and the fill.
+  struct Substitution {
+    Int column = 0;        // eliminated
+    Int other_column = 0;  // kept
+    double coefficient = 1.0;
+    double other_coefficient = 0.0;
+    double rhs = 0.0;
+  };
+  std::vector<Substitution> subs;
+  std::vector<Int> sub_of_col;  // -1, or an index into subs
 
   PostsolveStack* stack = nullptr;
   PresolveCounts* counts = nullptr;
@@ -705,6 +746,122 @@ bool merge_duplicate_rows(Workspace& w) {
   return changed;
 }
 
+// Doubleton equality substitution. A row a*xi + b*xj = c with the eliminated
+// column implied free: xi = (c - b*xj)/a, so every other row k holding xi
+// trades A_ki*xi for a constant A_ki*c/a - moved into that row's bounds here -
+// and a coefficient -A_ki*b/a on xj, left for build_reduced to emit.
+//
+// Runs once, after the other reductions have finished, and does not re-enter
+// them. A substitution can leave a row shorter or a column emptier than it
+// found it, and the reductions that would notice have already run; doing this
+// inside the loop would mean rebuilding the matrix every round to keep the
+// activity bounds honest.
+bool substitute_doubletons(Workspace& w, const PresolveOptions& opt,
+                           bool allow_removal) {
+  if (!opt.doubleton_equations || !allow_removal) return false;
+  w.sub_of_col.assign(sz(w.cols()), -1);
+  bool changed = false;
+
+  // Columns some earlier substitution in this pass now points at. One of them
+  // may not itself be eliminated later: the rows that traded a column for this
+  // one carry a coefficient on it that only appears when the reduced matrix is
+  // assembled, and eliminating it would leave those terms aimed at a column
+  // that is no longer there.
+  std::vector<char> kept(sz(w.cols()), 0);
+
+  std::vector<Int> live_col(2, 0);
+  std::vector<double> live_val(2, 0.0);
+  for (Int i = 0; i < w.rows(); ++i) {
+    if (!w.row_alive[sz(i)] || w.row_count[sz(i)] != 2) continue;
+    const double lo = w.rlo[sz(i)];
+    const double hi = w.rup[sz(i)];
+    if (!std::isfinite(lo) || !std::isfinite(hi)) continue;
+    if (std::fabs(hi - lo) > w.tol * scale_of(lo)) continue;  // not an equality
+    const double rhs = lo;
+
+    int live = 0;
+    bool blocked = false;
+    for (Int e = w.a->row_begin(i); e < w.a->row_end(i); ++e) {
+      const Int j = w.a->index()[sz(e)];
+      // Substituting a column out leaves every row that held it carrying a
+      // coefficient this matrix does not know about yet, so those rows have to
+      // be left alone for the rest of the pass. The test has to come before the
+      // liveness check, not after: a substituted column is also a dead one, and
+      // checking liveness first skips straight past the row that is stale.
+      if (w.sub_of_col[sz(j)] >= 0) { blocked = true; break; }
+      if (!w.col_alive[sz(j)]) continue;
+      // An integer column cannot be substituted at all: xi = (c - b*xj)/a is
+      // not whole for every whole xj.
+      if (w.integral[sz(j)]) { blocked = true; break; }
+      if (live < 2) { live_col[sz(live)] = j; live_val[sz(live)] = w.a->value()[sz(e)]; }
+      ++live;
+    }
+    if (blocked || live != 2) continue;
+
+    // Which of the two can go: the one the row already confines inside its own
+    // bounds. Prefer the cheaper of the two to eliminate, since the fill this
+    // creates is one entry per row the eliminated column appears in.
+    int pick = -1;
+    for (int t = 0; t < 2; ++t) {
+      const Int p = live_col[sz(t)], q = live_col[sz(1 - t)];
+      const double ap = live_val[sz(t)], aq = live_val[sz(1 - t)];
+      if (kept[sz(p)]) continue;
+      if (std::fabs(ap) < 1e-9 * scale_of(aq)) continue;
+      // xp = (rhs - aq*xq)/ap over xq in [clo_q, cup_q]
+      auto endpoint = [&](double xq) {
+        if (std::isinf(xq)) {
+          const double slope = -aq / ap;
+          if (slope == 0.0) return rhs / ap;
+          return ((xq > 0.0) == (slope > 0.0)) ? kInf : -kInf;
+        }
+        return (rhs - aq * xq) / ap;
+      };
+      double implied_lo = endpoint(w.clo[sz(q)]);
+      double implied_hi = endpoint(w.cup[sz(q)]);
+      if (implied_lo > implied_hi) std::swap(implied_lo, implied_hi);
+      const double give = w.tol * scale_of(rhs);
+      if (implied_lo < w.clo[sz(p)] - give) continue;
+      if (implied_hi > w.cup[sz(p)] + give) continue;
+      if (pick < 0 || w.col_count[sz(p)] < w.col_count[sz(live_col[sz(pick)])]) {
+        pick = t;
+      }
+    }
+    if (pick < 0) continue;
+
+    const Int p = live_col[sz(pick)], q = live_col[sz(1 - pick)];
+    const double ap = live_val[sz(pick)], aq = live_val[sz(1 - pick)];
+
+    kill_row(w, i);
+
+    // Every other row p appears in: shift its bounds by the constant the
+    // substitution leaves behind, and remember the coefficient for the dual.
+    std::vector<PostsolveStack::Term> column_rows;
+    const double constant = rhs / ap;
+    for (Int e = w.at.row_begin(p); e < w.at.row_end(p); ++e) {
+      const Int k = w.at.index()[sz(e)];
+      if (!w.row_alive[sz(k)]) continue;  // row i is already dead
+      const double aki = w.at.value()[sz(e)];
+      if (std::isfinite(w.rlo[sz(k)])) w.rlo[sz(k)] -= aki * constant;
+      if (std::isfinite(w.rup[sz(k)])) w.rup[sz(k)] -= aki * constant;
+      column_rows.push_back({k, aki});
+    }
+
+    w.cost[sz(q)] -= w.cost[sz(p)] * (aq / ap);
+    w.cost_offset += w.cost[sz(p)] * constant;
+
+    w.stack->record_singleton(p, ap, rhs, {{q, aq}});
+    w.stack->record_row_from_doubleton(i, p, ap, std::move(column_rows));
+
+    kill_col(w, p);
+    w.sub_of_col[sz(p)] = static_cast<Int>(w.subs.size());
+    w.subs.push_back({p, q, ap, aq, rhs});
+    kept[sz(q)] = 1;
+    ++w.counts->doubleton_equations;
+    changed = true;
+  }
+  return changed;
+}
+
 Model build_reduced(const Workspace& w, const Model& model, ObjSense sense,
                     std::vector<Int>* reduced_to_original,
                     std::vector<Int>* reduced_row_to_original) {
@@ -736,8 +893,22 @@ Model build_reduced(const Workspace& w, const Model& model, ObjSense sense,
     if (!w.row_alive[sz(i)]) continue;
     for (Int e = w.a->row_begin(i); e < w.a->row_end(i); ++e) {
       const Int j = w.a->index()[sz(e)];
+      const double v = w.a->value()[sz(e)];
+      const Int sub = w.sub_of_col.empty() ? -1 : w.sub_of_col[sz(j)];
+      if (sub >= 0) {
+        // This column was substituted out. Its share of the row becomes a
+        // coefficient on the column that replaced it; the constant part already
+        // went into the row's bounds. from_triplets sums duplicates, so this
+        // merges with an existing entry or becomes fill without either case
+        // needing to be handled here.
+        const Workspace::Substitution& t = w.subs[sz(sub)];
+        if (!w.col_alive[sz(t.other_column)]) continue;
+        entries.push_back({new_row[sz(i)], new_col[sz(t.other_column)],
+                           -v * t.other_coefficient / t.coefficient});
+        continue;
+      }
       if (!w.col_alive[sz(j)]) continue;
-      entries.push_back({new_row[sz(i)], new_col[sz(j)], w.a->value()[sz(e)]});
+      entries.push_back({new_row[sz(i)], new_col[sz(j)], v});
     }
   }
   out.constraints = SparseMatrix::from_triplets(rows, cols, std::move(entries));
@@ -854,6 +1025,8 @@ PresolveResult presolve(const Model& model, const PresolveOptions& options) {
     if (!changed) break;
   }
 
+  if (!w.infeasible && !w.unbounded) substitute_doubletons(w, options, allow_removal);
+
   if (w.unbounded) {
     result.status = PresolveStatus::kUnbounded;
     result.message = w.message;
@@ -890,13 +1063,15 @@ std::string format_presolve(const PresolveResult& result) {
       "time          %.4f s\n"
       "removed by    empty row %d, singleton row %d, redundant row %d,\n"
       "              forcing row %d, duplicate row %d,\n"
-      "              fixed column %d, empty column %d, free singleton %d\n"
+      "              fixed column %d, empty column %d, free singleton %d,\n"
+      "              doubleton equation %d\n"
       "bounds cut    %d  (%d were infinite before, largest now %.3e)\n",
       to_string(result.status).c_str(), result.original_rows, rows,
       result.original_cols, cols, result.original_nnz, nnz, c.rounds,
       result.seconds, c.empty_rows, c.singleton_rows, c.redundant_rows,
       c.forcing_rows, c.duplicate_rows, c.fixed_columns, c.empty_columns,
-      c.free_column_singletons, c.bounds_tightened, c.bounds_made_finite,
+      c.free_column_singletons, c.doubleton_equations, c.bounds_tightened,
+      c.bounds_made_finite,
       c.largest_new_finite_bound);
   std::string out(buf);
   if (!result.message.empty()) out += "message       " + result.message + "\n";

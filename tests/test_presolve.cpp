@@ -496,8 +496,11 @@ void test_dual_postsolve_indexes_reduced_costs_by_reduced_column() {
                         {2, 1, 1.0}, {2, 2, 2.0}},
                        {0.0, 1.0, 1.0}, {-kInf, 6.0, 8.0}, {10.0, 6.0, 8.0},
                        {1.0, 0.0, 0.0}, {1.0, kInf, kInf});
+  // Row 2 is itself a doubleton equality; leaving that reduction on would
+  // eliminate a column and change what this test is about.
   PresolveOptions exact;
   exact.bound_tightening = false;
+  exact.doubleton_equations = false;
   PresolveResult r = presolve(m, exact);
   CHECK(r.status == PresolveStatus::kReduced);
   CHECK_EQ(r.reduced.num_cols(), 2);   // x0 is gone
@@ -512,6 +515,82 @@ void test_dual_postsolve_indexes_reduced_costs_by_reduced_column() {
   CHECK_NEAR(y[0], 1.5, 1e-12);  // d_x2 / a = 3.0 / 2.0
 }
 
+
+void test_doubleton_equation_is_substituted_out() {
+  //  Row 0:  x0 + x1 = 5      x0 free, so the row confines it and it can go
+  //  Row 1: 2 x0 + x1 >= 1    x0 is here too, which is what makes this more
+  //                           than a free column singleton
+  //  objective: 3 x0 + x1
+  //
+  // Substituting x0 = 5 - x1 turns row 1 into 10 - x1 >= 1, i.e. -x1 >= -9,
+  // and the objective into 15 - 2 x1. Both the coefficient and the constant
+  // have to move, and the coefficient move is the one no other reduction here
+  // makes.
+  Model m = make_model(2, 2,
+                       {{0, 0, 1.0}, {0, 1, 1.0}, {1, 0, 2.0}, {1, 1, 1.0}},
+                       {3.0, 1.0}, {5.0, 1.0}, {5.0, kInf},
+                       {-kInf, 0.0}, {kInf, 5.0});
+  PresolveOptions opt;
+  opt.bound_tightening = false;
+  PresolveResult r = presolve(m, opt);
+  CHECK(r.status == PresolveStatus::kReduced);
+  CHECK_EQ(r.counts.doubleton_equations, 1);
+  CHECK_EQ(r.reduced.num_rows(), 1);
+  CHECK_EQ(r.reduced.num_cols(), 1);
+
+  // -x1 >= -9, carrying the constant the substitution left behind.
+  CHECK_EQ(r.reduced.constraints.nnz(), 1);
+  CHECK_NEAR(r.reduced.constraints.value()[0], -1.0, 1e-12);
+  CHECK_NEAR(r.reduced.row_lower[0], -9.0, 1e-12);
+  CHECK_NEAR(r.reduced.objective[0], -2.0, 1e-12);
+  CHECK_NEAR(r.reduced.objective_offset, 15.0, 1e-12);
+
+  // x1 = 4 must come back as x0 = 1, and the objective must agree either way.
+  const std::vector<double> x = r.postsolve.apply({4.0});
+  CHECK_EQ(static_cast<Int>(x.size()), 2);
+  CHECK_NEAR(x[0], 1.0, 1e-12);
+  CHECK_NEAR(x[1], 4.0, 1e-12);
+  CHECK_NEAR(3.0 * x[0] + 1.0 * x[1], -2.0 * 4.0 + 15.0, 1e-12);
+}
+
+void test_dual_of_a_substituted_doubleton_row() {
+  // Same model. The eliminated column was implied free, so its reduced cost is
+  // zero and stationarity pins the row's dual:
+  //     c_0 = a_00 y_0 + a_10 y_1   ->   3 = y_0 + 2 y_1
+  // With y_1 = 0.5 that is y_0 = 2. One right answer, no degeneracy.
+  Model m = make_model(2, 2,
+                       {{0, 0, 1.0}, {0, 1, 1.0}, {1, 0, 2.0}, {1, 1, 1.0}},
+                       {3.0, 1.0}, {5.0, 1.0}, {5.0, kInf},
+                       {-kInf, 0.0}, {kInf, 5.0});
+  PresolveOptions opt;
+  opt.bound_tightening = false;
+  PresolveResult r = presolve(m, opt);
+  CHECK_EQ(r.counts.doubleton_equations, 1);
+  CHECK(r.postsolve.dual_is_exact());
+
+  const std::vector<double> reduced_y = {0.5};
+  const std::vector<double> reduced_costs = {0.0};
+  const std::vector<double> y =
+      r.postsolve.apply_dual(reduced_y, reduced_costs, m.objective);
+  CHECK_EQ(static_cast<Int>(y.size()), 2);
+  CHECK_NEAR(y[1], 0.5, 1e-12);
+  CHECK_NEAR(y[0], 2.0, 1e-12);
+}
+
+void test_an_integer_column_is_never_substituted() {
+  // x0 = 5 - x1 is not whole for every whole x1, so the reduction has to
+  // decline rather than quietly relax the model.
+  Model m = make_model(2, 2,
+                       {{0, 0, 1.0}, {0, 1, 2.0}, {1, 0, 2.0}, {1, 1, 1.0}},
+                       {3.0, 1.0}, {5.0, 1.0}, {5.0, kInf},
+                       {-kInf, 0.0}, {kInf, 5.0});
+  m.col_type[0] = VarType::kInteger;
+  PresolveOptions opt;
+  opt.bound_tightening = false;
+  const PresolveResult r = presolve(m, opt);
+  CHECK_EQ(r.counts.doubleton_equations, 0);
+}
+
 }  // namespace
 
 int main() {
@@ -520,6 +599,9 @@ int main() {
   test_forcing_and_duplicate_rows_are_reported_not_guessed();
   test_every_original_row_gets_a_dual();
   test_dual_postsolve_indexes_reduced_costs_by_reduced_column();
+  test_doubleton_equation_is_substituted_out();
+  test_dual_of_a_substituted_doubleton_row();
+  test_an_integer_column_is_never_substituted();
   test_empty_row();
   test_singleton_row_becomes_a_bound();
   test_fixed_column_moves_into_the_row_bounds();
