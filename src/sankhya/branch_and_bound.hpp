@@ -69,6 +69,50 @@ struct BranchAndBoundOptions {
   // current point, so they are available now. See cuts.hpp.
   bool root_cuts = true;
   Int cut_rounds = 8;
+  // Rounds in which Gomory cuts are separated. They are read off the tableau,
+  // and after the first round that tableau describes a problem that is mostly
+  // previous cuts - so each round derives cuts from cuts, and the rounding
+  // arguments they rest on stop being exact.
+  //
+  // gt2 is what that looks like. With Gomory on in every round its root bound
+  // goes 13,460, 20,539, 20,857, 21,094, then 26,833 - past the optimum of
+  // 21,166 - and then back down to 21,110. A bound that falls after a cut is
+  // added is not a bound; the relaxation had been cut into something else.
+  // Gomory cuts are off by default, and that is a measurement rather than a
+  // doubt about them. They tighten the root bound on every one of the seven
+  // MIPLIB instances here - khb05250 from 95.9M to 105.7M against an optimum of
+  // 106.9M, p0201 from 7,125 to 7,199, gt2 from 20,593 to 20,862 - and then
+  // lose the tree. After 25 seconds gt2 goes from 5.556% to 11.112%, mas76 from
+  // 0.562% to 1.593%, gen-ip054 from 0.528% to 0.847%, and the other four are
+  // unchanged at zero.
+  //
+  // cuts.hpp already said why: a cut row costs something in every node below
+  // it, on every iteration, and a better root bound has to pay for that out of
+  // nodes not explored. A tighter relaxation that is explored less is not
+  // obviously a better solver, and here it measurably is not.
+  //
+  // What would change this is cut management the tree does not have yet -
+  // ageing cuts out when they stop binding, and keeping them in a pool rather
+  // than in the matrix. Worth doing; not done.
+  //
+  // One thing measured on the way and worth not repeating: separating cover and
+  // MIR cuts from `working`, which by the later rounds is mostly cuts, was
+  // briefly blamed for a root bound that ran past the optimum and restricted to
+  // the model's own rows. It was not the cause - Gomory was - and the
+  // restriction cost gt2 its exact answer, 0.000% to 5.556%, and cut the number
+  // of cuts found from 77 to 32. A MIR of a valid inequality is valid; two
+  // things were changed at once and the wrong one was blamed.
+  bool gomory_cuts = false;
+
+  // Rounds in which Gomory cuts are separated when they are on at all. They are
+  // read off the tableau, and after the first round that tableau describes a
+  // problem that is mostly previous cuts, so each round derives cuts from cuts
+  // and the rounding arguments stop being exact. On gt2 the root bound reaches
+  // 20,592 with none, 20,592 with one round and 20,861 with two, all rising
+  // monotonically; from three rounds on it passes the optimum of 21,166 - 26,833
+  // - and then falls back to 21,110. A bound that falls after a cut is added is
+  // not a bound.
+  Int gomory_rounds = 2;
   Int cuts_per_round = 60;
 
   // Branching rule. Most-fractional is the classic bad default, kept so its
@@ -122,6 +166,11 @@ struct BranchAndBoundResult {
   Int heuristic_successes = 0;
   Int dives_run = 0;
   Int cuts_added = 0;
+  // Of those, how many came off the tableau rather than the model's rows.
+  Int gomory_cuts_added = 0;
+  // Set when a round of cuts lowered the root bound, which valid cuts cannot
+  // do. The round is rolled back and cutting stops.
+  bool cuts_rolled_back = false;
   // Nodes whose relaxation started from the parent's basis rather than from
   // nothing. Close to the node count is what this is supposed to look like.
   Int warm_started_nodes = 0;

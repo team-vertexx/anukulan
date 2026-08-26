@@ -200,7 +200,17 @@ bool cover_from_row(const StandardLp& lp, const std::vector<bool>& integral,
   struct Item {
     Int column;
     double weight;
-    double slack;  // 1 - x*, how far from one the relaxation left it
+    double slack;  // how far this item is from the bound that would fill it
+    // Whether x_j was replaced by 1 - x_j to make its weight positive.
+    //
+    // Recorded rather than worked out again later. It used to be recovered by
+    // testing slack == x_j, which is true for a complemented item and false for
+    // an uncomplemented one - except at x_j = 0.5, where 1 - x_j is also 0.5
+    // and the test says complemented about everything. A simplex vertex can sit
+    // a binary at exactly 0.5, and then the cut came out with +1 where it
+    // needed -1 and removed feasible points. Separating only at random interior
+    // points never landed on 0.5 and never saw it.
+    bool complemented;
   };
   std::vector<Item> items;
   double capacity = -scale * lp.q[sz(row)];
@@ -215,9 +225,9 @@ bool cover_from_row(const StandardLp& lp, const std::vector<bool>& integral,
     if (coefficient < 0.0) {
       // Complement: x_j -> 1 - x_j turns a negative weight positive.
       capacity -= coefficient;
-      items.push_back(Item{j, -coefficient, x[sz(j)]});
+      items.push_back(Item{j, -coefficient, x[sz(j)], true});
     } else {
-      items.push_back(Item{j, coefficient, 1.0 - x[sz(j)]});
+      items.push_back(Item{j, coefficient, 1.0 - x[sz(j)], false});
     }
   }
   if (items.size() < 2 || capacity <= 0.0) return false;
@@ -246,8 +256,7 @@ bool cover_from_row(const StandardLp& lp, const std::vector<bool>& integral,
   double rhs = -(static_cast<double>(taken) - 1.0);
   for (std::size_t idx = 0; idx < taken; ++idx) {
     const Int j = items[idx].column;
-    const bool complemented = items[idx].slack == x[sz(j)];
-    if (complemented) {
+    if (items[idx].complemented) {
       out->columns.push_back(j);
       out->coefficients.push_back(1.0);
       rhs += 1.0;
@@ -264,30 +273,7 @@ bool cover_from_row(const StandardLp& lp, const std::vector<bool>& integral,
 
 }  // namespace
 
-std::vector<Cut> separate_cuts(const StandardLp& lp, const std::vector<bool>& integral,
-                               const std::vector<double>& x,
-                               const CutOptions& options) {
-  std::vector<Cut> cuts;
-  Cut candidate;
-
-  for (Int row = 0; row < lp.num_rows() && static_cast<Int>(cuts.size()) < options.max_cuts;
-       ++row) {
-    // A >= row read directly, and an equality read from both sides.
-    const bool equality = row < lp.num_equalities;
-    for (const double scale : (equality ? std::vector<double>{1.0, -1.0}
-                                        : std::vector<double>{1.0})) {
-      if (options.cover_cuts &&
-          cover_from_row(lp, integral, x, row, scale, options, &candidate)) {
-        cuts.push_back(candidate);
-        continue;  // a cover from this row is stronger than a MIR from it
-      }
-      if (options.mir_cuts &&
-          mir_from_row(lp, integral, x, row, scale, options, &candidate)) {
-        cuts.push_back(candidate);
-      }
-    }
-  }
-
+std::vector<Cut> select_cuts(std::vector<Cut> cuts, const CutOptions& options) {
   // Score by efficacy, then keep a near-orthogonal subset. This is the standard
   // selection from the branch-and-cut literature (Wesselmann and Suhl; it is
   // also what SCIP's default selector does): take the best remaining cut, drop
@@ -336,6 +322,33 @@ std::vector<Cut> separate_cuts(const StandardLp& lp, const std::vector<bool>& in
   return selected;
 }
 
+std::vector<Cut> separate_cuts(const StandardLp& lp, const std::vector<bool>& integral,
+                               const std::vector<double>& x,
+                               const CutOptions& options) {
+  std::vector<Cut> cuts;
+  Cut candidate;
+
+  for (Int row = 0; row < lp.num_rows() && static_cast<Int>(cuts.size()) < options.max_cuts;
+       ++row) {
+    // A >= row read directly, and an equality read from both sides.
+    const bool equality = row < lp.num_equalities;
+    for (const double scale : (equality ? std::vector<double>{1.0, -1.0}
+                                        : std::vector<double>{1.0})) {
+      if (options.cover_cuts &&
+          cover_from_row(lp, integral, x, row, scale, options, &candidate)) {
+        cuts.push_back(candidate);
+        continue;  // a cover from this row is stronger than a MIR from it
+      }
+      if (options.mir_cuts &&
+          mir_from_row(lp, integral, x, row, scale, options, &candidate)) {
+        cuts.push_back(candidate);
+      }
+    }
+  }
+
+  return select_cuts(std::move(cuts), options);
+}
+
 StandardLp append_cuts(const StandardLp& lp, const std::vector<Cut>& cuts) {
   if (cuts.empty()) return lp;
 
@@ -375,6 +388,149 @@ StandardLp append_cuts(const StandardLp& lp, const std::vector<Cut>& cuts) {
   out.k = SparseMatrix::from_triplets(rows, lp.num_cols(), std::move(entries));
   out.kt = out.k.transpose();
   return out;
+}
+
+std::vector<Cut> separate_gomory_cuts(const StandardLp& lp,
+                                      const std::vector<bool>& integral,
+                                      const std::vector<Int>& basic,
+                                      const std::vector<VarStatus>& status,
+                                      const CutOptions& options) {
+  std::vector<Cut> cuts;
+  const LogicalForm form = to_logical_form(lp);
+  const Int structural = form.num_structural;
+  const Int columns = form.columns.rows();
+  if (static_cast<Int>(basic.size()) != form.num_rows) return cuts;
+
+  SimplexBasis b;
+  std::string error;
+  if (!b.set_from(form, basic, status, &error)) return cuts;
+
+  std::vector<double> x;
+  b.compute_primal(form, &x);
+
+  // A logical variable is continuous whatever its row was, and a structural one
+  // only counts as integer here if the bound it is sitting on is a whole
+  // number - the displacement from that bound is what has to be integral.
+  auto integral_displacement = [&](Int j, VarStatus st) {
+    if (j >= structural) return false;
+    if (!integral[sz(j)]) return false;
+    const double bound = st == VarStatus::kAtUpper ? form.upper[sz(j)]
+                                                   : form.lower[sz(j)];
+    return std::isfinite(bound) && std::fabs(bound - std::round(bound)) < 1e-9;
+  };
+  std::vector<double> rho;
+  std::vector<double> alpha(sz(columns), 0.0);
+  std::vector<double> coefficient(sz(columns), 0.0);
+  std::vector<double> logical_part(sz(form.num_rows), 0.0);
+  std::vector<double> structural_part(sz(structural), 0.0);
+
+  for (Int r = 0; r < form.num_rows && static_cast<Int>(cuts.size()) < options.max_cuts;
+       ++r) {
+    const Int leaving = basic[sz(r)];
+    if (leaving >= structural || !integral[sz(leaving)]) continue;
+    const double value = x[sz(leaving)];
+    const double f0 = value - std::floor(value);
+    // Too close to integral and the cut is nearly trivial; too close to 1 or 0
+    // and dividing by f0 or 1 - f0 turns rounding into coefficients.
+    if (f0 < 1e-6 || f0 > 1.0 - 1e-6) continue;
+
+    b.pivot_row(form, r, &rho);
+
+    // The row of the tableau, and the sign that turns each nonbasic into a
+    // non-negative displacement from the bound it is sitting on.
+    bool usable = true;
+    for (Int j = 0; j < columns; ++j) {
+      alpha[sz(j)] = 0.0;
+      const VarStatus st = status[sz(j)];
+      if (st == VarStatus::kBasic) continue;
+      double dot = 0.0;
+      for (Int e = form.columns.row_begin(j); e < form.columns.row_end(j); ++e)
+        dot += form.columns.value()[sz(e)] * rho[sz(form.columns.index()[sz(e)])];
+      if (std::fabs(dot) < 1e-11) continue;
+      if (st == VarStatus::kFree) {
+        // A free nonbasic has no bound to measure from, so its displacement can
+        // go either way and the derivation below does not hold. Skip the row
+        // rather than produce something that looks like a cut.
+        usable = false;
+        break;
+      }
+      alpha[sz(j)] = st == VarStatus::kAtUpper ? -dot : dot;
+    }
+    if (!usable) continue;
+
+    std::fill(coefficient.begin(), coefficient.end(), 0.0);
+    double largest = 0.0;
+    double smallest = kInf;
+    for (Int j = 0; j < columns; ++j) {
+      const double a = alpha[sz(j)];
+      if (a == 0.0) continue;
+      double c = 0.0;
+      if (integral_displacement(j, status[sz(j)])) {
+        const double fj = a - std::floor(a);
+        c = (fj <= f0) ? fj / f0 : (1.0 - fj) / (1.0 - f0);
+      } else {
+        c = (a > 0.0) ? a / f0 : -a / (1.0 - f0);
+      }
+      if (c <= 0.0) continue;
+      coefficient[sz(j)] = c;
+      largest = std::fmax(largest, c);
+      smallest = std::fmin(smallest, c);
+    }
+    if (largest <= 0.0) continue;
+    // A cut whose coefficients span too many orders of magnitude is numerical
+    // noise wearing an inequality's clothes.
+    if (largest / smallest > options.max_dynamic_range) continue;
+
+    // Back to x. A displacement at a lower bound is x_j - l_j and at an upper
+    // bound is u_j - x_j, so the sign on x_j follows the bound, and each bound
+    // moves the right hand side.
+    std::fill(structural_part.begin(), structural_part.end(), 0.0);
+    std::fill(logical_part.begin(), logical_part.end(), 0.0);
+    double rhs = 1.0;
+    for (Int j = 0; j < columns; ++j) {
+      const double c = coefficient[sz(j)];
+      if (c == 0.0) continue;
+      const bool at_upper = status[sz(j)] == VarStatus::kAtUpper;
+      const double bound = at_upper ? form.upper[sz(j)] : form.lower[sz(j)];
+      if (!std::isfinite(bound)) { rhs = kInf; break; }
+      rhs += at_upper ? -c * bound : c * bound;
+      const double signed_c = at_upper ? -c : c;
+      if (j < structural) structural_part[sz(j)] += signed_c;
+      else logical_part[sz(j - structural)] += signed_c;
+    }
+    if (!std::isfinite(rhs)) continue;
+
+    // The logicals are slacks: s = K x - q, so their share of the cut folds
+    // into the structural coefficients and the right hand side.
+    for (Int i = 0; i < form.num_rows; ++i) {
+      const double d = logical_part[sz(i)];
+      if (d == 0.0) continue;
+      rhs += d * lp.q[sz(i)];
+      for (Int e = lp.k.row_begin(i); e < lp.k.row_end(i); ++e)
+        structural_part[sz(lp.k.index()[sz(e)])] += d * lp.k.value()[sz(e)];
+    }
+
+    Cut cut;
+    cut.family = "gomory";
+    double norm_squared = 0.0;
+    double activity = 0.0;
+    for (Int j = 0; j < structural; ++j) {
+      const double c = structural_part[sz(j)];
+      if (std::fabs(c) < 1e-11) continue;
+      cut.columns.push_back(j);
+      cut.coefficients.push_back(c);
+      norm_squared += c * c;
+      activity += c * x[sz(j)];
+    }
+    if (cut.columns.empty() || norm_squared <= 0.0) continue;
+    cut.rhs = rhs;
+    cut.norm = std::sqrt(norm_squared);
+    cut.violation = rhs - activity;
+    cut.efficacy = cut.violation / cut.norm;
+    if (cut.violation < options.min_violation) continue;
+    cuts.push_back(std::move(cut));
+  }
+  return cuts;
 }
 
 }  // namespace sankhya

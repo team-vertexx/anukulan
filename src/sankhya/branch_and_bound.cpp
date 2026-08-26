@@ -232,60 +232,6 @@ BranchAndBoundResult solve_milp(const Model& model,
   // Root cut loop: solve, separate, add, repeat. Cuts are kept for the whole
   // tree, so a round that tightens the root tightens every node below it.
   StandardLp working = sf.lp;
-  if (options.root_cuts && !integer_columns.empty()) {
-    PdhgOptions root_options = options.relaxation;
-    for (Int round = 0; round < options.cut_rounds; ++round) {
-      const PdhgResult root_solve = solve_pdhg(working, root_options);
-      result.relaxations_solved++;
-      if (root_solve.status != PdhgStatus::kOptimal) break;
-      if (round == 0) {
-        result.root_bound_before_cuts =
-            sf.lp.objective_scale * sf.lp.standard_objective(root_solve.x) +
-            sf.lp.objective_offset;
-      }
-      result.root_bound_after_cuts =
-          sf.lp.objective_scale * sf.lp.standard_objective(root_solve.x) +
-          sf.lp.objective_offset;
-
-      CutOptions cut_options;
-      cut_options.max_cuts = options.cuts_per_round;
-      const std::vector<Cut> cuts =
-          separate_cuts(working, is_integral, root_solve.x, cut_options);
-      if (cuts.empty()) break;
-      working = append_cuts(working, cuts);
-      result.cuts_added += static_cast<Int>(cuts.size());
-    }
-  }
-
-  std::vector<Node> stack;
-  Node root;
-  root.lower = working.lower;
-  root.upper = working.upper;
-  stack.push_back(std::move(root));
-
-  auto try_incumbent = [&](const std::vector<double>& candidate) {
-    // Accepts a point only if it is genuinely feasible and genuinely better.
-    // A heuristic that reports a point it has not checked is worse than no
-    // heuristic, because it poisons the bound that prunes the whole tree.
-    for (const Int j : integer_columns) {
-      if (fractionality(candidate[sz(j)]) > options.integrality_tolerance) return false;
-    }
-    for (std::size_t j = 0; j < candidate.size(); ++j) {
-      if (candidate[j] < working.lower[j] - 1e-7) return false;
-      if (candidate[j] > working.upper[j] + 1e-7) return false;
-    }
-    std::vector<double> scratch;
-    double inf_norm = 0.0;
-    working.primal_residual(candidate, &scratch, nullptr, &inf_norm);
-    if (inf_norm > 1e-6) return false;
-
-    const double value = working.standard_objective(candidate);
-    if (value >= incumbent) return false;
-    incumbent = value;
-    incumbent_x = candidate;
-    result.incumbents_found++;
-    return true;
-  };
 
   auto solve_node = [&](const Node& node, NodeSolution* out,
                         Int iteration_factor = -1) {
@@ -327,6 +273,98 @@ BranchAndBoundResult solve_milp(const Model& model,
     out->proved_infeasible = p.status == PdhgStatus::kPrimalInfeasible;
     out->x = p.x;
     return out->optimal;
+  };
+  if (options.root_cuts && !integer_columns.empty()) {
+    for (Int round = 0; round < options.cut_rounds; ++round) {
+      // Through the same solver the nodes use, because that is what makes the
+      // tableau available - and Gomory cuts are read off the tableau.
+      Node probe;
+      probe.lower = working.lower;
+      probe.upper = working.upper;
+      NodeSolution root_solve;
+      if (!solve_node(probe, &root_solve)) break;
+      if (round == 0) {
+        result.root_bound_before_cuts =
+            sf.lp.objective_scale * sf.lp.standard_objective(root_solve.x) +
+            sf.lp.objective_offset;
+      }
+      result.root_bound_after_cuts =
+          sf.lp.objective_scale * sf.lp.standard_objective(root_solve.x) +
+          sf.lp.objective_offset;
+
+      CutOptions cut_options;
+      cut_options.max_cuts = options.cuts_per_round;
+      std::vector<Cut> cuts =
+          separate_cuts(working, is_integral, root_solve.x, cut_options);
+
+      // Cover and MIR cuts come off the model's own rows; Gomory cuts come off
+      // a combination of them, so they see things the others cannot. They are
+      // ranked together rather than each family getting a quota, which is the
+      // point of having one selector.
+      cut_options.gomory_cuts =
+          options.gomory_cuts && round < options.gomory_rounds;
+      if (cut_options.gomory_cuts && !root_solve.basic.empty()) {
+        std::vector<Cut> gomory = separate_gomory_cuts(
+            working, is_integral, root_solve.basic, root_solve.basis_status,
+            cut_options);
+        result.gomory_cuts_added += static_cast<Int>(gomory.size());
+        if (!gomory.empty()) {
+          cuts.insert(cuts.end(), gomory.begin(), gomory.end());
+          cuts = select_cuts(std::move(cuts), cut_options);
+        }
+      }
+      if (cuts.empty()) break;
+      // Adding a valid cut can only raise the bound. If it falls, at least one
+      // of the cuts just added was not valid, and continuing would report a
+      // bound that is not one. This does not catch a bad cut that happens to
+      // raise the bound - nothing cheap does - so it is a safety net rather
+      // than a proof, and the round limit above is the actual mitigation.
+      const StandardLp before = working;
+      working = append_cuts(working, cuts);
+      Node recheck;
+      recheck.lower = working.lower;
+      recheck.upper = working.upper;
+      NodeSolution after;
+      if (solve_node(recheck, &after)) {
+        const double raised = working.standard_objective(after.x);
+        if (raised < working.standard_objective(root_solve.x) - 1e-6) {
+          working = before;
+          result.cuts_rolled_back = true;
+          break;
+        }
+      }
+      result.cuts_added += static_cast<Int>(cuts.size());
+    }
+  }
+
+  std::vector<Node> stack;
+  Node root;
+  root.lower = working.lower;
+  root.upper = working.upper;
+  stack.push_back(std::move(root));
+
+  auto try_incumbent = [&](const std::vector<double>& candidate) {
+    // Accepts a point only if it is genuinely feasible and genuinely better.
+    // A heuristic that reports a point it has not checked is worse than no
+    // heuristic, because it poisons the bound that prunes the whole tree.
+    for (const Int j : integer_columns) {
+      if (fractionality(candidate[sz(j)]) > options.integrality_tolerance) return false;
+    }
+    for (std::size_t j = 0; j < candidate.size(); ++j) {
+      if (candidate[j] < working.lower[j] - 1e-7) return false;
+      if (candidate[j] > working.upper[j] + 1e-7) return false;
+    }
+    std::vector<double> scratch;
+    double inf_norm = 0.0;
+    working.primal_residual(candidate, &scratch, nullptr, &inf_norm);
+    if (inf_norm > 1e-6) return false;
+
+    const double value = working.standard_objective(candidate);
+    if (value >= incumbent) return false;
+    incumbent = value;
+    incumbent_x = candidate;
+    result.incumbents_found++;
+    return true;
   };
 
   MilpStatus status = MilpStatus::kInfeasible;

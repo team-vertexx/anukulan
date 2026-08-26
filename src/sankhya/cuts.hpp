@@ -2,6 +2,7 @@
 
 #include <vector>
 
+#include "sankhya/simplex.hpp"
 #include "sankhya/standard_form.hpp"
 
 namespace sankhya {
@@ -42,6 +43,7 @@ struct CutOptions {
   double max_dynamic_range = 1e6;
   bool cover_cuts = true;
   bool mir_cuts = true;
+  bool gomory_cuts = true;
 
   // Cuts are ranked by efficacy - violation divided by the cut's own norm -
   // rather than by raw violation, which just rewards large coefficients.
@@ -64,5 +66,32 @@ std::vector<Cut> separate_cuts(const StandardLp& lp, const std::vector<bool>& in
 // Appends cuts to the constraint matrix, returning the enlarged problem. Cuts
 // are >= rows, so they join the inequality block.
 StandardLp append_cuts(const StandardLp& lp, const std::vector<Cut>& cuts);
+
+// Gomory mixed-integer cuts, read off a row of the simplex tableau.
+//
+// These were absent because there was no tableau to read: a first-order method
+// has no basis. The dual simplex that solves branch and bound's nodes has one,
+// and the row it needs is the same B^-T e_r the dual's ratio test already
+// computes.
+//
+// `basic` and `status` are a basis the simplex ended on, as returned in
+// SimplexResult. A row generates a cut when its basic variable is an integer
+// column sitting at a fractional value. Returns nothing rather than failing if
+// the basis will not factorise.
+//
+// Unlike the cover and MIR separators, these are not derived from the model's
+// own rows but from a combination of them, so a sign error produces an
+// inequality that looks entirely reasonable and quietly removes solutions.
+// test_cuts.cpp enumerates every feasible integer point of its fixtures and
+// checks that none is cut off; that is the only thing that catches it.
+// Rank by efficacy and keep a near-orthogonal subset, so that cuts from
+// different families compete on one list rather than each getting a quota.
+std::vector<Cut> select_cuts(std::vector<Cut> cuts, const CutOptions& options = {});
+
+std::vector<Cut> separate_gomory_cuts(const StandardLp& lp,
+                                      const std::vector<bool>& integral,
+                                      const std::vector<Int>& basic,
+                                      const std::vector<VarStatus>& status,
+                                      const CutOptions& options = {});
 
 }  // namespace sankhya

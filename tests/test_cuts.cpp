@@ -7,6 +7,7 @@
 #include "sankhya/cuts.hpp"
 #include "sankhya/mps_reader.hpp"
 #include "sankhya/pdhg.hpp"
+#include "sankhya/simplex.hpp"
 #include "sankhya/standard_form.hpp"
 
 using sankhya::Cut;
@@ -64,6 +65,8 @@ void enumerate(const StandardLp& lp, const std::vector<bool>& integral,
   }
 }
 
+void check_gomory_cuts_are_valid(const std::string& text, const char* label);
+
 void check_all_cuts_are_valid(const std::string& text, const char* label) {
   const StandardFormResult sf = build(text);
   CHECK(sf.ok);
@@ -113,9 +116,46 @@ void check_all_cuts_are_valid(const std::string& text, const char* label) {
       }
     }
   }
-  std::printf("     %s: %d feasible points, %d cuts, none invalid\n", label,
-              static_cast<int>(feasible.size()), cuts_generated);
+  // And at vertices, which is a different regime from a random interior point
+  // and the one branch and cut actually separates at once the root is solved by
+  // a simplex rather than a first-order method. A separator can be sound on the
+  // inside of the box and wrong on a face.
+  Int vertex_cuts = 0;
+  for (int trial = 0; trial < 40; ++trial) {
+    sankhya::StandardLp lp = sf.lp;
+    for (Int j = 0; j < lp.num_cols(); ++j) lp.c[sz(j)] = pick(rng) * 4.0 - 2.0;
+    sankhya::SimplexOptions so;
+    so.max_iterations = 20000;
+    const sankhya::SimplexResult r = sankhya::solve_simplex(lp, so);
+    if (r.status != sankhya::SimplexStatus::kOptimal) continue;
+    const std::vector<Cut> cuts = sankhya::separate_cuts(sf.lp, integral, r.x);
+    vertex_cuts += static_cast<Int>(cuts.size());
+    for (const Cut& cut : cuts) {
+      for (const std::vector<double>& point : feasible) {
+        double activity = 0.0;
+        for (std::size_t idx = 0; idx < cut.columns.size(); ++idx)
+          activity += cut.coefficients[idx] * point[sz(cut.columns[idx])];
+        if (activity < cut.rhs - 1e-7) {
+          std::fprintf(stderr,
+                       "%s: a %s cut separated at a vertex removes a feasible "
+                       "integer point (activity %.10g < rhs %.10g)\n",
+                       label, cut.family, activity, cut.rhs);
+          CHECK(false);
+          return;
+        }
+      }
+    }
+  }
+
+  std::printf("     %s: %d feasible points, %d cuts at random points, %d at "
+              "vertices, none invalid\n", label,
+              static_cast<int>(feasible.size()), cuts_generated,
+              static_cast<int>(vertex_cuts));
   CHECK(cuts_generated > 0);  // a separator that never fires proves nothing
+
+  // Every fixture gets put through the tableau separator too, so a new fixture
+  // covers both without anyone remembering to add it twice.
+  check_gomory_cuts_are_valid(text, label);
 }
 
 void test_binary_knapsack() {
@@ -251,6 +291,77 @@ void test_cuts_actually_tighten() {
               before.objective, after.objective);
   CHECK(after.objective > before.objective + 1e-6);
   CHECK(after.objective <= -20.0 + 1e-6);
+}
+
+// The same exhaustion test, for the cuts that come off the tableau instead of
+// off the model's own rows.
+//
+// A Gomory cut is a combination of rows with a rounding argument on top, so a
+// sign error anywhere in it - which bound a nonbasic sits on, which way a slack
+// substitutes back - produces an inequality that looks perfectly sensible and
+// silently removes integer solutions. Nothing short of enumerating the feasible
+// points catches that, which is why this test is the gate on the whole feature.
+//
+// One basis yields a handful of rows worth cutting, so the LP is re-solved
+// under many random objectives and cuts are taken from every basis that
+// produces. Different objectives put different columns on different bounds,
+// which is exactly the part most likely to be wrong.
+void check_gomory_cuts_are_valid(const std::string& text, const char* label) {
+  const StandardFormResult sf = build(text);
+  CHECK(sf.ok);
+  if (!sf.ok) return;
+  std::istringstream in(text);
+  const sankhya::Model model = sankhya::read_mps_stream(in, "<test>").model;
+  const std::vector<bool> integral = integrality(model);
+
+  std::vector<std::vector<double>> feasible;
+  enumerate(sf.lp, integral, &feasible,
+            std::vector<double>(sz(sf.lp.num_cols()), 0.0), 0);
+  CHECK(!feasible.empty());
+  if (feasible.empty()) return;
+
+  std::mt19937 rng(20260826);
+  std::uniform_real_distribution<double> pick(-2.0, 2.0);
+  Int cuts_generated = 0;
+  Int bases_used = 0;
+
+  for (int trial = 0; trial < 60; ++trial) {
+    sankhya::StandardLp lp = sf.lp;
+    if (trial > 0) {
+      for (Int j = 0; j < lp.num_cols(); ++j) lp.c[sz(j)] = pick(rng);
+    }
+    sankhya::SimplexOptions options;
+    options.max_iterations = 20000;
+    const sankhya::SimplexResult r = sankhya::solve_simplex(lp, options);
+    if (r.status != sankhya::SimplexStatus::kOptimal) continue;
+    if (r.final_basic.empty()) continue;
+    ++bases_used;
+
+    const std::vector<Cut> cuts = sankhya::separate_gomory_cuts(
+        sf.lp, integral, r.final_basic, r.final_status);
+    cuts_generated += static_cast<Int>(cuts.size());
+
+    for (const Cut& cut : cuts) {
+      for (const std::vector<double>& point : feasible) {
+        double activity = 0.0;
+        for (std::size_t idx = 0; idx < cut.columns.size(); ++idx)
+          activity += cut.coefficients[idx] * point[sz(cut.columns[idx])];
+        if (activity < cut.rhs - 1e-6) {
+          std::fprintf(stderr,
+                       "%s: a gomory cut removes a feasible integer point "
+                       "(activity %.10g < rhs %.10g)\n",
+                       label, activity, cut.rhs);
+          CHECK(false);
+          return;
+        }
+      }
+    }
+  }
+  std::printf("     %s: %d feasible points, %d bases, %d gomory cuts, none invalid\n",
+              label, static_cast<int>(feasible.size()),
+              static_cast<int>(bases_used), static_cast<int>(cuts_generated));
+  CHECK(bases_used >= 10);
+  CHECK(cuts_generated > 0);  // a separator that never fires proves nothing
 }
 
 }  // namespace
