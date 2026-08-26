@@ -1080,15 +1080,23 @@ SimplexResult solve_dual_simplex(const StandardLp& lp,
       if (!eligible) continue;
       double ratio = reduced[sz(j)] / a;
       if (ratio < 0.0) ratio = 0.0;  // dual infeasibility inside the tolerance
-      if (bland) {
-        // Lowest eligible index, which is the other half of the guarantee.
-        if (entering < 0) {
-          best_ratio = ratio;
-          best_pivot = std::fabs(a);
-          entering = j;
-        }
-        continue;
-      }
+      // No Bland override here, and the reason is that the dual's ratio test is
+      // not a tie-break on top of a pricing rule - it *is* the entering choice,
+      // and it is what holds dual feasibility. An earlier version took the
+      // lowest eligible index while stalled, the way the primal does, and that
+      // is not the same thing at all: the primal prices and then runs a ratio
+      // test, so overriding the pricing is safe, while here it discards the
+      // only thing keeping the reduced costs on the right side of zero.
+      //
+      // fit1p showed it exactly. Dual feasibility held perfectly for 101
+      // iterations and broke at 102 - the stall threshold is 100 - with nine
+      // columns violated by up to 0.97 after a single pivot. The solver then
+      // reached a primal feasible point and called it optimal at 33,609 against
+      // a true 9,146.38.
+      //
+      // Bland still applies to the leaving row, where it belongs: that is a
+      // pricing choice and overriding it cannot break an invariant.
+      //
       // Ties go to the larger pivot, which costs nothing here.
       if (ratio < best_ratio - 1e-9 ||
           (ratio < best_ratio + 1e-9 && std::fabs(a) > best_pivot)) {
