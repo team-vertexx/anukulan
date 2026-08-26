@@ -104,19 +104,32 @@ for n in names:
                            capture_output=True, text=True)
         row[tag] = json.loads(r.stdout) if r.stdout.strip() else None
         row[tag + "_wall"] = time.perf_counter() - t
+        # The solver's own clock as well as the wall clock. They are not the
+        # same number and the difference is not small: reading graph40-40's
+        # 1.26 million nonzeros out of an MPS file takes 1.6 seconds before the
+        # solver starts, and both backends pay it. Judging a GPU on a wall clock
+        # that is 59% serial parsing measures the parser.
+        row[tag + "_solve"] = row[tag]["seconds"] if row[tag] else 0.0
     rows.append(row)
 if not rows:
     print("no large instances downloaded; skipping")
 else:
-    print(f"{'instance':<15} {'cpu s':>9} {'gpu s':>9} {'speedup':>9} "
-          f"{'objectives agree':>18}")
+    print(f"{'instance':<15} {'cpu solve':>10} {'gpu solve':>10} {'speedup':>8} "
+          f"{'cpu wall':>9} {'gpu wall':>9} {'setup':>7} {'agree':>9}")
     for r in rows:
         if not r.get("cpu") or not r.get("gpu"):
             print(f"{r['name']:<15} incomplete"); continue
         d = abs(r['cpu']['objective'] - r['gpu']['objective']) / \
             max(1.0, abs(r['cpu']['objective']))
-        print(f"{r['name']:<15} {r['cpu_wall']:>9.2f} {r['gpu_wall']:>9.2f} "
-              f"{r['cpu_wall']/max(1e-9, r['gpu_wall']):>8.2f}x {d:>18.1e}")
+        setup = r['cpu_wall'] - r['cpu_solve']
+        print(f"{r['name']:<15} {r['cpu_solve']:>10.2f} {r['gpu_solve']:>10.2f} "
+              f"{r['cpu_solve']/max(1e-9, r['gpu_solve']):>7.2f}x "
+              f"{r['cpu_wall']:>9.2f} {r['gpu_wall']:>9.2f} {setup:>7.2f} {d:>9.1e}")
+    print()
+    print("speedup is on the solve. `setup` is everything before it - reading the")
+    print("MPS file, building the standard form - which runs on the host and is")
+    print("identical for both backends, so counting it dilutes the comparison by")
+    print("a constant that has nothing to do with the GPU.")
 PY
 
 mkdir -p results

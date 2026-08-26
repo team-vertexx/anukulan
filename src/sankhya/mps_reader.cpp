@@ -36,16 +36,31 @@ std::string upper(std::string s) {
   return s;
 }
 
-std::vector<std::string> tokenize(const std::string& line) {
-  std::vector<std::string> out;
+// Fills a caller-owned buffer rather than returning a fresh vector.
+//
+// A file like graph40-40 has 1.26 million entries, and returning a vector per
+// line meant a heap allocation per line for the vector's own storage. The names
+// themselves are short enough to live inside std::string without allocating, so
+// the vector was the whole cost: reading that file took 1.61 seconds, which was
+// 59% of what the GPU benchmark was calling a solve.
+void tokenize(const std::string& line, std::vector<std::string>* out) {
+  std::size_t count = 0;
   std::size_t i = 0;
   while (i < line.size()) {
     while (i < line.size() && std::isspace(static_cast<unsigned char>(line[i]))) ++i;
     if (i >= line.size()) break;
     const std::size_t start = i;
     while (i < line.size() && !std::isspace(static_cast<unsigned char>(line[i]))) ++i;
-    out.push_back(line.substr(start, i - start));
+    if (count == out->size()) out->emplace_back();
+    (*out)[count].assign(line, start, i - start);
+    ++count;
   }
+  out->resize(count);
+}
+
+std::vector<std::string> tokenize(const std::string& line) {
+  std::vector<std::string> out;
+  tokenize(line, &out);
   return out;
 }
 
@@ -57,22 +72,27 @@ std::vector<std::string> tokenize(const std::string& line) {
 //
 // The last field is taken to the end of the line, because writers routinely let
 // a value spill a character or two past column 61.
-std::vector<std::string> tokenize_fixed(const std::string& line) {
+void tokenize_fixed(const std::string& line, std::vector<std::string>* out) {
   static constexpr std::size_t kBegin[6] = {1, 4, 14, 24, 39, 49};
   static constexpr std::size_t kEnd[6] = {3, 12, 22, 36, 47,
                                           std::numeric_limits<std::size_t>::max()};
-  std::vector<std::string> out;
+  std::size_t count = 0;
   for (int f = 0; f < 6; ++f) {
     if (kBegin[f] >= line.size()) break;
     const std::size_t stop = std::min(kEnd[f], line.size());
     if (stop <= kBegin[f]) continue;
-    std::string field = line.substr(kBegin[f], stop - kBegin[f]);
-    const std::size_t first = field.find_first_not_of(" \t");
-    if (first == std::string::npos) continue;
-    const std::size_t last = field.find_last_not_of(" \t");
-    out.push_back(field.substr(first, last - first + 1));
+    // Trim in place over the original line instead of taking a substring and
+    // then a substring of that.
+    std::size_t first = kBegin[f];
+    while (first < stop && (line[first] == ' ' || line[first] == '\t')) ++first;
+    if (first >= stop) continue;
+    std::size_t last = stop;
+    while (last > first && (line[last - 1] == ' ' || line[last - 1] == '\t')) --last;
+    if (count == out->size()) out->emplace_back();
+    (*out)[count].assign(line, first, last - first);
+    ++count;
   }
-  return out;
+  out->resize(count);
 }
 
 // Some old Fortran-written files use D for the exponent. Cheap insurance.
@@ -153,9 +173,13 @@ class Reader {
     return false;
   }
 
-  std::vector<std::string> tokens_for(const std::string& line) const {
-    return fixed_format_ ? tokenize_fixed(line) : tokenize(line);
+  // One buffer for the whole file, so the tokenizer stops allocating per line.
+  const std::vector<std::string>& tokens_for(const std::string& line) const {
+    if (fixed_format_) tokenize_fixed(line, &token_buffer_);
+    else tokenize(line, &token_buffer_);
+    return token_buffer_;
   }
+  mutable std::vector<std::string> token_buffer_;
 
   bool flush_rows();
   bool handle_rows(const std::vector<std::string>& t);
@@ -186,6 +210,8 @@ class Reader {
 
   std::unordered_map<std::string, Int> row_index_;
   std::unordered_map<std::string, Int> col_index_;
+  std::string last_column_name_;
+  Int last_column_index_ = -1;
 
   std::vector<char> row_type_;  // 'E', 'L' or 'G'
   std::vector<double> row_rhs_;
@@ -218,8 +244,19 @@ Int Reader::find_row(const std::string& name, bool* known) const {
 }
 
 Int Reader::column_index(const std::string& name, bool create) {
+  // COLUMNS lists a column's entries together, so consecutive lines almost
+  // always name the column that was just looked up. Remembering the last one
+  // turns one hash of a string per matrix entry into one per column - on
+  // graph40-40 that is 1.26 million hashes down to 102,600.
+  if (!last_column_name_.empty() && last_column_name_ == name) {
+    return last_column_index_;
+  }
   const auto it = col_index_.find(name);
-  if (it != col_index_.end()) return it->second;
+  if (it != col_index_.end()) {
+    last_column_name_ = name;
+    last_column_index_ = it->second;
+    return it->second;
+  }
   if (!create) return -1;
   const Int idx = static_cast<Int>(result_.model.col_names.size());
   col_index_.emplace(name, idx);
@@ -231,6 +268,8 @@ Int Reader::column_index(const std::string& name, bool create) {
                                                       : VarType::kContinuous);
   has_lower_.push_back(false);
   has_upper_.push_back(false);
+  last_column_name_ = name;
+  last_column_index_ = idx;
   return idx;
 }
 
@@ -596,7 +635,9 @@ MpsReadResult Reader::run(std::istream& in) {
       continue;
     }
 
-    const std::vector<std::string> t = is_header ? tokenize(line) : tokens_for(line);
+    if (is_header) tokenize(line, &token_buffer_);
+    else tokens_for(line);
+    const std::vector<std::string>& t = token_buffer_;
     if (t.empty()) continue;
 
     if (is_header) {
