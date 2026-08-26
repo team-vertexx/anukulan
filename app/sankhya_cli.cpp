@@ -72,6 +72,16 @@ bool value_of(const std::string& arg, const std::string& prefix, double* out) {
   return true;
 }
 
+// JSON has no inf and no nan. An objective that is either means there is no
+// incumbent, and "null" is what a parser can actually read.
+std::string json_number(double v) {
+  if (!std::isfinite(v)) return "null";
+  std::ostringstream out;
+  out.precision(17);
+  out << v;
+  return out.str();
+}
+
 int command_read(const std::vector<std::string>& args) {
   if (args.empty()) {
     std::fprintf(stderr, "read: expected a file name\n");
@@ -715,6 +725,17 @@ int command_milp(const std::vector<std::string>& args) {
       options.integrality_tolerance = v;
     } else if (a == "--no-cuts") {
       options.root_cuts = false;
+    } else if (value_of(a, "--stall=", &v)) {
+      options.simplex.dual_stall_iterations = static_cast<sankhya::Int>(v);
+    } else if (value_of(a, "--dive-iters=", &v)) {
+      options.dive_iteration_factor = static_cast<sankhya::Int>(v);
+    } else if (value_of(a, "--node-iters=", &v)) {
+      options.node_iteration_factor = static_cast<sankhya::Int>(v);
+    } else if (a == "--nodes=simplex") {
+      options.node_solver = sankhya::BranchAndBoundOptions::NodeSolver::kSimplex;
+    } else if (a == "--nodes=first-order") {
+      options.node_solver =
+          sankhya::BranchAndBoundOptions::NodeSolver::kFirstOrder;
     } else if (a == "--most-fractional") {
       options.branching =
           sankhya::BranchAndBoundOptions::Branching::kMostFractional;
@@ -766,8 +787,8 @@ int command_milp(const std::vector<std::string>& args) {
     out.precision(17);
     out << "{\"name\":\"" << read_result.model.name << "\","
         << "\"status\":\"" << sankhya::to_string(r.status) << "\","
-        << "\"objective\":" << r.objective << ","
-        << "\"dual_bound\":" << r.dual_bound << ","
+        << "\"objective\":" << json_number(r.objective) << ","
+        << "\"dual_bound\":" << json_number(r.dual_bound) << ","
         << "\"gap\":" << r.relative_gap << ","
         << "\"nodes\":" << r.nodes << ","
         << "\"max_depth\":" << r.max_depth << ","
@@ -775,6 +796,8 @@ int command_milp(const std::vector<std::string>& args) {
         << "\"incumbents\":" << r.incumbents_found << ","
         << "\"heuristic_successes\":" << r.heuristic_successes << ","
         << "\"cuts_added\":" << r.cuts_added << ","
+        << "\"warm_started_nodes\":" << r.warm_started_nodes << ","
+        << "\"simplex_iterations\":" << r.simplex_iterations << ","
         << "\"root_before\":" << r.root_bound_before_cuts << ","
         << "\"root_after\":" << r.root_bound_after_cuts << ","
         << "\"seconds\":" << r.solve_seconds << "}\n";

@@ -82,6 +82,25 @@ bool SimplexBasis::set_initial(const LogicalForm& form, std::string* error) {
   return refactorize(form, error);
 }
 
+bool SimplexBasis::set_from(const LogicalForm& form, const std::vector<Int>& basic,
+                            const std::vector<VarStatus>& status,
+                            std::string* error) {
+  if (static_cast<Int>(basic.size()) != form.num_rows ||
+      static_cast<Int>(status.size()) != form.columns.rows()) {
+    if (error) *error = "the supplied basis does not match this form";
+    return false;
+  }
+  for (Int j : basic) {
+    if (j < 0 || j >= form.columns.rows()) {
+      if (error) *error = "the supplied basis names a column that does not exist";
+      return false;
+    }
+  }
+  basic_ = basic;
+  status_ = status;
+  return refactorize(form, error);
+}
+
 bool SimplexBasis::refactorize(const LogicalForm& form, std::string* error) {
   // The updates are only discarded once there is a factorisation to replace
   // them with. A failed refactorisation leaves the basis exactly as it was, so
@@ -332,7 +351,10 @@ SimplexResult solve_simplex(const StandardLp& lp, const SimplexOptions& options)
 
   SimplexBasis basis;
   std::string error;
-  if (!basis.set_initial(form, &error)) {
+  if (options.start_basic && options.start_status &&
+      basis.set_from(form, *options.start_basic, *options.start_status, &error)) {
+    result.started_warm = true;
+  } else if (!basis.set_initial(form, &error)) {
     result.message = error;
     return result;
   }
@@ -780,6 +802,8 @@ SimplexResult solve_simplex(const StandardLp& lp, const SimplexOptions& options)
   result.objective = form.objective_scale * standard + form.objective_offset;
   result.iterations = iteration;
   result.status = status;
+  result.final_basic = basis.basic();
+  result.final_status = basis.status();
   result.solve_seconds = elapsed();
   return result;
 }
@@ -847,7 +871,15 @@ SimplexResult solve_dual_simplex(const StandardLp& lp,
 
   SimplexBasis basis;
   std::string error;
-  if (!basis.set_initial(form, &error)) {
+  if (options.start_basic && options.start_status) {
+    if (basis.set_from(form, *options.start_basic, *options.start_status, &error)) {
+      result.started_warm = true;
+    } else if (!basis.set_initial(form, &error)) {
+      result.status = SimplexStatus::kNumericalError;
+      result.message = "could not factorise the initial basis: " + error;
+      return result;
+    }
+  } else if (!basis.set_initial(form, &error)) {
     result.status = SimplexStatus::kNumericalError;
     result.message = "could not factorise the initial basis: " + error;
     return result;
@@ -869,6 +901,20 @@ SimplexResult solve_dual_simplex(const StandardLp& lp,
 
   Int iteration = 0;
   SimplexStatus status = SimplexStatus::kIterationLimit;
+  // The dual's stall test is on the total primal infeasibility, not on the
+  // step. Copying the primal's test across looked obvious - a run of zero dual
+  // ratios instead of a run of zero steps - and it is 32 times worse: neos5
+  // goes from 110 iterations to 3,504 with 176 switches, because a zero dual
+  // ratio is an ordinary degenerate pivot rather than a symptom. The dual takes
+  // them constantly and gets on fine.
+  //
+  // What it is not fine with is making no progress towards feasibility, which
+  // is the thing this algorithm is actually driving to zero. That is what gets
+  // watched, and on a warm started node deep in a branch and bound tree it is
+  // what stops 200,000 pivots that never arrive.
+  Int stalled_rounds = 0;
+  double best_infeasibility = kInf;
+  bool bland = false;
   for (; iteration < options.max_iterations; ++iteration) {
     if (elapsed() > options.time_limit_seconds) {
       status = SimplexStatus::kTimeLimit;
@@ -894,6 +940,25 @@ SimplexResult solve_dual_simplex(const StandardLp& lp,
 
     // Step 2, pricing: the basic variable furthest outside its bounds. Dual
     // steepest edge would weight this by the row norm; that comes later.
+    double total_infeasibility = 0.0;
+    for (Int i = 0; i < m; ++i) {
+      const Int j = basis.basic()[sz(i)];
+      const double value = z[sz(j)];
+      if (value < form.lower[sz(j)]) total_infeasibility += form.lower[sz(j)] - value;
+      if (value > form.upper[sz(j)]) total_infeasibility += value - form.upper[sz(j)];
+    }
+    if (total_infeasibility < best_infeasibility * (1.0 - 1e-9)) {
+      best_infeasibility = total_infeasibility;
+      stalled_rounds = 0;
+      if (bland) {
+        bland = false;
+        ++result.bland_switches;
+      }
+    } else if (++stalled_rounds >= options.dual_stall_iterations && !bland) {
+      bland = true;
+      ++result.bland_switches;
+    }
+
     Int leaving_row = -1;
     double worst = options.primal_tolerance;
     bool below = false;
@@ -902,12 +967,16 @@ SimplexResult solve_dual_simplex(const StandardLp& lp,
       const double value = z[sz(j)];
       const double under = form.lower[sz(j)] - value;
       const double over = value - form.upper[sz(j)];
-      if (std::isfinite(under) && under > worst) {
+      const bool under_beats =
+          bland ? (leaving_row < 0 || j < basis.basic()[sz(leaving_row)]) : under > worst;
+      const bool over_beats =
+          bland ? (leaving_row < 0 || j < basis.basic()[sz(leaving_row)]) : over > worst;
+      if (std::isfinite(under) && under > options.primal_tolerance && under_beats) {
         worst = under;
         leaving_row = i;
         below = true;
       }
-      if (std::isfinite(over) && over > worst) {
+      if (std::isfinite(over) && over > options.primal_tolerance && over_beats) {
         worst = over;
         leaving_row = i;
         below = false;
@@ -962,6 +1031,15 @@ SimplexResult solve_dual_simplex(const StandardLp& lp,
       if (!eligible) continue;
       double ratio = reduced[sz(j)] / a;
       if (ratio < 0.0) ratio = 0.0;  // dual infeasibility inside the tolerance
+      if (bland) {
+        // Lowest eligible index, which is the other half of the guarantee.
+        if (entering < 0) {
+          best_ratio = ratio;
+          best_pivot = std::fabs(a);
+          entering = j;
+        }
+        continue;
+      }
       // Ties go to the larger pivot, which costs nothing here.
       if (ratio < best_ratio - 1e-9 ||
           (ratio < best_ratio + 1e-9 && std::fabs(a) > best_pivot)) {
@@ -1005,6 +1083,8 @@ SimplexResult solve_dual_simplex(const StandardLp& lp,
   }
 
   basis.compute_primal(form, &z);
+  result.final_basic = basis.basic();
+  result.final_status = basis.status();
   result.status = status;
   result.iterations = iteration;
   result.x.assign(sz(form.num_structural), 0.0);
@@ -1015,6 +1095,8 @@ SimplexResult solve_dual_simplex(const StandardLp& lp,
   for (Int j = 0; j < form.num_structural; ++j)
     objective += form.cost[sz(j)] * result.x[sz(j)];
   result.objective = form.objective_scale * objective + form.objective_offset;
+  result.final_basic = basis.basic();
+  result.final_status = basis.status();
   result.solve_seconds = elapsed();
   return result;
 }

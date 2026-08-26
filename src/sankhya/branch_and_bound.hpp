@@ -5,6 +5,7 @@
 
 #include "sankhya/model.hpp"
 #include "sankhya/pdhg.hpp"
+#include "sankhya/simplex.hpp"
 
 namespace sankhya {
 
@@ -24,6 +25,32 @@ namespace sankhya {
 // scope is tens of integer variables, not thousands.
 struct BranchAndBoundOptions {
   PdhgOptions relaxation;
+  SimplexOptions simplex;
+
+  // What solves a node's relaxation.
+  //
+  // The first-order method has no basis, so every node is a fresh solve and
+  // integrality has to be read off a point that is only near a vertex. The
+  // simplex has a basis, and branching changes one bound on one variable, which
+  // cannot change a reduced cost - so the parent's basis is still dual feasible
+  // and the child is a few dual pivots away. That is the difference between a
+  // tree that is affordable and one that is not.
+  //
+  // Both are kept because the comparison is worth being able to run.
+  enum class NodeSolver { kFirstOrder, kSimplex };
+  NodeSolver node_solver = NodeSolver::kSimplex;
+
+  // Iterations a single node's re-optimisation may take, as a multiple of the
+  // row count. A warm started dual should need a handful of pivots; needing
+  // thousands means it is stalling, and letting one node spend the solver's
+  // whole iteration budget is how neos5 managed 16 nodes in 63 seconds. Past
+  // the cap the node is reported as unsolved rather than pruned silently.
+  Int node_iteration_factor = 0;  // 0 means no cap
+
+  // The same, for the diving heuristic, which pins every integer column and so
+  // presents the solver with a problem unlike the one it just did. It is a
+  // heuristic and gets a short leash.
+  Int dive_iteration_factor = 20;
 
   Int node_limit = 20000;
   double time_limit_seconds = 300.0;
@@ -95,6 +122,10 @@ struct BranchAndBoundResult {
   Int heuristic_successes = 0;
   Int dives_run = 0;
   Int cuts_added = 0;
+  // Nodes whose relaxation started from the parent's basis rather than from
+  // nothing. Close to the node count is what this is supposed to look like.
+  Int warm_started_nodes = 0;
+  Int simplex_iterations = 0;
   double root_bound_before_cuts = 0.0;
   double root_bound_after_cuts = 0.0;
   double solve_seconds = 0.0;

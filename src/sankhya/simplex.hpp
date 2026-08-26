@@ -47,6 +47,12 @@ class SimplexBasis {
   // is crude but gives a starting point that factorises.
   bool set_initial(const LogicalForm& form, std::string* error = nullptr);
 
+  // Installs a basis someone else ended on and factorises it. The sizes have to
+  // match the form: one basic variable per row, one status per column. Returns
+  // false if they do not, or if the basis is singular.
+  bool set_from(const LogicalForm& form, const std::vector<Int>& basic,
+                const std::vector<VarStatus>& status, std::string* error = nullptr);
+
   bool refactorize(const LogicalForm& form, std::string* error = nullptr);
 
   // B^-1 x and B^-T x for the basis as it stands, which is the factorisation
@@ -179,6 +185,24 @@ struct SimplexOptions {
   // "New finite pivoting rules for the simplex method", Math. of OR 2(2), 1977.
   Int stall_iterations = 20;
 
+  // The dual's own, and it is five times the primal's because the dual's
+  // progress measure is noisier. Driving one infeasible variable into its bound
+  // can create infeasibility somewhere else, so the total does not fall
+  // monotonically and a short window reads ordinary progress as a stall.
+  //
+  // Measured over four MIPLIB instances, as the gap left after 20 seconds:
+  //
+  //            gt2      mas76    neos5     gen-ip054
+  //     20   21.048%    4.474%    1.667%    0.710%
+  //    100    0.000%    1.476%    3.333%    0.509%
+  //    500    0.000%    1.476%    3.333%    0.509%
+  //    off    0.000%    1.476%   38.333%    0.509%
+  //
+  // So the test earns its place on exactly one of them and is inert on the rest
+  // at 100 - and without it neos5 spends whole nodes on 200,000 pivots that
+  // never arrive. 20 was my first guess and it cost three instances to buy one.
+  Int dual_stall_iterations = 100;
+
   // How far back a refactorisation may walk before giving up.
   Int max_rollback = 20;
 
@@ -210,6 +234,14 @@ struct SimplexOptions {
   //
   // fit1p under Dantzig is the one that got worse, 3260 iterations to 6747.
   bool piecewise_phase_one = true;
+
+  // Start from this basis rather than the all-logical one. Both must be given
+  // or neither. This is what makes a branch and bound node cheap: tightening
+  // one bound on one variable leaves the parent's basis dual feasible, because
+  // a reduced cost does not depend on a bound, so the child is a few dual
+  // pivots away rather than a fresh solve.
+  const std::vector<Int>* start_basic = nullptr;
+  const std::vector<VarStatus>* start_status = nullptr;
 
   bool verbose = false;
   Int log_frequency = 1000;
@@ -298,6 +330,11 @@ struct SimplexResult {
   // feasible, and whether the dual had to hand back to the primal.
   Int dual_start_flips = 0;
   bool fell_back_to_primal = false;
+  bool started_warm = false;
+
+  // The basis this ended on, for the next problem that differs only in bounds.
+  std::vector<Int> final_basic;
+  std::vector<VarStatus> final_status;
   double solve_seconds = 0.0;
   std::string message;
 };
