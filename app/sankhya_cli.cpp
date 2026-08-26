@@ -498,6 +498,8 @@ int command_solve(const std::vector<std::string>& args) {
       options.scaling.pock_chambolle = false;
     } else if (a == "--no-adaptive") {
       options.adaptive_step_size = false;
+    } else if (a == "--halpern") {
+      options.halpern = true;
     } else if (a == "--no-restarts") {
       options.restarts = false;
     } else if (a == "--no-primal-weight") {

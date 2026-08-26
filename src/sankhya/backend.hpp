@@ -100,6 +100,10 @@ class LinAlgBackend {
   virtual void scale_into(Int n, double weight, const double* sum,
                           double* out) const = 0;
 
+  // z <- a z + b anchor, in place. The Halpern iteration's whole update.
+  virtual void blend(Int n, double a, double* z, double b,
+                     const double* anchor) const = 0;
+
   // omega * ||dx||^2 + ||dy||^2 / omega, the weighted norm PDLP works in.
   virtual double weighted_norm_squared(Int n, Int m, const double* dx,
                                        const double* dy, double omega) const = 0;

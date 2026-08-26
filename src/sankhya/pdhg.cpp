@@ -367,6 +367,18 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
   backend.multiply(lp.k, d_x.data(), k_x.data());
 
   double sum_weight = 0.0;
+  // The Halpern anchor: the point the current epoch started from.
+  BackendVector anchor_x(backend, n), anchor_y(backend, m);
+  // K times the anchor, kept alongside it. K is linear, so the blend below can
+  // be applied to K z as well as to z, and the product never has to be redone.
+  BackendVector anchor_kx(backend, m);
+  bool anchor_needs_reset = true;
+  Int halpern_k = 0;
+  // ||z - T(z)||^2 in the weighted norm, and its value at the start of the
+  // current epoch. The Halpern restart test is a decay of that quantity, which
+  // the adaptive step size already computes.
+  double movement = 0.0;
+  double epoch_start_movement = 0.0;
 
   // Restart anchors are read only at restarts, which are rare, so they stay on
   // the host rather than occupying device memory.
@@ -417,9 +429,10 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
       // absolute value here lets eta grow without bound whenever the
       // interaction happens to be negative, and the iterates blow up.
       double interaction = 0.0;
-      double movement = 0.0;
       backend.step_size_terms(n, m, dx.data(), dy.data(), k_dx.data(), omega,
                               &interaction, &movement);
+      // movement is ||z - T(z)||^2 in the weighted norm, which is also what the
+      // Halpern restart test below needs, so it is hoisted out of this scope.
       double eta_bar = kInf;
       if (interaction > 0.0) eta_bar = movement / (2.0 * interaction);
 
@@ -444,10 +457,50 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
     std::swap(d_y, y_next);
     ++iterations_since_restart;
 
-    if (options.restarts) {
+    if (options.halpern) {
+      if (anchor_needs_reset) {
+        // z <- T(z), and that point becomes the anchor. This is Algorithm 1's
+        // line 6: an epoch begins one plain PDHG step past where the last one
+        // ended, and the Halpern counter starts from there.
+        backend.copy(d_x.data(), anchor_x.data(), n);
+        backend.copy(d_y.data(), anchor_y.data(), m);
+        backend.copy(k_x.data(), anchor_kx.data(), m);
+        anchor_needs_reset = false;
+        halpern_k = 0;
+        epoch_start_movement = movement;
+      } else {
+        const double w = static_cast<double>(halpern_k + 1) /
+                         static_cast<double>(halpern_k + 2);
+        backend.blend(n, w, d_x.data(), 1.0 - w, anchor_x.data());
+        backend.blend(m, w, d_y.data(), 1.0 - w, anchor_y.data());
+        // K z follows z by the same combination, since K is linear. Recomputing
+        // it instead costs a sparse product per iteration, which on this set
+        // was the whole difference between Halpern winning and losing.
+        backend.blend(m, w, k_x.data(), 1.0 - w, anchor_kx.data());
+        ++halpern_k;
+      }
+    }
+
+    if (options.restarts && !options.halpern) {
       backend.accumulate(n, eta, d_x.data(), sum_x.data());
       backend.accumulate(m, eta, d_y.data(), sum_y.data());
       sum_weight += eta;
+    }
+
+    // Halpern's own restart test, which is not the KKT one. Equation (10) of
+    // Lu and Yang: restart once the fixed point residual ||z - T(z)|| has
+    // decayed by a factor of e since the epoch began. That quantity is the
+    // `movement` the adaptive step size already computes, so the test is free,
+    // and it is checked every iteration rather than on the termination
+    // schedule - the whole point is to catch the decay when it happens.
+    if (options.halpern && options.halpern_restart && options.restarts &&
+        !anchor_needs_reset &&
+        epoch_start_movement > 0.0 && halpern_k >= options.halpern_minimum_epoch) {
+      // Comparing squares, so the factor of e becomes e^2.
+      if (movement <= epoch_start_movement / 7.389056098930650) {
+        anchor_needs_reset = true;
+        ++result.restarts;
+      }
     }
 
     const bool check = ((iteration + 1) % options.termination_check_frequency == 0);
@@ -474,7 +527,7 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
     const double current_kkt = weighted_kkt_error(lp, host_x, host_y, omega, &kkt_work);
     bool use_average = false;
     double candidate_kkt = current_kkt;
-    if (options.restarts && sum_weight > 0.0) {
+    if (options.restarts && !options.halpern && sum_weight > 0.0) {
       backend.scale_into(n, sum_weight, sum_x.data(), avg_x.data());
       backend.scale_into(m, sum_weight, sum_y.data(), avg_y.data());
       avg_x.download(&host_avg_x);
@@ -579,6 +632,7 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
     backend.fill(sum_x.data(), n, 0.0);
     backend.fill(sum_y.data(), m, 0.0);
     sum_weight = 0.0;
+    anchor_needs_reset = true;
     iterations_since_restart = 0;
     last_candidate_kkt = kInf;
     kkt_at_restart = weighted_kkt_error(lp, host_x, host_y, omega, &kkt_work);

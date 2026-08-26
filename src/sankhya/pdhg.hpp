@@ -45,6 +45,56 @@ struct PdhgOptions {
   bool primal_weight_updates = true;
   bool restarts = true;
 
+  // Halpern iteration instead of the averaged restart scheme.
+  //
+  // Plain PDHG restarted on a running average is raPDHG - what this has done
+  // until now. Restarted Halpern PDHG keeps an anchor instead: each step is a
+  // combination of the PDHG operator's output and the point the current epoch
+  // started from,
+  //
+  //     z^{k+1} = (k+1)/(k+2) T(z^k) + 1/(k+2) z^{0}
+  //
+  // and a restart takes one plain PDHG step and makes that the new anchor.
+  // Lu and Yang, Restarted Halpern PDHG for Linear Programming
+  // (arXiv:2407.16144); it is what cuPDLPx is built on, and the reported
+  // speedups over averaged restarts are large.
+  //
+  // On, and here is what that rests on. Over the sixteen Netlib instances with
+  // published optima, solved to 1e-6 with an absolute cap and presolve: 0.87x
+  // the iterations and 0.86x the wall clock, correct on all sixteen either way.
+  // Eleven of the sixteen improve, and the largest do most - 25fv47 140,520
+  // iterations to 102,920, maros-r7 8.4s to 5.5s, stocfor2 2.1s to 1.3s.
+  //
+  // Where it does not help: qap15 and datt256_lp are neutral at every tolerance
+  // from 1e-4 to 1e-8, and graph40-40 is about 1.4x worse. That last one is the
+  // GPU demonstration instance, but the speedup there is CPU against GPU on the
+  // same algorithm, so both sides move together and the ratio does not change.
+  //
+  // The literature reports far more than 1.16x for this - cuPDLPx claims 2.5x
+  // to 5x on MIPLIB relaxations - and the gap is not a mystery: that solver
+  // also has a new restart criterion and a PID-controlled primal weight update,
+  // neither of which is here. This is the Halpern base on its own.
+  bool halpern = true;
+
+  // Restart on the Halpern paper's own test - equation (10) of Lu and Yang,
+  // where an epoch ends once ||z - T(z)|| has decayed by a factor of e - rather
+  // than on the KKT error the averaged scheme uses.
+  //
+  // It is off, and that is measured. Over the sixteen Netlib instances Halpern
+  // with the existing KKT restart takes 0.87x the iterations and 0.86x the time
+  // of averaged restarts; with the paper's test instead it is 0.93x and 0.91x.
+  // The KKT restart is PDLP's and has had a lot of tuning behind it, and it
+  // keeps winning here. The paper's test is cheaper - it reuses a quantity the
+  // adaptive step size already computes - so it may yet be the better one with
+  // a floor chosen by measurement rather than by guess.
+  bool halpern_restart = false;
+
+  // Shortest epoch the Halpern restart test will end. Without a floor the test
+  // can fire on the first iteration of an epoch and restart forever. Chosen by
+  // guess, which is the honest reason not to trust the comparison above too
+  // far.
+  Int halpern_minimum_epoch = 16;
+
   ScalingOptions scaling;
 
   // Null means whatever this build and machine offer - CUDA when both are

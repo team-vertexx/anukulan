@@ -94,6 +94,11 @@ class CpuBackend final : public LinAlgBackend {
     for (Int i = 0; i < n; ++i) out[sz(i)] = sum[sz(i)] / weight;
   }
 
+  void blend(Int n, double a, double* z, double b,
+             const double* anchor) const override {
+    for (Int i = 0; i < n; ++i) z[sz(i)] = a * z[sz(i)] + b * anchor[sz(i)];
+  }
+
   double weighted_norm_squared(Int n, Int m, const double* dx, const double* dy,
                                double omega) const override {
     return omega * dot(dx, dx, n) + dot(dy, dy, m) / omega;

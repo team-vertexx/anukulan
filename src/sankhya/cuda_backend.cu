@@ -135,6 +135,12 @@ __global__ void advance_kx_kernel(Int m, const double* __restrict__ k_x_bar,
   if (i < m) k_x[i] = 0.5 * (k_x_bar[i] + k_x[i]);
 }
 
+__global__ void blend_kernel(Int n, double a, double* __restrict__ z, double b,
+                             const double* __restrict__ anchor) {
+  const Int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n) z[i] = a * z[i] + b * anchor[i];
+}
+
 __global__ void accumulate_kernel(Int n, double weight, const double* __restrict__ v,
                                   double* __restrict__ sum) {
   const Int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -463,6 +469,14 @@ class CudaBackend final : public LinAlgBackend {
     if (n > 0) {
       Scope timer(this, "scale into");
       scale_into_kernel<<<blocks(n), kBlock>>>(n, 1.0 / weight, sum, out);
+    }
+  }
+
+  void blend(Int n, double a, double* z, double b,
+             const double* anchor) const override {
+    if (n > 0) {
+      Scope timer(this, "halpern blend");
+      blend_kernel<<<blocks(n), kBlock>>>(n, a, z, b, anchor);
     }
   }
 
