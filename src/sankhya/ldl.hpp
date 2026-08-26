@@ -34,6 +34,18 @@ namespace sankhya {
 //
 // The algorithm is the up-looking LDL' of Davis, Algorithm 849: A concise
 // sparse Cholesky factorization package, ACM TOMS 31(4), 2005.
+//
+// There is no fill-reducing ordering here, and that is a real limitation rather
+// than a detail. The elimination happens in the order the matrix arrives, and
+// on a structured problem that can be ruinous: Maros-Meszaros AUG2DC, 10,000
+// rows by 20,200 columns, does not finish at all in the natural order, while
+// conjugate gradient on the reduced system solves it in 1.19 seconds. Random
+// sparse systems gave a worst fill ratio of 3.43 and told me nothing about
+// that, which is what comes of measuring on the easy case.
+//
+// Approximate minimum degree is the fix and is not written yet. Until it is,
+// predicted_nonzeros() lets a caller find out what the factor would cost before
+// paying for it, and choose something else.
 struct LdlOptions {
   // A pivot smaller than this in magnitude means the matrix is not
   // quasi-definite after all - usually a rho or sigma that has gone to zero.
@@ -56,7 +68,14 @@ class LdlFactor {
   //
   // analyse() reads only the pattern, so one call covers every later set of
   // values with the same structure - which is the point of quasi-definiteness.
-  bool analyse(const SparseMatrix& lower, std::string* error = nullptr);
+  // `nonzero_budget` stops the analysis early once the factor is known to
+  // exceed it, returning false. The tree walk costs about one step per nonzero
+  // of L, so on a pattern whose fill is the problem the analysis is expensive
+  // for the same reason the factorisation would be - counting all the way to
+  // 2771 times the input before declining is paying most of the price of the
+  // thing being declined. Zero means no budget.
+  bool analyse(const SparseMatrix& lower, Int nonzero_budget = 0,
+               std::string* error = nullptr);
 
   // Factorises values with the pattern from the last analyse(). Returns false
   // if a pivot is too small, naming the column.
@@ -65,6 +84,11 @@ class LdlFactor {
 
   // Solves K x = b in place, using the factors from the last factorize().
   void solve(std::vector<double>* x) const;
+
+  // Nonzeros the factor will hold, known from analyse() alone - before any
+  // arithmetic. A caller that cannot afford the fill can find out cheaply and
+  // do something else.
+  Int predicted_nonzeros() const { return predicted_nonzeros_; }
 
   Int size() const { return n_; }
   Int nonzeros() const { return static_cast<Int>(values_.size()); }
@@ -79,6 +103,7 @@ class LdlFactor {
  private:
   Int n_ = 0;
   Int input_nonzeros_ = 0;
+  Int predicted_nonzeros_ = 0;
   Int positive_pivots_ = 0;
 
   std::vector<Int> parent_;    // elimination tree

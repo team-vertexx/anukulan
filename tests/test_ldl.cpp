@@ -71,7 +71,7 @@ void test_diagonal() {
   const SparseMatrix k = SparseMatrix::from_triplets(6, 6, std::move(entries));
   LdlFactor f;
   std::string error;
-  CHECK(f.analyse(k, &error));
+  CHECK(f.analyse(k, 0, &error));
   CHECK(f.factorize(k, {}, &error));
   CHECK_EQ(f.positive_pivots(), 3);
   const std::vector<double> x{1.0, -2.0, 3.0, -4.0, 5.0, -6.0};
@@ -85,7 +85,7 @@ void test_small_kkt_by_hand() {
   const SparseMatrix k = build_kkt(2, 2, p, a, 1e-6, 0.1);
   LdlFactor f;
   std::string error;
-  CHECK(f.analyse(k, &error));
+  CHECK(f.analyse(k, 0, &error));
   CHECK(f.factorize(k, {}, &error));
   // Two primal variables, so two positive pivots and two negative.
   CHECK_EQ(f.positive_pivots(), 2);
@@ -128,7 +128,7 @@ void test_random_kkt() {
     const SparseMatrix k = build_kkt(n, m, p, a, 1e-6, 0.1);
     LdlFactor f;
     std::string error;
-    if (!f.analyse(k, &error)) { CHECK(false); continue; }
+    if (!f.analyse(k, 0, &error)) { CHECK(false); continue; }
     if (!f.factorize(k, {}, &error)) {
       sankhya_test::report(__FILE__, __LINE__, "factorize failed: " + error);
       continue;
@@ -157,7 +157,7 @@ void test_values_can_change_without_reanalysing() {
   LdlFactor f;
   std::string error;
   const SparseMatrix first = build_kkt(3, 2, p, a, 1e-6, 0.1);
-  CHECK(f.analyse(first, &error));
+  CHECK(f.analyse(first, 0, &error));
   CHECK(f.factorize(first, {}, &error));
   const std::vector<double> x{1.0, 2.0, 3.0, -1.0, -2.0};
   CHECK(worst_solve_error(first, f, x) < 1e-12);

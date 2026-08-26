@@ -5,7 +5,8 @@
 
 namespace sankhya {
 
-bool LdlFactor::analyse(const SparseMatrix& lower, std::string* error) {
+bool LdlFactor::analyse(const SparseMatrix& lower, Int nonzero_budget,
+                        std::string* error) {
   if (lower.rows() != lower.cols()) {
     if (error) *error = "LDL' needs a square matrix";
     return false;
@@ -23,6 +24,7 @@ bool LdlFactor::analyse(const SparseMatrix& lower, std::string* error) {
   // Elimination tree and column counts in one pass. For each entry (i, k) above
   // the diagonal, walk from i up the tree marking the path; every node on it
   // gains a nonzero in column k of L.
+  Int running_total = 0;
   for (Int k = 0; k < n_; ++k) {
     flag_[sz(k)] = k;
     for (Int e = lower.row_begin(k); e < lower.row_end(k); ++e) {
@@ -32,13 +34,22 @@ bool LdlFactor::analyse(const SparseMatrix& lower, std::string* error) {
         if (parent_[sz(i)] == -1) parent_[sz(i)] = k;
         ++column_count_[sz(i)];
         flag_[sz(i)] = k;
-        if (parent_[sz(i)] == -1) break;
+        if (++running_total > nonzero_budget && nonzero_budget > 0) {
+          predicted_nonzeros_ = running_total;
+          if (error) {
+            *error = "the factor would hold more than " +
+                     std::to_string(nonzero_budget) +
+                     " nonzeros; stopped counting";
+          }
+          return false;
+        }
       }
     }
   }
 
   start_.assign(sz(n_) + 1, 0);
   for (Int k = 0; k < n_; ++k) start_[sz(k) + 1] = start_[sz(k)] + column_count_[sz(k)];
+  predicted_nonzeros_ = start_[sz(n_)];
   index_.assign(sz(start_[sz(n_)]), 0);
   values_.assign(sz(start_[sz(n_)]), 0.0);
   return true;

@@ -858,6 +858,10 @@ int command_qp(const std::vector<std::string>& args) {
       options.max_absolute_residual = 0.0;
     } else if (a == "--presolve") {
       use_presolve = true;
+    } else if (a == "--indirect") {
+      options.direct = false;
+    } else if (a == "--direct") {
+      options.direct = true;
     } else if (a == "--polish") {
       options.polish = true;
     } else if (a == "--no-adaptive-rho") {
@@ -909,6 +913,8 @@ int command_qp(const std::vector<std::string>& args) {
         << "\"iterations\":" << r.iterations << ","
         << "\"cg_iterations\":" << r.cg_iterations << ","
         << "\"rho_updates\":" << r.rho_updates << ","
+        << "\"kkt_fill_ratio\":" << r.kkt_fill_ratio << ","
+        << "\"fell_back_to_cg\":" << r.fell_back_to_cg << ","
         << "\"polished\":" << (r.polished ? 1 : 0) << ","
         << "\"primal\":" << r.residual.primal << ","
         << "\"dual\":" << r.residual.dual << ","

@@ -53,6 +53,25 @@ struct QpOptions {
 
   // Conjugate gradient budget per ADMM iteration. Loose early, tightened as the
   // outer iteration converges.
+  // Solve the KKT system by factorising it rather than by conjugate gradient
+  // on the reduced normal equations P + sigma I + A' diag(rho) A.
+  //
+  // The reduced form squares the conditioning of A, which is what CG then has
+  // to live with, and it is also why polishing never worked: the polished
+  // system is worse still. The KKT system itself is quasi-definite, so it
+  // factorises with a pivot order chosen from the pattern alone - one analysis,
+  // then a numeric factorisation each time rho changes, which on these problems
+  // is a handful of times in a whole solve.
+  bool direct = true;
+
+  // Give up on the direct solve when the factor would hold more than this many
+  // times the nonzeros of the KKT matrix itself, and use conjugate gradient
+  // instead. Without a fill-reducing ordering the natural elimination order is
+  // ruinous on some structured problems - AUG2DC never finishes - and the
+  // symbolic analysis says so before any arithmetic happens, so the fallback
+  // costs one pass over the pattern rather than a hung solve.
+  double max_fill_ratio = 20.0;
+
   Int cg_max_iterations = 200;
   double cg_tolerance = 1e-7;
 
@@ -120,6 +139,10 @@ struct QpResult {
   Int iterations = 0;
   Int cg_iterations = 0;
   Int rho_updates = 0;
+  // What the symbolic analysis predicted the KKT factor would cost, and whether
+  // that was enough to send the solve back to conjugate gradient.
+  double kkt_fill_ratio = 0.0;
+  bool fell_back_to_cg = false;
   bool polished = false;
   double solve_seconds = 0.0;
   double final_rho = 0.0;

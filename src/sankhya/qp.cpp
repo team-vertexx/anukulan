@@ -1,5 +1,7 @@
 #include "sankhya/qp.hpp"
 
+#include "sankhya/ldl.hpp"
+
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -199,6 +201,56 @@ QpResult solve_qp(const Model& model, const QpOptions& options) {
   // Conjugate gradient on M = P + sigma I + A' diag(rho) A, which never needs to
   // be formed: one product with P and two with A per iteration.
   std::vector<double> cg_r(sz(n)), cg_p(sz(n)), cg_mp(sz(n)), cg_tmp(sz(m));
+  // The KKT system, as a lower triangle stored row-wise:
+  //
+  //     [ P + sigma I      A'        ]      rows 0..n-1 hold P's lower half
+  //     [ A            -diag(1/rho)  ]      rows n..n+m-1 hold A and -1/rho
+  //
+  // Only the values on the trailing diagonal change when rho does, so the
+  // pattern is analysed once and the numbers are refactorised as needed.
+  LdlFactor kkt;
+  std::vector<double> kkt_rhs(sz(n + m), 0.0);
+  bool kkt_ready = false;
+  auto build_kkt = [&]() {
+    std::vector<Triplet> entries;
+    entries.reserve(sz(s.p.nnz() + s.a.nnz() + n + m));
+    for (Int j = 0; j < n; ++j) {
+      for (Int e = s.p.row_begin(j); e < s.p.row_end(j); ++e) {
+        const Int c = s.p.index()[sz(e)];
+        if (c <= j) entries.push_back(Triplet{j, c, s.p.value()[sz(e)]});
+      }
+      entries.push_back(Triplet{j, j, options.sigma});
+    }
+    for (Int i = 0; i < m; ++i) {
+      for (Int e = s.a.row_begin(i); e < s.a.row_end(i); ++e)
+        entries.push_back(Triplet{n + i, s.a.index()[sz(e)], s.a.value()[sz(e)]});
+      entries.push_back(Triplet{n + i, n + i, -1.0 / rho[sz(i)]});
+    }
+    return SparseMatrix::from_triplets(n + m, n + m, std::move(entries));
+  };
+  bool use_direct = options.direct;
+  auto refactorize_kkt = [&](std::string* error) {
+    const SparseMatrix k = build_kkt();
+    if (!kkt_ready) {
+      const Int budget =
+          static_cast<Int>(options.max_fill_ratio * static_cast<double>(k.nnz()));
+      if (!kkt.analyse(k, budget, error)) {
+        // Decided from the pattern, before any numbers are touched, and the
+        // counting stops as soon as the answer is known.
+        result.kkt_fill_ratio = k.nnz() > 0
+            ? static_cast<double>(kkt.predicted_nonzeros()) / k.nnz() : 0.0;
+        use_direct = false;
+        result.fell_back_to_cg = true;
+        if (error) error->clear();
+        return true;
+      }
+      result.kkt_fill_ratio = k.nnz() > 0
+          ? static_cast<double>(kkt.predicted_nonzeros()) / k.nnz() : 0.0;
+      kkt_ready = true;
+    }
+    return kkt.factorize(k, LdlOptions{}, error);
+  };
+
   auto apply_m = [&](const std::vector<double>& v, std::vector<double>* out) {
     backend.multiply(s.p, v.data(), out->data());
     backend.multiply(s.a, v.data(), cg_tmp.data());
@@ -275,6 +327,13 @@ QpResult solve_qp(const Model& model, const QpOptions& options) {
 
   QpStatus status = QpStatus::kIterationLimit;
   Int iteration = 0;
+  std::string kkt_error;
+  if (use_direct && !refactorize_kkt(&kkt_error)) {
+    result.status = QpStatus::kNumericalError;
+    result.message = "could not factorise the KKT system: " + kkt_error;
+    return result;
+  }
+
   result.residual = QpResidual{};
   for (; iteration < options.max_iterations; ++iteration) {
     // rhs = sigma x - q + A'(rho z - y)
@@ -283,11 +342,30 @@ QpResult solve_qp(const Model& model, const QpOptions& options) {
     for (Int j = 0; j < n; ++j)
       rhs[sz(j)] += options.sigma * x[sz(j)] - s.q[sz(j)];
 
-    x_tilde = x;  // warm start the inner solve from the current iterate
-    result.cg_iterations += conjugate_gradient(rhs, &x_tilde, options.cg_tolerance);
+    if (use_direct) {
+      // [ P + sigma I   A'      ] [x~]   [ sigma x - q   ]
+      // [ A          -1/rho     ] [nu]   [ z - y/rho     ]
+      //
+      // The top block is sigma x - q on its own. `rhs` above is the right hand
+      // side of the *reduced* system, which has already had A'(rho z - y)
+      // folded into it - that term is what eliminating nu produces, and putting
+      // it back into a system that still has nu in it counts it twice.
+      for (Int j = 0; j < n; ++j)
+        kkt_rhs[sz(j)] = options.sigma * x[sz(j)] - s.q[sz(j)];
+      for (Int i = 0; i < m; ++i)
+        kkt_rhs[sz(n + i)] = z[sz(i)] - y[sz(i)] / rho[sz(i)];
+      kkt.solve(&kkt_rhs);
+      for (Int j = 0; j < n; ++j) x_tilde[sz(j)] = kkt_rhs[sz(j)];
+      // nu came back in the tail, and z~ = z + (nu - y)/rho.
+      for (Int i = 0; i < m; ++i)
+        z_tilde[sz(i)] = z[sz(i)] + (kkt_rhs[sz(n + i)] - y[sz(i)]) / rho[sz(i)];
+    } else {
+      x_tilde = x;  // warm start the inner solve from the current iterate
+      result.cg_iterations += conjugate_gradient(rhs, &x_tilde, options.cg_tolerance);
 
-    // Eliminating nu from the KKT system leaves z_tilde = A x_tilde exactly.
-    backend.multiply(s.a, x_tilde.data(), z_tilde.data());
+      // Eliminating nu from the KKT system leaves z_tilde = A x_tilde exactly.
+      backend.multiply(s.a, x_tilde.data(), z_tilde.data());
+    }
 
     for (Int j = 0; j < n; ++j)
       x[sz(j)] = options.alpha * x_tilde[sz(j)] + (1.0 - options.alpha) * x[sz(j)];
@@ -341,6 +419,13 @@ QpResult solve_qp(const Model& model, const QpOptions& options) {
         rho_bar = std::fmin(1e6, std::fmax(1e-6, rho_bar * factor));
         set_rho();
         result.rho_updates++;
+        // Only the trailing diagonal moved, so the pattern still holds and this
+        // is a numeric factorisation on the ordering already chosen.
+        if (use_direct && !refactorize_kkt(&kkt_error)) {
+          result.status = QpStatus::kNumericalError;
+          result.message = "could not refactorise after a rho update: " + kkt_error;
+          return result;
+        }
       }
     }
   }
