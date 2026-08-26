@@ -1,0 +1,13 @@
+=== refinery, feasibility 1e-8 with a 1% gap ===
+--- --no-polish ---
+status        iteration limit
+objective     2.426061993520e+10
+iterations    200000  (41 restarts, 0 in 0 polish attempts)
+relative      primal 1.998e-07  dual 0.000e+00  gap 1.014e-07
+vs original   row 8.467e-01  bound 0.000e+00
+--- with polish ---
+status        optimal: converged after feasibility polishing
+objective     2.398388982474e+10
+iterations    25600  (23 restarts, 2120 in 2 polish attempts, adopted)
+relative      primal 7.037e-10  dual 0.000e+00  gap 5.768e-03
+vs original   row 1.602e-03  bound 0.000e+00

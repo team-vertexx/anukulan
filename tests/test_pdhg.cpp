@@ -312,6 +312,89 @@ void test_empty_constraint_matrix() {
   CHECK_NEAR(r.objective, -5.0, 1e-6);
 }
 
+
+// Feasibility polishing solves two modified problems, and the modifications are
+// the part most easily got wrong: they have to leave the feasible sets alone
+// and remove only the objectives. These check that directly rather than through
+// a solve, because a solve that happens to be right hides a construction that
+// is not.
+void test_feasibility_polishing_preserves_the_answer() {
+  // Polishing may end a solve early, but never at a point the caller's own
+  // termination test would have rejected.
+  for (const bool polish : {false, true}) {
+    PdhgOptions options;
+    options.tolerance = 1e-8;
+    options.max_iterations = 200000;
+    options.polish_feasibility = polish;
+    const PdhgResult r = sankhya::solve_pdhg(build(kWyndor), options);
+    CHECK(r.status == PdhgStatus::kOptimal);
+    CHECK_NEAR(r.objective, 36.0, 1e-6);
+  }
+}
+
+void test_polishing_buys_feasibility_for_gap() {
+  // The regime the technique exists for: feasibility held tight while the gap
+  // is allowed to be loose. The answer must land inside the gap it was given,
+  // and be feasible to the tolerance it was given - not the other way round.
+  PdhgOptions options;
+  options.tolerance = 1e-8;
+  options.gap_tolerance = 1e-2;
+  options.max_iterations = 200000;
+  const PdhgResult r = sankhya::solve_pdhg(build(kWyndor), options);
+  CHECK(r.status == PdhgStatus::kOptimal);
+  CHECK(r.residual.relative_primal <= 1e-8);
+  CHECK(r.residual.relative_dual <= 1e-8);
+  CHECK(r.residual.relative_gap <= 1e-2);
+  // A 1% gap on this problem still pins the objective to within a percent.
+  CHECK_NEAR(r.objective, 36.0, 0.5);
+}
+
+void test_gap_tolerance_defaults_to_the_main_tolerance() {
+  // Zero means "same as tolerance". A caller who never heard of gap_tolerance
+  // has to get exactly what they got before it existed.
+  PdhgOptions loose;
+  loose.tolerance = 1e-8;
+  loose.gap_tolerance = 0.0;
+  const PdhgResult r = sankhya::solve_pdhg(build(kWyndor), loose);
+  CHECK(r.status == PdhgStatus::kOptimal);
+  CHECK(r.residual.relative_gap <= 1e-8);
+}
+
+void test_a_warm_start_is_actually_used() {
+  // The dual warm start was silently dropped for as long as both iterates
+  // started at zero: x was uploaded to the working vector and y was not. That
+  // is invisible until something warm starts a dual, which is exactly what
+  // polishing does.
+  const StandardLp lp = build(kWyndor);
+  PdhgOptions cold;
+  cold.tolerance = 1e-8;
+  const PdhgResult reference = sankhya::solve_pdhg(lp, cold);
+  CHECK(reference.status == PdhgStatus::kOptimal);
+
+  // Starting from the answer, one termination check should be enough.
+  PdhgOptions warm = cold;
+  warm.warm_x = &reference.x;
+  warm.warm_y = &reference.y;
+  warm.scaling.ruiz_iterations = 0;
+  warm.scaling.pock_chambolle = false;
+  warm.max_iterations = 200000;
+  const PdhgResult r = sankhya::solve_pdhg(lp, warm);
+  CHECK(r.status == PdhgStatus::kOptimal);
+  CHECK(r.iterations < reference.iterations);
+}
+
+void test_polishing_respects_the_iteration_limit_of_the_main_loop() {
+  // Polishing is additional work and is reported as such. What max_iterations
+  // bounds is the main loop, and that has to stay checkable.
+  PdhgOptions options;
+  options.tolerance = 1e-14;
+  options.gap_tolerance = 1e-2;
+  options.max_iterations = 80;
+  options.termination_check_frequency = 40;
+  const PdhgResult r = sankhya::solve_pdhg(build(kWyndor), options);
+  CHECK_EQ(r.iterations, 80);
+}
+
 }  // namespace
 
 int main() {
@@ -327,5 +410,10 @@ int main() {
   test_is_deterministic();
   test_iteration_limit_is_respected();
   test_empty_constraint_matrix();
+  test_feasibility_polishing_preserves_the_answer();
+  test_polishing_buys_feasibility_for_gap();
+  test_gap_tolerance_defaults_to_the_main_tolerance();
+  test_a_warm_start_is_actually_used();
+  test_polishing_respects_the_iteration_limit_of_the_main_loop();
   return sankhya_test::finish("test_pdhg");
 }

@@ -253,6 +253,39 @@ double weighted_kkt_error(const StandardLp& lp, const std::vector<double>& x,
 
 }  // namespace
 
+namespace {
+
+// The two sub-problems feasibility polishing solves. Both keep K untouched,
+// which is what lets the sub-solve reuse the enclosing solve's matrix norm.
+//
+// Primal: drop the objective. Same feasible set, nothing pulling against it.
+void make_primal_feasibility(StandardLp* lp) {
+  std::fill(lp->c.begin(), lp->c.end(), 0.0);
+  lp->objective_offset = 0.0;
+}
+
+// Dual: drop the right-hand side and the bound values, keeping which bounds are
+// finite. The dual feasible set is {y >= 0 on the inequality block, with
+// c - K'y respecting the sign each column's finite bounds impose}, and none of
+// K, c or the finiteness pattern moves here - only the dual objective, which
+// becomes identically zero. x = 0 is feasible for what is left, so the modified
+// problem has optimal value zero and PDHG on it converges to a dual feasible y.
+void make_dual_feasibility(StandardLp* lp) {
+  std::fill(lp->q.begin(), lp->q.end(), 0.0);
+  for (std::size_t j = 0; j < lp->lower.size(); ++j) {
+    if (lp->lower[j] > -kInf) lp->lower[j] = 0.0;
+    if (lp->upper[j] < kInf) lp->upper[j] = 0.0;
+  }
+  lp->objective_offset = 0.0;
+}
+
+// Depth of nested solves on this thread. The backend releases every uploaded
+// matrix at once, so the sub-solves must not do it while the enclosing solve is
+// still running.
+thread_local int g_solve_depth = 0;
+
+}  // namespace
+
 PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
   const auto start_time = std::chrono::steady_clock::now();
   auto elapsed = [&start_time]() {
@@ -275,10 +308,20 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
   backend.prepare(lp.kt);
   struct ReleaseGuard {
     const LinAlgBackend& backend;
-    ~ReleaseGuard() { backend.release(); }
-  } release_guard{backend};
+    bool outermost;
+    ~ReleaseGuard() {
+      --g_solve_depth;
+      if (outermost) backend.release();
+    }
+  } release_guard{backend, g_solve_depth == 0};
+  ++g_solve_depth;
 
-  const double matrix_norm = estimate_matrix_norm(lp, 200, 1e-8);
+  // The sub-solves share the enclosing solve's matrix exactly, so they are
+  // handed its norm rather than paying two hundred power iterations for the
+  // same number.
+  const double matrix_norm = options.known_matrix_norm > 0.0
+                                 ? options.known_matrix_norm
+                                 : estimate_matrix_norm(lp, 200, 1e-8);
   result.matrix_norm_estimate = matrix_norm;
   if (matrix_norm <= 0.0) {
     // No constraint matrix content: the answer is whatever the bounds and the
@@ -320,14 +363,33 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
     const double q_norm = two_norm(lp.q);
     if (c_norm > 1e-12 && q_norm > 1e-12) omega = c_norm / q_norm;
   }
+  // A polishing sub-solve is handed the values the main loop had reached. The
+  // rule above cannot produce them: the sub-problem's c or q is all zeros, so
+  // it would fall through to a weight of 1.
+  if (options.initial_step_size > 0.0) eta = options.initial_step_size;
+  if (options.initial_primal_weight > 0.0) omega = options.initial_primal_weight;
 
   std::vector<double> x(sz(n), 0.0);
   std::vector<double> y(sz(m), 0.0);
+  const bool warm = options.warm_x != nullptr &&
+                    options.warm_x->size() == sz(n) &&
+                    options.warm_y != nullptr &&
+                    options.warm_y->size() == sz(m);
+  if (warm) {
+    x = *options.warm_x;
+    y = *options.warm_y;
+    // The dual iterate lives in the cone the projection maintains, so a warm
+    // start has to be put there before the loop assumes it already is.
+    for (Int i = lp.num_equalities; i < m; ++i) {
+      if (!(y[sz(i)] > 0.0)) y[sz(i)] = 0.0;
+    }
+  }
   for (Int j = 0; j < n; ++j) {
     // Start inside the box, or the first projection does all the work.
     const double lo = lp.lower[sz(j)];
     const double hi = lp.upper[sz(j)];
-    double v = 0.0;
+    double v = warm ? x[sz(j)] : 0.0;
+    if (!std::isfinite(v)) v = 0.0;
     if (v < lo) v = std::isfinite(lo) ? lo : 0.0;
     if (v > hi) v = std::isfinite(hi) ? hi : 0.0;
     x[sz(j)] = v;
@@ -363,6 +425,16 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
   d_upper.upload(lp.upper);
   d_q.upload(lp.q);
   d_x.upload(host_x);
+  // The dual iterate needs uploading for the same reason the primal does. It
+  // was missing here for as long as both started at zero, which hid two things:
+  // a warm-started dual silently did nothing, and on CUDA the loop began from
+  // whatever cudaMalloc handed back. The CPU allocator value-initialises, so
+  // neither was visible on this machine.
+  d_y.upload(host_y);
+  // Same reason: these are accumulated into, not written, so they have to start
+  // at zero rather than at whatever the allocator returned.
+  backend.fill(sum_x.data(), n, 0.0);
+  backend.fill(sum_y.data(), m, 0.0);
 
   backend.multiply(lp.k, d_x.data(), k_x.data());
 
@@ -397,6 +469,124 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
   std::vector<double> infeasibility_work;
 
   const double tolerance = options.tolerance;
+  const double gap_tolerance =
+      options.gap_tolerance > 0.0 ? options.gap_tolerance : options.tolerance;
+
+  // Halpern is a restart scheme, so it means nothing with restarts switched
+  // off. The anchor is only ever reset inside the restart block, so
+  // halpern-without-restarts sets one anchor on the first iteration and then
+  // blends against it forever - neither Halpern nor plain PDHG, but a permanent
+  // pull toward the starting point. The ablation that turns restarts off has to
+  // turn this off with it, or it is not measuring what its name says.
+  const bool halpern = options.halpern && options.restarts;
+
+  // Which measures have to hold to stop. The polishing sub-solves ask for one
+  // side only, since one side is all they are solving for.
+  auto passes = [&](const PdhgResidual& r) {
+    switch (options.termination) {
+      case PdhgOptions::Termination::kPrimalFeasibility:
+        return r.primal_ok(tolerance, options.absolute_tolerance,
+                           options.require_inf_norm_termination);
+      case PdhgOptions::Termination::kDualFeasibility:
+        return r.dual_ok(tolerance, options.absolute_tolerance,
+                         options.require_inf_norm_termination);
+      case PdhgOptions::Termination::kFull:
+        break;
+    }
+    return r.converged(tolerance, options.absolute_tolerance,
+                       options.require_inf_norm_termination, gap_tolerance);
+  };
+
+  // Feasibility polishing state. The two sub-problems are built once and
+  // reused: they share this solve's matrix, and the backend caches its uploads
+  // by matrix address, so rebuilding them per attempt would re-upload K to the
+  // device for nothing.
+  StandardLp primal_feas_lp;
+  StandardLp dual_feas_lp;
+  bool feasibility_problems_built = false;
+  std::vector<double> polished_x;
+  std::vector<double> polished_y;
+  PdhgResidual polished_residual;
+  bool have_polished = false;
+  Int next_polish_iteration = options.polish_first_iteration;
+
+  // One polishing attempt. Takes a scaled primal-dual pair, returns the
+  // unscaled polished pair and what it cost. Says nothing about whether the
+  // result is worth having - that is the caller's test, and it is the same test
+  // the caller would have had to pass anyway.
+  auto run_polish = [&](const std::vector<double>& seed_x,
+                        const std::vector<double>& seed_y, Int budget,
+                        std::vector<double>* out_x, std::vector<double>* out_y,
+                        PdhgResidual* out_r, Int* spent) {
+    if (!feasibility_problems_built) {
+      primal_feas_lp = lp;
+      make_primal_feasibility(&primal_feas_lp);
+      dual_feas_lp = lp;
+      make_dual_feasibility(&dual_feas_lp);
+      feasibility_problems_built = true;
+    }
+
+    PdhgOptions sub = options;
+    sub.polish_feasibility = false;  // no recursion
+    sub.polish_on_exit = false;
+    sub.detect_infeasibility = false;  // both sub-problems are feasible by construction
+    sub.verbose = false;
+    sub.backend = &backend;
+    sub.known_matrix_norm = matrix_norm;
+    // The sub-problems are built from the already-scaled lp and the seed lives
+    // in that space, so scaling them again would put the warm start in the
+    // wrong coordinates.
+    sub.scaling.ruiz_iterations = 0;
+    sub.scaling.pock_chambolle = false;
+    sub.max_iterations = budget;
+    // Feasibility sub-problems converge fast, and a sub-solve that cannot look
+    // at itself until iteration 40 spends 40 iterations whether or not it
+    // arrived at iteration 6. Give a small budget several chances to stop.
+    sub.termination_check_frequency =
+        std::max<Int>(10, std::min(options.termination_check_frequency, budget / 4));
+    sub.time_limit_seconds = std::fmax(0.0, options.time_limit_seconds - elapsed());
+    sub.initial_step_size = eta;
+    sub.initial_primal_weight = omega;
+
+    // Each sub-solve carries the seed on the side it is solving for and starts
+    // the other side at zero, which is trivially feasible for the sub-problem
+    // and therefore silent. Carrying the seed's dual into a problem with no
+    // objective is what sent the dual objective from 5969 to -11234 the first
+    // time this was written.
+    const std::vector<double> zero_x(sz(n), 0.0);
+    const std::vector<double> zero_y(sz(m), 0.0);
+
+    sub.termination = PdhgOptions::Termination::kPrimalFeasibility;
+    sub.warm_x = &seed_x;
+    sub.warm_y = &zero_y;
+    const PdhgResult primal_polish = solve_pdhg(primal_feas_lp, sub);
+
+    sub.termination = PdhgOptions::Termination::kDualFeasibility;
+    sub.warm_x = &zero_x;
+    sub.warm_y = &seed_y;
+    const PdhgResult dual_polish = solve_pdhg(dual_feas_lp, sub);
+
+    *spent = primal_polish.iterations + dual_polish.iterations;
+    result.scaling.scaling.unscale_primal(primal_polish.x, out_x);
+    result.scaling.scaling.unscale_dual(dual_polish.y, out_y);
+    *out_r = evaluate_residual(original, *out_x, *out_y);
+    if (options.verbose) {
+      std::printf(
+          "  polish  spent %5d (%d primal, %d dual)  ->  primal %.3e  dual %.3e"
+          "  gap %.3e\n",
+          *spent, (int)primal_polish.iterations, (int)dual_polish.iterations,
+          out_r->relative_primal, out_r->relative_dual, out_r->relative_gap);
+    }
+  };
+
+  auto polish_budget = [&](Int at_iteration) {
+    Int budget = static_cast<Int>(options.polish_iteration_factor *
+                                  static_cast<double>(at_iteration + 1));
+    budget = std::max(budget, options.polish_minimum_iterations);
+    budget = std::min(budget, options.polish_maximum_iterations);
+    return budget;
+  };
+
   Int iteration = 0;
   Int iterations_since_restart = 0;
   PdhgStatus status = PdhgStatus::kIterationLimit;
@@ -457,7 +647,7 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
     std::swap(d_y, y_next);
     ++iterations_since_restart;
 
-    if (options.halpern) {
+    if (halpern) {
       if (anchor_needs_reset) {
         // z <- T(z), and that point becomes the anchor. This is Algorithm 1's
         // line 6: an epoch begins one plain PDHG step past where the last one
@@ -481,7 +671,7 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
       }
     }
 
-    if (options.restarts && !options.halpern) {
+    if (options.restarts && !halpern) {
       backend.accumulate(n, eta, d_x.data(), sum_x.data());
       backend.accumulate(m, eta, d_y.data(), sum_y.data());
       sum_weight += eta;
@@ -493,7 +683,7 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
     // `movement` the adaptive step size already computes, so the test is free,
     // and it is checked every iteration rather than on the termination
     // schedule - the whole point is to catch the decay when it happens.
-    if (options.halpern && options.halpern_restart && options.restarts &&
+    if (halpern && options.halpern_restart &&
         !anchor_needs_reset &&
         epoch_start_movement > 0.0 && halpern_k >= options.halpern_minimum_epoch) {
       // Comparing squares, so the factor of e becomes e^2.
@@ -527,7 +717,7 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
     const double current_kkt = weighted_kkt_error(lp, host_x, host_y, omega, &kkt_work);
     bool use_average = false;
     double candidate_kkt = current_kkt;
-    if (options.restarts && !options.halpern && sum_weight > 0.0) {
+    if (options.restarts && !halpern && sum_weight > 0.0) {
       backend.scale_into(n, sum_weight, sum_x.data(), avg_x.data());
       backend.scale_into(m, sum_weight, sum_y.data(), avg_y.data());
       avg_x.download(&host_avg_x);
@@ -563,12 +753,49 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
       adopt_candidate();
       break;
     }
-    if (r.converged(tolerance, options.absolute_tolerance,
-                    options.require_inf_norm_termination)) {
+    if (passes(r)) {
       status = PdhgStatus::kOptimal;
       ++iteration;
       adopt_candidate();
       break;
+    }
+
+    // Polish, once the pair is close enough that the sub-problems start from
+    // somewhere useful. Adopted only if the polished pair passes the test the
+    // iterate above just failed, so this can end the solve early and cannot end
+    // it wrongly.
+    if (options.polish_feasibility &&
+        options.termination == PdhgOptions::Termination::kFull &&
+        iteration + 1 >= next_polish_iteration) {
+      // The checkpoints are fixed - 100, 200, 400, 800 and so on - and they
+      // advance whether or not this one leads to an attempt; the gap gate
+      // below is what decides that. Advancing them only on attempts would
+      // cluster attempts at every termination check from the moment the gap
+      // first came good, which is the opposite of a geometric schedule.
+      while (next_polish_iteration <= iteration + 1) next_polish_iteration *= 2;
+
+      const Int budget = polish_budget(iteration);
+      if (r.gap_ok(gap_tolerance) && budget > 0) {
+        std::vector<double> try_x;
+        std::vector<double> try_y;
+        PdhgResidual try_r;
+        Int spent = 0;
+        run_polish(cand_x, cand_y, budget, &try_x, &try_y, &try_r, &spent);
+        ++result.polish_attempts;
+        result.polish_iterations += spent;
+        if (try_r.converged(tolerance, options.absolute_tolerance,
+                            options.require_inf_norm_termination, gap_tolerance)) {
+          polished_x = std::move(try_x);
+          polished_y = std::move(try_y);
+          polished_residual = try_r;
+          have_polished = true;
+          result.polished = true;
+          status = PdhgStatus::kOptimal;
+          result.message = "converged after feasibility polishing";
+          ++iteration;
+          break;
+        }
+      }
     }
     if (options.verbose && (iteration + 1) % options.log_frequency == 0) {
       std::printf(
@@ -639,12 +866,80 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
     ++result.restarts;
   }
 
-  d_x.download(&host_x);
-  d_y.download(&host_y);
-  result.scaling.scaling.unscale_primal(host_x, &result.x);
-  result.scaling.scaling.unscale_dual(host_y, &result.y);
-  result.residual = evaluate_residual(original, result.x, result.y);
+  if (!have_polished) {
+    d_x.download(&host_x);
+    d_y.download(&host_y);
+    result.scaling.scaling.unscale_primal(host_x, &result.x);
+    result.scaling.scaling.unscale_dual(host_y, &result.y);
+    result.residual = evaluate_residual(original, result.x, result.y);
+
+    // One last polish on the way out. The loop stopped for a reason that was
+    // not convergence, so the point it is holding has a real constraint
+    // violation in it - and a plan that violates a capacity by 1e-04 is not a
+    // plan. Kept only when the polished pair sits closer to the KKT conditions
+    // than what it would replace, which is a comparison rather than a
+    // judgement.
+    const bool worth_trying =
+        options.polish_feasibility && options.polish_on_exit &&
+        options.termination == PdhgOptions::Termination::kFull &&
+        status != PdhgStatus::kOptimal &&
+        status != PdhgStatus::kPrimalInfeasible &&
+        status != PdhgStatus::kNumericalError &&
+        std::isfinite(result.residual.primal_residual) &&
+        std::isfinite(result.residual.dual_residual) &&
+        elapsed() < options.time_limit_seconds;
+    const Int exit_budget = worth_trying ? polish_budget(iteration) : 0;
+    if (exit_budget > 0) {
+      std::vector<double> try_x;
+      std::vector<double> try_y;
+      PdhgResidual try_r;
+      Int spent = 0;
+      run_polish(host_x, host_y, exit_budget, &try_x, &try_y, &try_r, &spent);
+      ++result.polish_attempts;
+      result.polish_iterations += spent;
+      const bool require_inf = options.require_inf_norm_termination;
+      // Feasibility is what polishing buys, so feasibility is what has to
+      // improve - both sides of it, and strictly. The gap is what it spends,
+      // so the gap is capped at whatever the caller already said they would
+      // accept, or at what they were about to be handed, whichever is looser.
+      // Trading a violated constraint for a wider gap is the intended bargain;
+      // trading it for a gap nobody agreed to is not.
+      const double gap_ceiling =
+          std::fmax(gap_tolerance, result.residual.relative_gap);
+      // Neither side may get worse and at least one must get better. Demanding
+      // that both improve strictly looks tidier and is wrong: a dual residual
+      // of exactly zero is common here, and nothing is strictly less than that,
+      // so the test could never pass on the instances that reach it.
+      const bool feasibility_improved =
+          try_r.relative_primal <= result.residual.relative_primal &&
+          try_r.relative_dual <= result.residual.relative_dual &&
+          (try_r.relative_primal < result.residual.relative_primal ||
+           try_r.relative_dual < result.residual.relative_dual);
+      if (feasibility_improved && try_r.relative_gap <= gap_ceiling) {
+        result.x = std::move(try_x);
+        result.y = std::move(try_y);
+        result.residual = try_r;
+        result.polished = true;
+        if (try_r.converged(tolerance, options.absolute_tolerance, require_inf,
+                            gap_tolerance)) {
+          status = PdhgStatus::kOptimal;
+          result.message = "converged after feasibility polishing";
+        } else {
+          result.message = result.message.empty()
+                               ? "feasibility polished"
+                               : result.message + ", feasibility polished";
+        }
+      }
+    }
+  } else {
+    result.x = std::move(polished_x);
+    result.y = std::move(polished_y);
+    result.residual = polished_residual;
+  }
   result.objective = original.model_objective(result.x);
+  // The main loop's count, which is what max_iterations bounds. Polishing is
+  // reported next to it rather than folded into it, so that the limit means
+  // something a caller can check.
   result.iterations = iteration;
   result.status = status;
   result.final_step_size = eta;

@@ -55,6 +55,12 @@ void print_usage() {
       "                       2-norm ones alone\n"
       "  --no-adaptive        fixed step size\n"
       "  --no-restarts        no restarting\n"
+      "  --no-halpern         averaged restarts instead of Halpern\n"
+      "  --no-polish          no feasibility polishing\n"
+      "  --no-exit-polish     polish during the solve but not on the way out\n"
+      "  --gap-tol=T          duality gap tolerance, if not --tol (e.g. 1e-2)\n"
+      "  --polish-first=N     first polish attempt, doubling after (default 100)\n"
+      "  --polish-factor=F    polish budget as a fraction of iterations so far\n"
       "  --no-primal-weight   keep the primal weight at one\n"
       "  --presolve           reduce the model first, then map the answer back\n"
       "  --profile            report where the device time went, kernel by kernel\n"
@@ -502,6 +508,18 @@ int command_solve(const std::vector<std::string>& args) {
       options.adaptive_step_size = false;
     } else if (a == "--halpern") {
       options.halpern = true;
+    } else if (a == "--no-halpern") {
+      options.halpern = false;
+    } else if (a == "--no-polish") {
+      options.polish_feasibility = false;
+    } else if (a == "--no-exit-polish") {
+      options.polish_on_exit = false;
+    } else if (value_of(a, "--gap-tol=", &v)) {
+      options.gap_tolerance = v;
+    } else if (value_of(a, "--polish-first=", &v)) {
+      options.polish_first_iteration = static_cast<sankhya::Int>(v);
+    } else if (value_of(a, "--polish-factor=", &v)) {
+      options.polish_iteration_factor = v;
     } else if (a == "--no-restarts") {
       options.restarts = false;
     } else if (a == "--no-primal-weight") {
@@ -690,6 +708,9 @@ int command_solve(const std::vector<std::string>& args) {
         << "\"original_bound_violation\":" << checked.bound_violation << ","
         << "\"iterations\":" << r.iterations << ","
         << "\"restarts\":" << r.restarts << ","
+        << "\"polish_attempts\":" << r.polish_attempts << ","
+        << "\"polish_iterations\":" << r.polish_iterations << ","
+        << "\"polished\":" << (r.polished ? "true" : "false") << ","
         << "\"seconds\":" << r.solve_seconds << ","
         << "\"rel_primal\":" << r.residual.relative_primal << ","
         << "\"rel_dual\":" << r.residual.relative_dual << ","
@@ -715,7 +736,7 @@ int command_solve(const std::vector<std::string>& args) {
   std::printf(
       "status        %s%s%s\n"
       "objective     %.12e\n"
-      "iterations    %d  (%d restarts)\n"
+      "iterations    %d  (%d restarts, %d more in %d polish attempts%s)\n"
       "time          %.3f s\n"
       "relative      primal %.3e  dual %.3e  gap %.3e\n"
       "rel inf-norm  primal %.3e  dual %.3e\n"
@@ -723,7 +744,9 @@ int command_solve(const std::vector<std::string>& args) {
       "||K||         %.6e\n"
       "row spread    %.3e -> %.3e\n%s",
       sankhya::to_string(r.status).c_str(), r.message.empty() ? "" : ": ",
-      r.message.c_str(), r.objective, r.iterations, r.restarts, r.solve_seconds,
+      r.message.c_str(), r.objective, r.iterations, r.restarts,
+      r.polish_iterations, r.polish_attempts, r.polished ? ", adopted" : "",
+      r.solve_seconds,
       r.residual.relative_primal, r.residual.relative_dual, r.residual.relative_gap,
       r.residual.relative_primal_inf, r.residual.relative_dual_inf,
       r.residual.primal_residual_inf, r.residual.dual_residual_inf,

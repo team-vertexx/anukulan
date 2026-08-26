@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cmath>
 #include <string>
 #include <vector>
 
@@ -19,6 +20,20 @@ struct PdhgOptions {
   // and the duality gap. 1e-4 is the "moderate accuracy" setting first-order
   // methods are usually benchmarked at; 1e-8 is the high accuracy setting.
   double tolerance = 1e-6;
+
+  // Tolerance on the duality gap alone, when it should differ from the one
+  // above. Zero means "the same as `tolerance`", which is the usual thing to
+  // want and what every caller got before this existed.
+  //
+  // It exists because of what feasibility polishing is for. Section 4 of the
+  // PDLP paper is explicit that the technique targets "extremely small
+  // feasibility violations and moderate (e.g. 1%) duality gaps" - it buys
+  // feasibility, and it pays for it in the gap. Asking for 1e-9 feasibility and
+  // a 1% gap is a perfectly sensible thing to want from a production model: a
+  // refinery plan that violates a capacity is not a plan, while a plan that
+  // leaves 1% of margin on the table is still a plan. Asking for both at 1e-9
+  // is what simplex is for.
+  double gap_tolerance = 0.0;
 
   Int max_iterations = 200000;
   double time_limit_seconds = 300.0;
@@ -95,6 +110,115 @@ struct PdhgOptions {
   // far.
   Int halpern_minimum_epoch = 16;
 
+  // Feasibility polishing: Algorithm 4 of Applegate, Diaz, Hinder, Lu, Lubin,
+  // O'Donoghue and Schudy, "PDLP: A Practical First-Order Method for
+  // Large-Scale Linear Programming" (arXiv:2501.07018), section 4.
+  //
+  // Two insights, both theirs. A feasibility problem - the same constraints
+  // with no objective - is empirically orders of magnitude faster for PDHG than
+  // the LP it came from, because nothing is pulling against the constraints.
+  // And PDHG's iterates are non-increasing in distance to any optimal solution,
+  // so a run warm started near a good point stays near it. Put together: warm
+  // start a feasibility solve from a near-optimal iterate and you land on a
+  // feasible point with roughly the objective you started with.
+  //
+  // Two sub-problems, both solved by this same routine:
+  //
+  //   primal   c := 0                        started from (x, 0)
+  //   dual     q := 0, finite bounds := 0    started from (0, y)
+  //
+  // The second is the paper's problem (7), "maximize 0 subject to c - A'y = r,
+  // y in Y, r in R": zeroing the right-hand side and the bound values leaves
+  // the dual feasible set alone - it reads K, c and which bounds are finite,
+  // none of which move - while making the dual objective identically zero.
+  //
+  // Each sub-solve starts the *other* coordinate at zero rather than carrying
+  // the seed's. Zero is trivially feasible for the sub-problem's other side, so
+  // it contributes no force; carrying over a dual that was tuned for an
+  // objective the sub-problem no longer has does contribute one, and the
+  // iterate walks away. Measured here on 25fv47 with the seed's dual carried
+  // in: feasibility polished to 1e-10 and 1e-9, and the dual objective went
+  // from 5969 to -11234.
+  //
+  // On, and here is what that rests on. Eighteen Netlib instances with
+  // published optima, presolved, against the same run with polishing off, and
+  // counting the polishing sub-solves' iterations as the work they are:
+  //
+  //   one tolerance on everything (--tol=1e-8)   1.00x iterations, 1.00x time
+  //   feasibility 1e-8, gap 1e-2                 0.79x iterations, 0.88x time
+  //
+  // The first line is the point of the first: with no slack in the gap the
+  // trigger almost never fires, so leaving this on costs nothing when the
+  // caller wants everything tight. The second is what the technique is for,
+  // and the gains sit on the instances that need them - fit1p 0.06x, bandm
+  // 0.11x, maros-r7 0.12x, 25fv47 0.12x, adlittle 0.51x, degen3 0.61x - while
+  // the losses are all on instances that finish in under two thousand
+  // iterations anyway (sctap1 1.20x, at a hundredth of a second). bandm stops
+  // reporting a numerical error and starts reporting an answer.
+  //
+  // The objective errors get worse, and that is the trade, not a defect: 25fv47
+  // goes from 1.5e-07 to 6.8e-03 because a 1% gap is what was asked for.
+  // Anyone wanting both tight is asking for the simplex.
+  //
+  // On the refinery model this is the difference between an answer and no
+  // answer. Without it: the iteration limit at 200,000, and a capacity violated
+  // by 0.85 units. With it: optimal at 25,600 iterations, the same capacity
+  // violated by 0.0016, for a duality gap of 0.58%. A plan that overruns a unit
+  // is not a plan; a plan that leaves half a percent on the table is.
+  //
+  // What is not here: a back-off after repeated failures. greenbea spends 1.11x
+  // and gains nothing, which is the worst case in the set, but it only makes
+  // one attempt before the iteration limit while 25fv47 needs three before one
+  // is accepted - so any cutoff cheap enough to help greenbea also throws away
+  // 25fv47's 0.12x.
+  bool polish_feasibility = true;
+
+  // The gap is what polishing spends, so the gap is what triggers it: the paper
+  // pauses normal iterations once the relative duality gap is already under the
+  // target, and asks polishing for the feasibility. No point paying for a
+  // polish whose result the gap test will reject anyway.
+  //
+  // Attempts are spaced at doubling iteration counts - 100, 200, 400, 800 -
+  // which is what bounds the total cost. Each attempt gets a budget
+  // proportional to the iterations behind it, so a geometric schedule keeps the
+  // sum proportional to the work already done rather than to the number of
+  // checks.
+  Int polish_first_iteration = 100;
+
+  // Budget for one sub-solve, as a fraction of the iterations taken so far. The
+  // paper's k/8.
+  double polish_iteration_factor = 0.125;
+  // A sub-solve only gets to stop early at a termination check, so a budget
+  // below one check period is spent in full whatever happens. The floor is one
+  // check period for that reason, not a tuned number.
+  Int polish_minimum_iterations = 40;
+  Int polish_maximum_iterations = 20000;
+
+  // Polish once more after the main loop stops. The periodic polish is about
+  // finishing sooner; this one is about the answer that gets handed back. A
+  // first-order method that runs out of iterations returns a point with a real
+  // constraint violation in it, and this is the chance to hand back a feasible
+  // one instead. Accepted only when neither feasibility measure gets worse, at
+  // least one gets better, and the gap stays inside what the caller already
+  // said they would accept.
+  //
+  // It fires when the main loop ran out of iterations, and not when it ran out
+  // of time - there is no time left to polish in, and quietly running past a
+  // deadline is worse than handing back the point that was reached.
+  //
+  // On, and this one is a closer call than the periodic polish, so here is the
+  // whole measurement. Across the eighteen instances it is adopted never at a
+  // single tolerance and once - pilot87 - at a relaxed gap, and it moves the
+  // totals the wrong way: 0.79x becomes 0.82x, 1.00x becomes 1.03x.
+  //
+  // It stays on because of where that cost lands. This only runs when the loop
+  // failed to converge, so all sixteen instances that solve pay exactly
+  // nothing; the entire 3% is greenbea and pilot87 spending a tenth of a budget
+  // they had already exhausted. What it bought on pilot87 was a feasibility
+  // violation of 1.8e-04 in place of 1.6e-02. Half the runs it can affect get
+  // an answer they can use, and the other half were out of budget regardless.
+  bool polish_on_exit = true;
+
   ScalingOptions scaling;
 
   // Null means whatever this build and machine offer - CUDA when both are
@@ -109,6 +233,34 @@ struct PdhgOptions {
   // infeasible and a guess makes the dual bound worthless as a proof.
   bool detect_infeasibility = true;
   double infeasibility_tolerance = 1e-8;
+
+  // Which of the three convergence measures have to hold to stop. The full test
+  // is what a caller wants; the one-sided ones are how the polishing
+  // sub-problems above are asked for exactly the half they are being solved
+  // for, and nothing more.
+  enum class Termination { kFull, kPrimalFeasibility, kDualFeasibility };
+  Termination termination = Termination::kFull;
+
+  // Start from this point rather than from zero. In the *scaled* space when
+  // `scaling.enabled` is false, which is how the polishing sub-solves pass the
+  // iterate that triggered them without a scaling round trip. Null means the
+  // usual cold start.
+  const std::vector<double>* warm_x = nullptr;
+  const std::vector<double>* warm_y = nullptr;
+
+  // Skip the power iteration and use this for ||K||. Only safe when the matrix
+  // really is the one the number was measured on - the sub-solves reuse the
+  // main solve's estimate, since they share its matrix exactly.
+  double known_matrix_norm = 0.0;
+
+  // Start from this step size and primal weight instead of deriving them from
+  // the data. Algorithm 4 hands the sub-solves "the initial primal weight and
+  // step size equal to the current values from Step 1", and it has to: the
+  // sub-problems have had their c or their q zeroed, so the usual
+  // ||c|| / ||q|| rule would hand back a weight derived from a vector that is
+  // no longer there. Zero means derive it as usual.
+  double initial_step_size = 0.0;
+  double initial_primal_weight = 0.0;
 
   bool verbose = false;
   Int log_frequency = 5000;
@@ -157,18 +309,41 @@ struct PdhgResidual {
   // `absolute_tolerance` of 0 keeps the pure PDLP behaviour; anything positive
   // additionally demands that no single row or reduced cost is out by more than
   // that much, which is what HiGHS and OSQP do.
-  bool converged(double tolerance, double absolute_tolerance = 0.0,
+  bool primal_ok(double tolerance, double absolute_tolerance = 0.0,
                  bool require_inf_norm = true) const {
-    bool ok = relative_primal <= tolerance && relative_dual <= tolerance &&
-              relative_gap <= tolerance;
-    if (require_inf_norm) {
-      ok = ok && relative_primal_inf <= tolerance && relative_dual_inf <= tolerance;
-    }
-    if (absolute_tolerance > 0.0) {
-      ok = ok && primal_residual_inf <= absolute_tolerance &&
-           dual_residual_inf <= absolute_tolerance;
-    }
+    bool ok = relative_primal <= tolerance;
+    if (require_inf_norm) ok = ok && relative_primal_inf <= tolerance;
+    if (absolute_tolerance > 0.0) ok = ok && primal_residual_inf <= absolute_tolerance;
     return ok;
+  }
+
+  bool dual_ok(double tolerance, double absolute_tolerance = 0.0,
+               bool require_inf_norm = true) const {
+    bool ok = relative_dual <= tolerance;
+    if (require_inf_norm) ok = ok && relative_dual_inf <= tolerance;
+    if (absolute_tolerance > 0.0) ok = ok && dual_residual_inf <= absolute_tolerance;
+    return ok;
+  }
+
+  bool gap_ok(double tolerance) const { return relative_gap <= tolerance; }
+
+  // `gap_tolerance` of zero means the gap is held to `tolerance` like
+  // everything else, which is the ordinary case.
+  bool converged(double tolerance, double absolute_tolerance = 0.0,
+                 bool require_inf_norm = true, double gap_tolerance = 0.0) const {
+    return primal_ok(tolerance, absolute_tolerance, require_inf_norm) &&
+           dual_ok(tolerance, absolute_tolerance, require_inf_norm) &&
+           gap_ok(gap_tolerance > 0.0 ? gap_tolerance : tolerance);
+  }
+
+  // How far this point is from passing, as one number: the largest of the
+  // relative measures. The polish trigger compares it against the target.
+  double worst_relative(bool require_inf_norm = true) const {
+    double worst = std::fmax(relative_primal, std::fmax(relative_dual, relative_gap));
+    if (require_inf_norm) {
+      worst = std::fmax(worst, std::fmax(relative_primal_inf, relative_dual_inf));
+    }
+    return worst;
   }
 };
 
@@ -180,6 +355,11 @@ struct PdhgResult {
 
   Int iterations = 0;
   Int restarts = 0;
+
+  // Polishing, reported so a run can be read for whether it earned its keep.
+  Int polish_attempts = 0;
+  Int polish_iterations = 0;  // included in `iterations`
+  bool polished = false;      // the returned point came out of a polish
   double solve_seconds = 0.0;
   double matrix_norm_estimate = 0.0;
   double final_step_size = 0.0;
