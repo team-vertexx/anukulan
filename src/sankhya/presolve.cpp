@@ -117,6 +117,28 @@ std::vector<double> PostsolveStack::apply_dual(
   for (std::size_t i = 0; i < rows; ++i)
     y[sz(reduced_row_to_original_[i])] = reduced_y[i];
 
+  // `reduced_costs` is indexed by reduced column, because that is the model the
+  // caller solved. The entries below record original columns, because that is
+  // the model presolve was handed. Reading one with the other is only harmless
+  // when no column was removed ahead of the one being read, which is exactly
+  // the case an all-zero reduced-cost vector cannot distinguish.
+  std::vector<Int> reduced_of_original(sz(original_cols_), -1);
+  for (std::size_t k = 0; k < reduced_to_original_.size(); ++k) {
+    const Int original = reduced_to_original_[k];
+    if (original >= 0 && sz(original) < reduced_of_original.size())
+      reduced_of_original[sz(original)] = static_cast<Int>(k);
+  }
+  auto reduced_cost_of = [&](Int original_column) {
+    if (original_column < 0 || sz(original_column) >= reduced_of_original.size())
+      return 0.0;
+    const Int k = reduced_of_original[sz(original_column)];
+    // A column that did not survive has no reduced cost to read. That leaves
+    // the row's dual at zero, which is a guess - and `dual_is_exact` is what
+    // says so.
+    if (k < 0 || sz(k) >= reduced_costs.size()) return 0.0;
+    return reduced_costs[sz(k)];
+  };
+
   // Reverse order, for the same reason the primal replay is reversed: a row
   // recovered from a column's reduced cost needs that column's own recovery to
   // have happened already.
@@ -140,8 +162,7 @@ std::vector<double> PostsolveStack::apply_dual(
         // The row became a bound on one column. In the reduced model that bound
         // carries the column's reduced cost; in the original there is no such
         // bound, so the row has to carry it instead.
-        const std::size_t j = sz(entry.column);
-        const double d = j < reduced_costs.size() ? reduced_costs[j] : 0.0;
+        const double d = reduced_cost_of(entry.column);
         y[sz(entry.row)] =
             std::fabs(entry.coefficient) > 1e-12 ? d / entry.coefficient : 0.0;
         break;

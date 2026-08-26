@@ -478,6 +478,40 @@ void test_every_original_row_gets_a_dual() {
   CHECK(checked >= 30);
 }
 
+
+void test_dual_postsolve_indexes_reduced_costs_by_reduced_column() {
+  //  x0 is fixed and disappears, so every column after it shifts down by one.
+  //  Row 0 is a singleton on x2 and is removed as a bound, and recovering its
+  //  dual means reading x2's reduced cost - from the reduced model, where x2 is
+  //  column 1, not column 2.
+  //
+  //  The existing dual tests all pass an all-zero reduced-cost vector, which is
+  //  the one input that cannot tell the two indexings apart.
+  //  Row 0:  2 x2 <= 10          singleton, becomes a bound and is removed
+  //  Row 1:  x0 + x1 + x2 = 6     equality, survives
+  //  Row 2:       x1 + 2 x2 = 8   equality, survives
+  Model m = make_model(3, 3,
+                       {{0, 2, 2.0},
+                        {1, 0, 1.0}, {1, 1, 1.0}, {1, 2, 1.0},
+                        {2, 1, 1.0}, {2, 2, 2.0}},
+                       {0.0, 1.0, 1.0}, {-kInf, 6.0, 8.0}, {10.0, 6.0, 8.0},
+                       {1.0, 0.0, 0.0}, {1.0, kInf, kInf});
+  PresolveOptions exact;
+  exact.bound_tightening = false;
+  PresolveResult r = presolve(m, exact);
+  CHECK(r.status == PresolveStatus::kReduced);
+  CHECK_EQ(r.reduced.num_cols(), 2);   // x0 is gone
+  CHECK_EQ(r.counts.singleton_rows, 1);
+
+  // Distinct per column, so reading the wrong one cannot accidentally be right.
+  const std::vector<double> reduced_y(sz(r.reduced.num_rows()), 0.0);
+  const std::vector<double> reduced_costs = {7.0, 3.0};  // x1 then x2
+  const std::vector<double> y =
+      r.postsolve.apply_dual(reduced_y, reduced_costs, m.objective);
+  CHECK_EQ(static_cast<Int>(y.size()), 3);
+  CHECK_NEAR(y[0], 1.5, 1e-12);  // d_x2 / a = 3.0 / 2.0
+}
+
 }  // namespace
 
 int main() {
@@ -485,6 +519,7 @@ int main() {
   test_rows_that_cannot_bind_get_a_zero_dual();
   test_forcing_and_duplicate_rows_are_reported_not_guessed();
   test_every_original_row_gets_a_dual();
+  test_dual_postsolve_indexes_reduced_costs_by_reduced_column();
   test_empty_row();
   test_singleton_row_becomes_a_bound();
   test_fixed_column_moves_into_the_row_bounds();
