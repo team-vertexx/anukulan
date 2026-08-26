@@ -79,29 +79,34 @@ struct QpOptions {
   Int ruiz_iterations = 10;
 
   // Solution polishing. ADMM converges quickly to a rough answer and slowly to
-  // a sharp one, so OSQP finishes by guessing which constraints are active from
-  // the signs of the duals and solving one small system exactly.
+  // an exact one, so once it has stopped, the active set is guessed from the
+  // signs of the duals and the equality-constrained problem that guess implies
+  // is solved outright. When the guess is right the answer is exact to machine
+  // precision; when it is wrong the result is rejected and nothing is lost.
   //
-  // Off by default, because the implementation here does not earn its place and
-  // saying so is better than shipping a switch that quietly does nothing.
+  // This was off for months and the reason is worth keeping. The obvious way to
+  // solve the polished system is to eliminate the duals of the active rows,
+  // which turns
   //
-  // OSQP factorises the reduced KKT system directly. That system is indefinite,
-  // so conjugate gradient cannot touch it, and the obvious way round -
-  // eliminating the active duals to leave something positive definite - trades
-  // an indefinite well-conditioned system for a definite one with a condition
-  // number of order 1/delta. Measured: with delta at 1e-6 the polished dual
-  // residual on dualc1 came out at 75 against 9.8e-05 before polishing, because
-  // conjugate gradient gets nowhere on a system that badly conditioned.
-  // Raising delta to 1e-3 conditions it better and makes the answer wrong
-  // instead. Zero of twelve instances accepted a polished point at either
-  // setting, at both loose and tight tolerances.
+  //   [ P + delta I     A_act'   ]      into    (P + delta I + A_act' A_act/delta)
+  //   [ A_act         -delta I   ]
   //
-  // The honest fix is a sparse LDL' of the indefinite system, which is the same
-  // factorisation the revised simplex needs in November. This gets switched
-  // back on then, for free. Until it does, the code stays here and stays off.
-  bool polish = false;
+  // - a quasi-definite system into a positive definite one with a condition
+  // number of order 1/delta. Conjugate gradient gets nowhere on that: at delta
+  // 1e-6 the polished dual residual on dualc1 came out at 75 against 9.8e-05
+  // before polishing, and zero of fifteen instances accepted a polished point.
+  //
+  // The system was never the problem; reducing it was. Left quasi-definite it
+  // factorises, and the duals come out of the solve instead of being recovered
+  // by dividing by delta. Over the 24 smallest Maros-Meszaros instances the
+  // polished point is now accepted on 16, the objective error is at least
+  // halved on 15 and worsened on none: dualc5 goes from 3.3e-05 to 7.6e-09,
+  // hs118's primal residual from 9.0e-05 to 5.0e-21.
+  bool polish = true;
   double polish_regularisation = 1e-6;
   Int polish_refinement_steps = 3;
+  // Left over from the conjugate gradient version and unused now that the
+  // polished system is factorised.
   Int polish_cg_iterations = 400;
 
   bool verbose = false;

@@ -455,6 +455,7 @@ QpResult solve_qp(const Model& model, const QpOptions& options) {
     }
 
     const double delta = options.polish_regularisation;
+    std::vector<double> polish_nu(sz(m), 0.0);
     std::vector<double> row_active(sz(m), 0.0);
     std::vector<double> row_target(sz(m), 0.0);
     for (std::size_t idx = 0; idx < active.size(); ++idx) {
@@ -462,53 +463,87 @@ QpResult solve_qp(const Model& model, const QpOptions& options) {
       row_target[sz(active[idx])] = target[idx];
     }
 
-    auto apply_polish = [&](const std::vector<double>& v, std::vector<double>* out) {
-      backend.multiply(s.p, v.data(), out->data());
-      backend.multiply(s.a, v.data(), cg_tmp.data());
-      for (Int i = 0; i < m; ++i) cg_tmp[sz(i)] *= row_active[sz(i)] / delta;
-      backend.multiply_transpose(s.at, cg_tmp.data(), work_n.data());
-      for (Int j = 0; j < n; ++j)
-        (*out)[sz(j)] += delta * v[sz(j)] + work_n[sz(j)];
-    };
-
-    std::vector<double> rhs_polish(sz(n), 0.0);
-    for (Int i = 0; i < m; ++i) cg_tmp[sz(i)] = row_target[sz(i)] / delta;
-    backend.multiply_transpose(s.at, cg_tmp.data(), rhs_polish.data());
-    for (Int j = 0; j < n; ++j) rhs_polish[sz(j)] -= s.q[sz(j)];
-
-    std::vector<double> polished = x;
-    std::vector<double> pr(sz(n)), pp(sz(n)), pmp(sz(n));
-    // Iterative refinement around the regularised solve, as OSQP does: the
-    // regularisation is what makes the system solvable and also what makes the
-    // answer slightly wrong, and refinement takes that back out.
-    for (Int pass = 0; pass < options.polish_refinement_steps; ++pass) {
-      apply_polish(polished, &pmp);
-      for (Int j = 0; j < n; ++j) pr[sz(j)] = rhs_polish[sz(j)] - pmp[sz(j)];
-      pp = pr;
-      double rr = backend.dot(pr.data(), pr.data(), n);
-      if (rr < 1e-30) break;
-      const double stop = 1e-14 * rr;
-      for (Int k = 0; k < options.polish_cg_iterations && rr > stop; ++k) {
-        apply_polish(pp, &pmp);
-        const double den = backend.dot(pp.data(), pmp.data(), n);
-        if (!(den > 0.0)) break;
-        const double alpha = rr / den;
-        for (Int j = 0; j < n; ++j) {
-          polished[sz(j)] += alpha * pp[sz(j)];
-          pr[sz(j)] -= alpha * pmp[sz(j)];
-        }
-        const double rr_next = backend.dot(pr.data(), pr.data(), n);
-        const double beta = rr_next / rr;
-        for (Int j = 0; j < n; ++j) pp[sz(j)] = pr[sz(j)] + beta * pp[sz(j)];
-        rr = rr_next;
+    // The reduced KKT system, solved rather than reduced further:
+    //
+    //     [ P + delta I     A_act'   ] [x]   [ -q      ]
+    //     [ A_act         -delta I   ] [nu] = [ b_act   ]
+    //
+    // Eliminating nu from this is what the previous version did, and it turns a
+    // quasi-definite system into a positive definite one with a condition
+    // number of order 1/delta - which is why conjugate gradient never got
+    // anywhere and polishing was rejected fifteen times out of fifteen. Left
+    // alone the system is quasi-definite and factorises, and the duals come
+    // straight out of it instead of being recovered by dividing by delta.
+    const Int k = static_cast<Int>(active.size());
+    std::vector<Triplet> polish_entries;
+    for (Int j = 0; j < n; ++j) {
+      for (Int e = s.p.row_begin(j); e < s.p.row_end(j); ++e) {
+        const Int c = s.p.index()[sz(e)];
+        if (c <= j) polish_entries.push_back(Triplet{j, c, s.p.value()[sz(e)]});
       }
+      polish_entries.push_back(Triplet{j, j, delta});
     }
+    for (Int idx = 0; idx < k; ++idx) {
+      const Int row = active[sz(idx)];
+      for (Int e = s.a.row_begin(row); e < s.a.row_end(row); ++e)
+        polish_entries.push_back(
+            Triplet{n + idx, s.a.index()[sz(e)], s.a.value()[sz(e)]});
+      polish_entries.push_back(Triplet{n + idx, n + idx, -delta});
+    }
+    const SparseMatrix polish_kkt =
+        SparseMatrix::from_triplets(n + k, n + k, std::move(polish_entries));
 
-    // The duals have to be recovered too. Eliminating them is what made the
-    // system positive definite, so they come back from the same relation:
-    // y_active = (A_active x - target) / delta, and zero everywhere else.
-    // A first version of this kept the old duals and only replaced x, which
-    // made the dual residual worse by construction and meant the polished point
+    LdlFactor polish_factor;
+    std::string polish_error;
+    std::vector<double> polished = x;
+    bool polish_ok = false;
+    if (polish_factor.analyse(polish_kkt,
+                              static_cast<Int>(options.max_fill_ratio *
+                                               static_cast<double>(polish_kkt.nnz())),
+                              &polish_error) &&
+        polish_factor.factorize(polish_kkt, LdlOptions{}, &polish_error)) {
+      std::vector<double> rhs_polish(sz(n + k), 0.0);
+      for (Int j = 0; j < n; ++j) rhs_polish[sz(j)] = -s.q[sz(j)];
+      for (Int idx = 0; idx < k; ++idx) rhs_polish[sz(n + idx)] = target[sz(idx)];
+
+      std::vector<double> t = rhs_polish;
+      polish_factor.solve(&t);
+
+      // Iterative refinement against the system without the regularisation.
+      // The delta is what makes it solvable and also what makes the answer
+      // slightly wrong; this takes that back out.
+      std::vector<double> residual(sz(n + k), 0.0);
+      std::vector<double> px_full(sz(n), 0.0);
+      for (Int pass = 0; pass < options.polish_refinement_steps; ++pass) {
+        for (Int j = 0; j < n; ++j) work_n[sz(j)] = t[sz(j)];
+        backend.multiply(s.p, work_n.data(), px_full.data());
+        for (Int j = 0; j < n; ++j) residual[sz(j)] = -s.q[sz(j)] - px_full[sz(j)];
+        for (Int idx = 0; idx < k; ++idx) {
+          const Int row = active[sz(idx)];
+          double dot = 0.0;
+          for (Int e = s.a.row_begin(row); e < s.a.row_end(row); ++e) {
+            const Int c = s.a.index()[sz(e)];
+            dot += s.a.value()[sz(e)] * t[sz(c)];
+            residual[sz(c)] -= s.a.value()[sz(e)] * t[sz(n + idx)];
+          }
+          residual[sz(n + idx)] = target[sz(idx)] - dot;
+        }
+        polish_factor.solve(&residual);
+        for (Int i = 0; i < n + k; ++i) t[sz(i)] += residual[sz(i)];
+      }
+
+      for (Int j = 0; j < n; ++j) polished[sz(j)] = t[sz(j)];
+      for (Int idx = 0; idx < k; ++idx)
+        row_target[sz(active[sz(idx)])] = target[sz(idx)];
+      polish_nu.assign(sz(m), 0.0);
+      for (Int idx = 0; idx < k; ++idx)
+        polish_nu[sz(active[sz(idx)])] = t[sz(n + idx)];
+      polish_ok = true;
+    }
+    if (!polish_ok) {
+      if (options.verbose)
+        std::printf("  polish: skipped, %s\n", polish_error.c_str());
+    } else {
     // was rejected every single time - fifteen instances out of fifteen.
     const std::vector<double> saved_x = x;
     const std::vector<double> saved_z = z;
@@ -518,7 +553,7 @@ QpResult solve_qp(const Model& model, const QpOptions& options) {
     for (Int i = 0; i < m; ++i) {
       const std::size_t si = sz(i);
       if (row_active[si] > 0.0) {
-        y[si] = (ax[si] - row_target[si]) / delta;
+        y[si] = polish_nu[si];  // straight out of the solve
         z[si] = row_target[si];
       } else {
         y[si] = 0.0;
@@ -542,6 +577,7 @@ QpResult solve_qp(const Model& model, const QpOptions& options) {
       x = saved_x;
       z = saved_z;
       y = saved_y;
+    }
     }
   }
 
