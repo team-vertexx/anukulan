@@ -583,6 +583,35 @@ int command_solve(const std::vector<std::string>& args) {
   // measure_violation in model.hpp for what went wrong without this.
   if (use_presolve) r.x = pre.postsolve.apply(r.x);
 
+  // The dual, mapped back the same way the primal is. Standard-form rows carry
+  // a sign and a model row they came from - a two-sided row becomes two of them
+  // - so they fold back onto the model's own rows first, and presolve's row
+  // recovery runs after that.
+  std::vector<double> model_dual(sankhya::sz(solved_model.num_rows()), 0.0);
+  for (sankhya::Int i = 0; i < sf.lp.num_rows(); ++i) {
+    const auto& origin = sf.lp.row_origin[sankhya::sz(i)];
+    model_dual[sankhya::sz(origin.model_row)] += origin.sign * r.y[sankhya::sz(i)];
+  }
+  std::vector<double> original_dual = model_dual;
+  bool dual_exact = true;
+  if (use_presolve) {
+    // Reduced costs of the reduced model, which the singleton-row recovery
+    // needs: d = c - A' y.
+    std::vector<double> reduced_costs = solved_model.objective;
+    for (sankhya::Int i = 0; i < solved_model.num_rows(); ++i) {
+      const double yi = model_dual[sankhya::sz(i)];
+      if (yi == 0.0) continue;
+      for (sankhya::Int e = solved_model.constraints.row_begin(i);
+           e < solved_model.constraints.row_end(i); ++e) {
+        reduced_costs[sankhya::sz(solved_model.constraints.index()[sankhya::sz(e)])] -=
+            yi * solved_model.constraints.value()[sankhya::sz(e)];
+      }
+    }
+    original_dual = pre.postsolve.apply_dual(model_dual, reduced_costs,
+                                             read_result.model.objective);
+    dual_exact = pre.postsolve.dual_is_exact();
+  }
+
   // Measured on both paths, because the number is worth seeing either way.
   const sankhya::ModelViolation checked =
       sankhya::measure_violation(read_result.model, r.x);
@@ -635,6 +664,15 @@ int command_solve(const std::vector<std::string>& args) {
     for (std::size_t j = 0; j < r.x.size(); ++j) {
       out << read_result.model.col_names[j] << " " << r.x[j] << "\n";
     }
+    // Row duals - shadow prices - after the solution, marked with whether
+    // presolve could put them back exactly.
+    out << "# duals " << (dual_exact ? "exact" : "approximate") << "\n";
+    for (std::size_t i = 0; i < original_dual.size(); ++i) {
+      const std::string name = i < read_result.model.row_names.size()
+                                   ? read_result.model.row_names[i]
+                                   : ("row" + std::to_string(i));
+      out << "# dual " << name << " " << original_dual[i] << "\n";
+    }
   }
 
   if (as_json) {
@@ -648,6 +686,7 @@ int command_solve(const std::vector<std::string>& args) {
         << "\"original_row_violation\":" << checked.row_violation << ","
         << "\"original_row_violation_relative\":"
         << checked.relative_row_violation << ","
+        << "\"dual_exact\":" << dual_exact << ","
         << "\"original_bound_violation\":" << checked.bound_violation << ","
         << "\"iterations\":" << r.iterations << ","
         << "\"restarts\":" << r.restarts << ","
