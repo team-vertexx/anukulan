@@ -67,10 +67,29 @@ struct QpOptions {
   // Give up on the direct solve when the factor would hold more than this many
   // times the nonzeros of the KKT matrix itself, and use conjugate gradient
   // instead. Without a fill-reducing ordering the natural elimination order is
-  // ruinous on some structured problems - AUG2DC never finishes - and the
-  // symbolic analysis says so before any arithmetic happens, so the fallback
-  // costs one pass over the pattern rather than a hung solve.
-  double max_fill_ratio = 20.0;
+  // ruinous on some structured problems - AUG2DC's factor would be over 100,000
+  // times the input and it never finishes - and the symbolic analysis says so
+  // before any arithmetic, so the fallback costs one pass over the pattern.
+  //
+  // 50 is measured. Over the 40 smallest Maros-Meszaros instances, as the
+  // number solved to 1e-4 and the total time:
+  //
+  //       20   33/40   28 direct   62.15s      <- guessed, and too tight
+  //       50   33/40   34 direct   58.86s
+  //      200   33/40   38 direct   60.01s
+  //     1000   33/40   38 direct   60.25s
+  //
+  // The budget changes no answers, only where the work happens. My first guess
+  // of 20 kept six instances off the direct path for nothing - QPCBOEI2's true
+  // fill is 22.0 and it was falling back over two points of it.
+  //
+  // The more useful thing in that table is the other direction: raising the
+  // budget to 200 puts four more instances on the direct path and makes the set
+  // slower. Those instances do not want the direct solve - the factorisation
+  // costs more than it saves - which also says an approximate minimum degree
+  // ordering would buy less here than it looks like it should, since what it
+  // would fix is exactly the cases that gain nothing from being fixed.
+  double max_fill_ratio = 50.0;
 
   Int cg_max_iterations = 200;
   double cg_tolerance = 1e-7;

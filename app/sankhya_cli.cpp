@@ -860,6 +860,8 @@ int command_qp(const std::vector<std::string>& args) {
       options.max_absolute_residual = 0.0;
     } else if (a == "--presolve") {
       use_presolve = true;
+    } else if (value_of(a, "--max-fill=", &v)) {
+      options.max_fill_ratio = v;
     } else if (a == "--indirect") {
       options.direct = false;
     } else if (a == "--direct") {
