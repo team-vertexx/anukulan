@@ -285,41 +285,19 @@ struct SimplexOptions {
   // instead of solving from scratch. That is the whole reason node relaxations
   // are affordable, and it is why every serious MILP code solves nodes with a
   // dual simplex.
-  // Dual steepest edge pricing was written, measured and removed. What it
-  // would replace is "largest infeasibility", which is the dual's Dantzig: it
-  // takes the basic variable furthest outside its bounds, scale dependent in
-  // exactly the way Dantzig pricing is. DSE divides that by the norm of the
-  // corresponding row of B^-1 - p = arg max (infeasibility_i)^2 / w_i, with
-  // w_i = ||e_i' B^-1||^2 - updated at each pivot from the pivotal column and
-  // one extra FTRAN (Huangfu and Hall, Math. Prog. Computation 10, 2018).
+  // How the dual simplex picks the row to leave.
   //
-  // It is not here, and the reason is worth more than the code was.
+  // Largest infeasibility is the dual's Dantzig: the basic variable furthest
+  // outside its bounds, scale dependent in the way Dantzig pricing is. Dual
+  // steepest edge divides that by the norm of the corresponding row of B^-1,
   //
-  // The update is right: the weights track directly computed row norms to
-  // 1e-19 for the first two dozen iterations on gt2. Then one produces a
-  // negative value - which a squared norm cannot be, so it is cancellation in
-  // w_i - 2(a_iq/a_pq)tau_i + (a_iq/a_pq)^2 w_p when the pivot is small - and
-  // the guard that clamps it corrupts every weight computed from it afterwards.
-  // By iteration 32 the relative error is 1.0 and the pricing is choosing rows
-  // by noise. On gt2 the LP relaxation came out at 41,828 against a true
-  // 13,460, with 61 columns dual infeasible at a termination that called itself
-  // optimal.
+  //     r = arg max (x_B(i) violation)^2 / beta_i,   beta_i = ||e_i' B^-1||^2
   //
-  // tau_p is the exact current weight of the pivot row - tau = B^-1(B^-T e_p),
-  // so tau_p = ||e_p' B^-1||^2 - and correcting from it each pivot fixes the
-  // wrong answer. It also destroys the speed: resetting the other weights when
-  // the pivot row shows drift fires constantly, and sctap1 goes from 9,404
-  // iterations to the 300,000 limit, fit1p from 3,692 to a timeout.
-  //
-  // Fast and wrong, or correct and useless. Where it did work it worked well -
-  // fit1p 67,323 iterations to 3,692, sctap1 46,853 to 9,404 - so it is worth
-  // returning to with a proper accuracy test rather than a clamp.
-  //
-  // And it would not have paid where the dual mostly runs. Branch and bound
-  // re-optimises a node in about three pivots, and DSE's advantage needs a long
-  // run to show while its extra FTRAN is charged every iteration. Measured over
-  // seven MIPLIB instances it changed no gap and moved iterations per node by
-  // less than a fifth either way.
+  // and updates the weights at each pivot from the pivotal column and one extra
+  // FTRAN. Koberstein, The Dual Simplex Method, 2005, section 3.3.
+  enum class DualPricing { kLargestInfeasibility, kSteepestEdge };
+  DualPricing dual_pricing = DualPricing::kLargestInfeasibility;
+
   enum class Algorithm { kPrimal, kDual };
   Algorithm algorithm = Algorithm::kPrimal;
 
@@ -364,6 +342,12 @@ struct SimplexResult {
   // Nonbasic columns moved to their other bound to make the start dual
   // feasible, and whether the dual had to hand back to the primal.
   Int dual_start_flips = 0;
+  // Times a steepest-edge weight came out non-positive and had to be floored,
+  // which exact arithmetic cannot produce.
+  Int dse_resets = 0;
+  // The largest amount by which a reduced cost sat on the wrong side of zero
+  // when the dual simplex reached a primal feasible point.
+  double worst_dual_infeasibility = 0.0;
   bool fell_back_to_primal = false;
   bool started_warm = false;
 

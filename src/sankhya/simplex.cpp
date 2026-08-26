@@ -915,6 +915,11 @@ SimplexResult solve_dual_simplex(const StandardLp& lp,
   Int stalled_rounds = 0;
   double best_infeasibility = kInf;
   bool bland = false;
+
+  // Steepest-edge weights, one per row: beta_i = ||e_i' B^-1||^2. The starting
+  // basis is all-logical, so B^-1 is a signed identity and every norm is one.
+  std::vector<double> dse_weight(sz(m), 1.0);
+  std::vector<double> tau;
   for (; iteration < options.max_iterations; ++iteration) {
     if (elapsed() > options.time_limit_seconds) {
       status = SimplexStatus::kTimeLimit;
@@ -960,24 +965,32 @@ SimplexResult solve_dual_simplex(const StandardLp& lp,
     }
 
     Int leaving_row = -1;
-    double worst = options.primal_tolerance;
+    double worst = 0.0;  // eligibility is the tolerance test below, not this
     bool below = false;
     for (Int i = 0; i < m; ++i) {
       const Int j = basis.basic()[sz(i)];
       const double value = z[sz(j)];
       const double under = form.lower[sz(j)] - value;
       const double over = value - form.upper[sz(j)];
+      const bool steepest =
+          options.dual_pricing == SimplexOptions::DualPricing::kSteepestEdge;
+      const double beta = steepest ? std::fmax(dse_weight[sz(i)], 1e-12) : 1.0;
+      const double under_score = steepest ? under * under / beta : under;
+      const double over_score = steepest ? over * over / beta : over;
+
       const bool under_beats =
-          bland ? (leaving_row < 0 || j < basis.basic()[sz(leaving_row)]) : under > worst;
+          bland ? (leaving_row < 0 || j < basis.basic()[sz(leaving_row)])
+                : under_score > worst;
       const bool over_beats =
-          bland ? (leaving_row < 0 || j < basis.basic()[sz(leaving_row)]) : over > worst;
+          bland ? (leaving_row < 0 || j < basis.basic()[sz(leaving_row)])
+                : over_score > worst;
       if (std::isfinite(under) && under > options.primal_tolerance && under_beats) {
-        worst = under;
+        worst = under_score;
         leaving_row = i;
         below = true;
       }
       if (std::isfinite(over) && over > options.primal_tolerance && over_beats) {
-        worst = over;
+        worst = over_score;
         leaving_row = i;
         below = false;
       }
@@ -996,6 +1009,42 @@ SimplexResult solve_dual_simplex(const StandardLp& lp,
         result.message = "could not refactorise to confirm optimality: " + error;
         break;
       }
+      // Optimality here is a claim about every column, and it rests entirely on
+      // dual feasibility having held through every pivot. The ratio test is
+      // what maintains it, and if it has slipped the point is primal feasible
+      // and not optimal - which from the outside is indistinguishable from an
+      // answer. On fit1p the dual reported "optimal" at 33,609 against a true
+      // 9,146.38, with a row violation of 2.8e-14: perfectly feasible, and
+      // wrong by a factor of nearly four.
+      //
+      // So the claim gets checked before it is made. This does not fix whatever
+      // loses dual feasibility; it stops the solver lying about the result.
+      double worst_dual = 0.0;
+      Int dual_offenders = 0;
+      for (Int j = 0; j < columns; ++j) {
+        const VarStatus st = basis.status()[sz(j)];
+        if (st == VarStatus::kBasic) continue;
+        const double d = reduced[sz(j)];
+        double violation = 0.0;
+        if (st == VarStatus::kAtLower && d < 0.0) violation = -d;
+        else if (st == VarStatus::kAtUpper && d > 0.0) violation = d;
+        else if (st == VarStatus::kFree) violation = std::fabs(d);
+        if (violation > options.dual_tolerance) {
+          ++dual_offenders;
+          worst_dual = std::fmax(worst_dual, violation);
+        }
+      }
+      result.worst_dual_infeasibility = worst_dual;
+      if (dual_offenders > 0) {
+        status = SimplexStatus::kNumericalError;
+        result.message =
+            "primal feasible but " + std::to_string(dual_offenders) +
+            " columns are dual infeasible by up to " +
+            std::to_string(worst_dual) +
+            ", so this point is not optimal however feasible it looks";
+        break;
+      }
+
       status = SimplexStatus::kOptimal;
       break;
     }
@@ -1065,6 +1114,49 @@ SimplexResult solve_dual_simplex(const StandardLp& lp,
 
     // Steps 6 and 7.
     basis.ftran_column(form, entering, &alpha_q);
+
+    if (options.dual_pricing == SimplexOptions::DualPricing::kSteepestEdge) {
+      // tau = B^-1 rho, and rho is already B^-T e_r from the pivot row, so this
+      // is one FTRAN. Two things fall out of it:
+      //
+      //   tau_r = e_r' B^-1 B^-T e_r = rho' rho = beta_r, exactly
+      //   tau_i = rho_i' rho_r,       the cross term the update needs
+      //
+      // Koberstein 6.32: always replace the stored beta_r by the recomputed
+      // rho' rho, because it is free here and more accurate. And explicitly do
+      // not use the disagreement between them to trigger recomputing all the
+      // weights - that is expensive and it is not what the test is for. An
+      // earlier attempt did exactly that and took sctap1 from 9,404 iterations
+      // to the 300,000 limit.
+      tau = rho;
+      basis.ftran(&tau);
+      const double pivot = alpha_q[sz(leaving_row)];
+      if (std::fabs(pivot) > 1e-12) {
+        const double beta_r = tau[sz(leaving_row)] > 0.0 ? tau[sz(leaving_row)]
+                                                         : dse_weight[sz(leaving_row)];
+        for (Int i = 0; i < m; ++i) {
+          if (i == leaving_row) continue;
+          const double a = alpha_q[sz(i)];
+          if (a == 0.0) continue;
+          const double ratio = a / pivot;
+          // beta_i - 2(a_i/a_r) tau_i + (a_i/a_r)^2 beta_r, with beta_r the
+          // OLD weight. Koberstein 3.47b comes from expanding
+          // (rho_i - (a_i/a_r) rho_r)'(rho_i - (a_i/a_r) rho_r), where the last
+          // term is rho_r' rho_r and nothing has divided it by a_r^2 yet.
+          // Huangfu and Hall write the two assignments on consecutive lines and
+          // an earlier version of this read them in sequence, using the already
+          // updated beta_r. That is smaller by a_r^2, so the update term came
+          // out too small and the weights only ever decreased - which is
+          // exactly what the trace showed.
+          dse_weight[sz(i)] += -2.0 * ratio * tau[sz(i)] + ratio * ratio * beta_r;
+          if (!(dse_weight[sz(i)] > 1e-8)) {
+            dse_weight[sz(i)] = 1e-8;
+            ++result.dse_resets;
+          }
+        }
+        dse_weight[sz(leaving_row)] = std::fmax(beta_r / (pivot * pivot), 1e-12);
+      }
+    }
     const VarStatus leaving_to = below ? VarStatus::kAtLower : VarStatus::kAtUpper;
     if (!basis.pivot(form, leaving_row, entering, leaving_to, alpha_q, &error)) {
       if (!basis.refactorize(form, &error)) {

@@ -351,6 +351,8 @@ int command_simplex(const std::vector<std::string>& args) {
       options.primal_tolerance = v;
     } else if (value_of(a, "--dual-tol=", &v)) {
       options.dual_tolerance = v;
+    } else if (a == "--dse") {
+      options.dual_pricing = sankhya::SimplexOptions::DualPricing::kSteepestEdge;
     } else if (a == "--dual") {
       options.algorithm = sankhya::SimplexOptions::Algorithm::kDual;
     } else if (a == "--primal") {
@@ -737,6 +739,9 @@ int command_milp(const std::vector<std::string>& args) {
       options.dive_iteration_factor = static_cast<sankhya::Int>(v);
     } else if (value_of(a, "--node-iters=", &v)) {
       options.node_iteration_factor = static_cast<sankhya::Int>(v);
+    } else if (a == "--dse") {
+      options.simplex.dual_pricing =
+          sankhya::SimplexOptions::DualPricing::kSteepestEdge;
     } else if (a == "--nodes=simplex") {
       options.node_solver = sankhya::BranchAndBoundOptions::NodeSolver::kSimplex;
     } else if (a == "--nodes=first-order") {
