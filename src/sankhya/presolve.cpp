@@ -63,6 +63,94 @@ std::vector<double> PostsolveStack::apply(const std::vector<double>& reduced_x) 
   return x;
 }
 
+
+void PostsolveStack::record_zero_dual_row(Int row) {
+  RowEntry e;
+  e.kind = RowKind::kZero;
+  e.row = row;
+  row_entries_.push_back(e);
+}
+
+void PostsolveStack::record_row_from_free_singleton(Int row, Int column,
+                                                    double coefficient) {
+  RowEntry e;
+  e.kind = RowKind::kFreeSingleton;
+  e.row = row;
+  e.column = column;
+  e.coefficient = coefficient;
+  row_entries_.push_back(e);
+}
+
+void PostsolveStack::record_row_from_singleton(Int row, Int column,
+                                               double coefficient,
+                                               double lower_created,
+                                               double upper_created) {
+  RowEntry e;
+  e.kind = RowKind::kSingleton;
+  e.row = row;
+  e.column = column;
+  e.coefficient = coefficient;
+  e.lower_created = lower_created;
+  e.upper_created = upper_created;
+  row_entries_.push_back(e);
+}
+
+void PostsolveStack::record_unrecoverable_row(Int row) {
+  RowEntry e;
+  e.kind = RowKind::kUnrecoverable;
+  e.row = row;
+  row_entries_.push_back(e);
+  ++unrecoverable_rows_;
+}
+
+void PostsolveStack::set_row_dimensions(Int original_rows,
+                                        std::vector<Int> reduced_row_to_original) {
+  original_rows_ = original_rows;
+  reduced_row_to_original_ = std::move(reduced_row_to_original);
+}
+
+std::vector<double> PostsolveStack::apply_dual(
+    const std::vector<double>& reduced_y, const std::vector<double>& reduced_costs,
+    const std::vector<double>& original_cost) const {
+  std::vector<double> y(sz(original_rows_), 0.0);
+  const std::size_t rows = std::min(reduced_y.size(), reduced_row_to_original_.size());
+  for (std::size_t i = 0; i < rows; ++i)
+    y[sz(reduced_row_to_original_[i])] = reduced_y[i];
+
+  // Reverse order, for the same reason the primal replay is reversed: a row
+  // recovered from a column's reduced cost needs that column's own recovery to
+  // have happened already.
+  for (std::size_t e = row_entries_.size(); e-- > 0;) {
+    const RowEntry& entry = row_entries_[e];
+    switch (entry.kind) {
+      case RowKind::kZero:
+      case RowKind::kUnrecoverable:
+        y[sz(entry.row)] = 0.0;
+        break;
+      case RowKind::kFreeSingleton: {
+        // The eliminated column was free, so dual feasibility demands a zero
+        // reduced cost: c_k - y_i a_ik = 0. One row, one unknown, exact.
+        const std::size_t j = sz(entry.column);
+        const double c = j < original_cost.size() ? original_cost[j] : 0.0;
+        y[sz(entry.row)] =
+            std::fabs(entry.coefficient) > 1e-12 ? c / entry.coefficient : 0.0;
+        break;
+      }
+      case RowKind::kSingleton: {
+        // The row became a bound on one column. In the reduced model that bound
+        // carries the column's reduced cost; in the original there is no such
+        // bound, so the row has to carry it instead.
+        const std::size_t j = sz(entry.column);
+        const double d = j < reduced_costs.size() ? reduced_costs[j] : 0.0;
+        y[sz(entry.row)] =
+            std::fabs(entry.coefficient) > 1e-12 ? d / entry.coefficient : 0.0;
+        break;
+      }
+    }
+  }
+  return y;
+}
+
 namespace {
 
 // Everything the reductions read and write. A's coefficients are never touched,
@@ -245,6 +333,7 @@ bool scan_rows(Workspace& w, const PresolveOptions& opt) {
         return changed;
       }
       ++w.counts->empty_rows;
+      w.stack->record_zero_dual_row(i);  // an empty row cannot bind
       kill_row(w, i);
       changed = true;
       continue;
@@ -280,9 +369,12 @@ bool scan_rows(Workspace& w, const PresolveOptions& opt) {
       if (col >= 0 && std::fabs(a) > 1e-30) {
         const double b1 = std::isinf(lo) ? (a > 0.0 ? -kInf : kInf) : lo / a;
         const double b2 = std::isinf(hi) ? (a > 0.0 ? kInf : -kInf) : hi / a;
-        tighten_lower(w, col, std::fmin(b1, b2));
-        tighten_upper(w, col, std::fmax(b1, b2));
+        const double created_lower = std::fmin(b1, b2);
+        const double created_upper = std::fmax(b1, b2);
+        tighten_lower(w, col, created_lower);
+        tighten_upper(w, col, created_upper);
         ++w.counts->singleton_rows;
+        w.stack->record_row_from_singleton(i, col, a, created_lower, created_upper);
         kill_row(w, i);
         changed = true;
         continue;
@@ -301,6 +393,9 @@ bool scan_rows(Workspace& w, const PresolveOptions& opt) {
         fix_column(w, j, (a > 0.0) ? w.clo[sz(j)] : w.cup[sz(j)]);
       }
       ++w.counts->forcing_rows;
+      // A forcing row's dual is only bounded by its columns' reduced costs, not
+      // determined by them, so there is no single right value to put back.
+      w.stack->record_unrecoverable_row(i);
       kill_row(w, i);
       changed = true;
       continue;
@@ -314,6 +409,7 @@ bool scan_rows(Workspace& w, const PresolveOptions& opt) {
         fix_column(w, j, (a > 0.0) ? w.cup[sz(j)] : w.clo[sz(j)]);
       }
       ++w.counts->forcing_rows;
+      w.stack->record_unrecoverable_row(i);
       kill_row(w, i);
       changed = true;
       continue;
@@ -326,6 +422,7 @@ bool scan_rows(Workspace& w, const PresolveOptions& opt) {
           std::isinf(hi) || (act.max_infinite == 0 && act.max_value <= hi + w.tol * hi_scale);
       if (lower_ok && upper_ok) {
         ++w.counts->redundant_rows;
+        w.stack->record_zero_dual_row(i);  // proven unable to bind
         kill_row(w, i);
         changed = true;
         continue;
@@ -343,13 +440,17 @@ bool scan_rows(Workspace& w, const PresolveOptions& opt) {
         const double own_max = (a > 0.0) ? w.cup[sz(j)] : w.clo[sz(j)];
 
         // a x_j <= hi - (smallest the rest of the row can be)
+        // Only this path is flagged. A singleton row also tightens a bound,
+        // but that one is recorded and inverts exactly; this one comes from a
+        // combination of rows and does not.
         if (!std::isinf(hi) &&
             (act.min_infinite == 0 || (act.min_infinite == 1 && std::isinf(own_min)))) {
           const double rest =
               act.min_infinite == 0 ? act.min_value - a * own_min : act.min_value;
           const double limit = (hi - rest) / a;
-          if (a > 0.0) { if (tighten_upper(w, j, limit)) changed = true; }
-          else { if (tighten_lower(w, j, limit)) changed = true; }
+          const bool moved = (a > 0.0) ? tighten_upper(w, j, limit)
+                                       : tighten_lower(w, j, limit);
+          if (moved) { changed = true; w.stack->note_bound_tightening(); }
         }
         // a x_j >= lo - (largest the rest of the row can be)
         if (!std::isinf(lo) &&
@@ -357,8 +458,9 @@ bool scan_rows(Workspace& w, const PresolveOptions& opt) {
           const double rest =
               act.max_infinite == 0 ? act.max_value - a * own_max : act.max_value;
           const double limit = (lo - rest) / a;
-          if (a > 0.0) { if (tighten_lower(w, j, limit)) changed = true; }
-          else { if (tighten_upper(w, j, limit)) changed = true; }
+          const bool moved = (a > 0.0) ? tighten_lower(w, j, limit)
+                                       : tighten_upper(w, j, limit);
+          if (moved) { changed = true; w.stack->note_bound_tightening(); }
         }
         if (w.infeasible) return changed;
       }
@@ -474,6 +576,7 @@ bool scan_columns(Workspace& w, const PresolveOptions& opt, bool allow_removal) 
           w.cost[sz(t.col)] -= cj * t.coefficient / a;
       }
       w.stack->record_singleton(j, a, lo, std::move(terms));
+      w.stack->record_row_from_free_singleton(row, j, a);
       ++w.counts->free_column_singletons;
       kill_col(w, j);
       kill_row(w, row);
@@ -570,6 +673,9 @@ bool merge_duplicate_rows(Workspace& w) {
           return changed;
         }
         ++w.counts->duplicate_rows;
+        // Which of the two rows supplied the binding bound decides where the
+        // dual belongs, and that is not recorded here.
+        w.stack->record_unrecoverable_row(i2);
         kill_row(w, i2);
         changed = true;
       }
@@ -579,12 +685,17 @@ bool merge_duplicate_rows(Workspace& w) {
 }
 
 Model build_reduced(const Workspace& w, const Model& model, ObjSense sense,
-                    std::vector<Int>* reduced_to_original) {
+                    std::vector<Int>* reduced_to_original,
+                    std::vector<Int>* reduced_row_to_original) {
   std::vector<Int> new_row(sz(w.rows()), -1);
   std::vector<Int> new_col(sz(w.cols()), -1);
   Int rows = 0, cols = 0;
-  for (Int i = 0; i < w.rows(); ++i)
-    if (w.row_alive[sz(i)]) new_row[sz(i)] = rows++;
+  reduced_row_to_original->clear();
+  for (Int i = 0; i < w.rows(); ++i) {
+    if (!w.row_alive[sz(i)]) continue;
+    new_row[sz(i)] = rows++;
+    reduced_row_to_original->push_back(i);
+  }
   reduced_to_original->clear();
   for (Int j = 0; j < w.cols(); ++j) {
     if (!w.col_alive[sz(j)]) continue;
@@ -731,8 +842,10 @@ PresolveResult presolve(const Model& model, const PresolveOptions& options) {
   } else {
     result.status = PresolveStatus::kReduced;
     std::vector<Int> map;
-    result.reduced = build_reduced(w, model, model.sense, &map);
+    std::vector<Int> row_map;
+    result.reduced = build_reduced(w, model, model.sense, &map, &row_map);
     result.postsolve.set_dimensions(model.num_cols(), std::move(map));
+    result.postsolve.set_row_dimensions(model.num_rows(), std::move(row_map));
   }
 
   const auto finished = std::chrono::steady_clock::now();

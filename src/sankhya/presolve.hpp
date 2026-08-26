@@ -32,11 +32,30 @@ namespace sankhya {
 //     rather than feasibility, so they can cut off alternative optima. That is
 //     fine when only the objective is wanted and wrong when the point itself
 //     is the deliverable - which, for a refinery plan, it is.
-//   - Dual postsolve. What comes back is a primal point, exact and feasible for
-//     the original model. Row duals of the reduced model do not map back
-//     without recording more than this stack records, so the LP dual is
-//     reported from an unpresolved solve. Stated here rather than discovered
-//     later.
+//   - Complete dual postsolve. Four of the row reductions invert exactly and
+//     do: an empty or redundant row cannot bind, so its dual is zero; a free
+//     column singleton pins its row's dual, since the eliminated column was
+//     free and needs a zero reduced cost, giving y_i = c_k / a_ik; and a
+//     singleton row's dual comes from the reduced cost of the column whose
+//     bound it became. Forcing and duplicate rows do not invert uniquely -
+//     a forcing row's dual is only bounded by its columns' reduced costs, and a
+//     duplicate's depends on which of the two rows supplied the binding bound -
+//     and those get zero.
+//
+//     Bound tightening is the third, and it took a failing test to notice. A
+//     column whose bounds were tightened can sit at the tightened bound in the
+//     reduced model carrying a nonzero reduced cost, and in the original model
+//     that bound does not exist, so the cost has nowhere to go. Worse, it can
+//     change which reductions are available: on a two-row example, tightening
+//     turned a free column into a bounded one, which made a different column
+//     look implied-free, and the row dual that came back was 1 where the
+//     original model requires 2. Both are right for the model they were derived
+//     from.
+//
+//     So the recovered dual is exact when none of those three fired, and a
+//     guess when they did. dual_is_exact() says which, and measure_dual_violation
+//     in model.hpp says how far off - because a caller reading shadow prices off
+//     a refinery plan needs to know whether they are prices or decoration.
 struct PresolveOptions {
   bool empty_rows = true;
   bool singleton_rows = true;      // a row with one term is a bound
@@ -123,6 +142,36 @@ class PostsolveStack {
 
   void set_dimensions(Int original_cols, std::vector<Int> reduced_to_original);
 
+  // The row side, recorded as rows are removed so their duals can be put back.
+  void record_zero_dual_row(Int row);
+  void record_row_from_free_singleton(Int row, Int column, double coefficient);
+  void record_row_from_singleton(Int row, Int column, double coefficient,
+                                 double lower_created, double upper_created);
+  void record_unrecoverable_row(Int row);
+  void set_row_dimensions(Int original_rows, std::vector<Int> reduced_row_to_original);
+
+  Int original_rows() const { return original_rows_; }
+  const std::vector<Int>& reduced_row_to_original() const {
+    return reduced_row_to_original_;
+  }
+  // Rows whose dual could not be recovered exactly and were set to zero.
+  Int unrecoverable_rows() const { return unrecoverable_rows_; }
+
+  // Whether every reduction that fired inverts exactly on the dual side. False
+  // means the vector apply_dual returns is a plausible guess, not the dual.
+  bool dual_is_exact() const {
+    return unrecoverable_rows_ == 0 && !bounds_were_tightened_;
+  }
+  void note_bound_tightening() { bounds_were_tightened_ = true; }
+
+  // Maps the reduced model's row duals and column reduced costs back to the
+  // original model's rows. `reduced_y` has reduced_rows() entries and
+  // `reduced_costs` has reduced_cols(); either may be empty, in which case the
+  // rows that depend on it get zero.
+  std::vector<double> apply_dual(const std::vector<double>& reduced_y,
+                                 const std::vector<double>& reduced_costs,
+                                 const std::vector<double>& original_cost) const;
+
   Int original_cols() const { return original_cols_; }
   Int reduced_cols() const { return static_cast<Int>(reduced_to_original_.size()); }
   const std::vector<Int>& reduced_to_original() const { return reduced_to_original_; }
@@ -141,9 +190,25 @@ class PostsolveStack {
     std::vector<Term> terms;   // kSingleton: the rest of the row.
   };
 
+  // How a removed row's dual is recovered.
+  enum class RowKind { kZero, kFreeSingleton, kSingleton, kUnrecoverable };
+  struct RowEntry {
+    RowKind kind = RowKind::kZero;
+    Int row = 0;
+    Int column = 0;
+    double coefficient = 1.0;
+    double lower_created = 0.0;
+    double upper_created = 0.0;
+  };
+
   std::vector<Entry> entries_;
+  std::vector<RowEntry> row_entries_;
   Int original_cols_ = 0;
+  Int original_rows_ = 0;
+  Int unrecoverable_rows_ = 0;
+  bool bounds_were_tightened_ = false;
   std::vector<Int> reduced_to_original_;
+  std::vector<Int> reduced_row_to_original_;
 };
 
 struct PresolveCounts {
