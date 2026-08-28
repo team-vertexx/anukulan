@@ -160,11 +160,17 @@ struct PdhgOptions {
   // goes from 1.5e-07 to 6.8e-03 because a 1% gap is what was asked for.
   // Anyone wanting both tight is asking for the simplex.
   //
-  // On the refinery model this is the difference between an answer and no
-  // answer. Without it: the iteration limit at 200,000, and a capacity violated
-  // by 0.85 units. With it: optimal at 25,600 iterations, the same capacity
-  // violated by 0.0016, for a duality gap of 0.58%. A plan that overruns a unit
-  // is not a plan; a plan that leaves half a percent on the table is.
+  // On the refinery model, at the defaults this ships with: 160,720 iterations
+  // and a capacity violated by 1.5e-02 without it, against 12,800 plus 1,720 of
+  // polishing and a violation of 1.3e-04 with it. Eleven times fewer iterations
+  // for a violation 114 times smaller, paid for with a 0.45% gap.
+  //
+  // It used to read better than that - before the cuPDLPx additions the
+  // unpolished solve hit the iteration limit outright, so polishing was the
+  // difference between an answer and none. The base method getting faster
+  // turned that into the difference between an answer and a worse one, which is
+  // the better problem to have and worth writing down rather than quietly
+  // keeping the older, more flattering number.
   //
   // What is not here: a back-off after repeated failures. greenbea spends 1.11x
   // and gains nothing, which is the worst case in the set, but it only makes

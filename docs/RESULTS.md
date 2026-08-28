@@ -114,14 +114,22 @@ technique is for. Gains: `fit1p` 0.06×, `bandm` 0.11×, `maros-r7` 0.12×,
 Objective errors get *worse* — `25fv47` from 1.5e-07 to 6.8e-03 — and that is
 the trade, not a defect. A 1% gap was asked for.
 
-**On the refinery model** it is the difference between an answer and none:
+**On the refinery model**, at the shipped defaults:
 
 | | no polish | with polish |
 |---|---|---|
-| status | iteration limit (**failed**) | **optimal** |
-| iterations | 200,000 | 6,400 |
-| capacity violation | 0.847 | **3.1e-04** |
-| duality gap | — | 0.75% |
+| iterations | 160,720 | **12,800** + 1,720 polishing |
+| capacity violation | 1.46e-02 | **1.28e-04** |
+| duality gap | 1.1e-09 | 4.5e-03 |
+
+Eleven times fewer iterations for a capacity violation 114 times smaller, paid
+for with a 0.45% gap. A plan that overruns a unit by 0.015 is still a plan you
+have to argue about; one that overruns by 0.0001 is not.
+
+Before the cuPDLPx additions landed this was starker still — the unpolished
+solve hit the iteration limit at 200,000 and left a violation of 0.85. The base
+method getting faster is what turned that from *no answer* into *a worse
+answer*, which is the better problem to have.
 
 ```bash
 python3 bench/polish_sweep.py polish
