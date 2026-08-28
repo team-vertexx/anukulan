@@ -20,6 +20,9 @@ import argparse
 # Extra flags applied to the presolved run only, so one reduction can be
 # switched off and the two sides compared on the same harness.
 EXTRA = []
+# Flags applied to BOTH runs, so a solver option can be A/B'd without breaking
+# the plain-versus-presolved comparison the harness is built on.
+BOTH = []
 import csv
 import json
 import math
@@ -51,6 +54,7 @@ def solve(binary, model, presolve, tol, time_limit, max_iter, solution=None,
            f"--tol={tol}", f"--time-limit={time_limit}", f"--max-iter={max_iter}"]
     if abs_tol:
         cmd.append(f"--abs-tol={abs_tol}")
+    cmd.extend(BOTH)
     if presolve:
         cmd.append("--presolve")
         cmd.extend(EXTRA)
@@ -99,6 +103,8 @@ def main():
     ap.add_argument("--max-iter", default="1000000")
     ap.add_argument("--tolerance", type=float, default=1e-5,
                     help="relative objective error allowed against the published optimum")
+    ap.add_argument("--both-extra", default="",
+                    help="extra flags for both runs, space separated")
     ap.add_argument("--extra", default="",
                     help="extra flags for the presolved run, space separated")
     ap.add_argument("--check-feasibility", action="store_true")
@@ -119,8 +125,9 @@ def main():
             return 2
         print(f"using {args.binary}")
 
-    global EXTRA
+    global EXTRA, BOTH
     EXTRA = args.extra.split() if args.extra else []
+    BOTH = args.both_extra.split() if args.both_extra else []
     optima = published_optima(args.reference)
     names = args.instances
     if not names:

@@ -56,6 +56,14 @@ void print_usage() {
       "  --no-adaptive        fixed step size\n"
       "  --no-restarts        no restarting\n"
       "  --no-halpern         averaged restarts instead of Halpern\n"
+      "  --no-reflection --adaptive-step --no-fixed-point-restart\n"
+      "  --no-pid-weight      turn off one cuPDLPx addition each (all on)\n"
+      "  --reflection=G       R(z) = (1+G) T(z) - G z, 0 is plain Halpern\n"
+      "  --constant-step      fixed step size instead of the adaptive rule\n"
+      "  --step-scale=S       fixed step size S/||K|| (default 0.998)\n"
+      "  --fixed-point-restart  restart on ||z-T(z)||, not on the KKT error\n"
+      "  --pid-weight         PID control on the primal weight\n"
+      "  --kp= --ki= --kd=    its coefficients (default 0.5, 0, 0)\n"
       "  --no-polish          no feasibility polishing\n"
       "  --no-exit-polish     polish during the solve but not on the way out\n"
       "  --gap-tol=T          duality gap tolerance, if not --tol (e.g. 1e-2)\n"
@@ -511,6 +519,40 @@ int command_solve(const std::vector<std::string>& args) {
       options.adaptive_step_size = false;
     } else if (a == "--halpern") {
       options.halpern = true;
+    } else if (value_of(a, "--reflection=", &v)) {
+      options.reflection = v;
+    } else if (a == "--constant-step") {
+      options.constant_step_size = true;
+    } else if (a == "--no-reflection") {
+      options.reflection = 0.0;
+    } else if (a == "--adaptive-step") {
+      options.constant_step_size = false;
+    } else if (a == "--no-fixed-point-restart") {
+      options.restart_on_fixed_point = false;
+    } else if (a == "--no-pid-weight") {
+      options.pid_primal_weight = false;
+    } else if (value_of(a, "--step-scale=", &v)) {
+      options.constant_step_size = true;
+      options.constant_step_scale = v;
+    } else if (a == "--fixed-point-restart") {
+      options.restart_on_fixed_point = true;
+    } else if (a == "--pid-weight") {
+      options.pid_primal_weight = true;
+    } else if (value_of(a, "--kp=", &v)) {
+      options.pid_primal_weight = true;
+      options.primal_weight_kp = v;
+    } else if (value_of(a, "--ki=", &v)) {
+      options.pid_primal_weight = true;
+      options.primal_weight_ki = v;
+    } else if (value_of(a, "--kd=", &v)) {
+      options.pid_primal_weight = true;
+      options.primal_weight_kd = v;
+    } else if (a == "--cupdlpx") {
+      // All four together, which is the configuration the paper reports.
+      options.reflection = 1.0;
+      options.constant_step_size = true;
+      options.restart_on_fixed_point = true;
+      options.pid_primal_weight = true;
     } else if (a == "--no-halpern") {
       options.halpern = false;
     } else if (a == "--no-polish") {

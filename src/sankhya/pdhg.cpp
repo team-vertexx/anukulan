@@ -357,6 +357,10 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
   // Step size stays below 1 / ||K||. The primal weight splits it between the two
   // steps: tau = eta / omega, sigma = eta * omega.
   double eta = 0.9 / matrix_norm;
+  // cuPDLPx fixes the step size rather than adapting it, at a scale just under
+  // the 1/||K|| the convergence proof needs.
+  const bool adaptive = options.adaptive_step_size && !options.constant_step_size;
+  if (options.constant_step_size) eta = options.constant_step_scale / matrix_norm;
   double omega = 1.0;
   if (options.primal_weight_updates) {
     const double c_norm = two_norm(lp.c);
@@ -464,6 +468,15 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
   double kkt_at_restart = weighted_kkt_error(lp, x, y, omega, &kkt_work);
   double last_candidate_kkt = kInf;
 
+  // The fixed-point residual at the start of the current epoch, and its value
+  // at the previous check. Tracked separately from the Halpern anchor's copy,
+  // which only exists when Halpern is on.
+  double residual_at_restart = kInf;
+  double last_residual = kInf;
+  // PID state for the primal weight, carried across restarts.
+  double weight_error_sum = 0.0;
+  double weight_error_previous = 0.0;
+
   std::vector<double> unscaled_x;
   std::vector<double> unscaled_y;
   std::vector<double> infeasibility_work;
@@ -479,6 +492,13 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
   // pull toward the starting point. The ablation that turns restarts off has to
   // turn this off with it, or it is not measuring what its name says.
   const bool halpern = options.halpern && options.restarts;
+
+  // Reflection is half of a scheme, not a step on its own. R(z) overshoots the
+  // operator, and what pulls it back is the Halpern anchor; without that this
+  // is plain reflected PDHG, which does not converge - it cycles. The ablation
+  // that turns restarts off has to turn this off with it, or it is measuring a
+  // divergent iteration and calling it a baseline.
+  const double reflection = halpern ? options.reflection : 0.0;
 
   // Which measures have to hold to stop. The polishing sub-solves ask for one
   // side only, since one side is all they are solving for.
@@ -610,7 +630,12 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
                         k_x_bar.data(), k_x.data(), y_next.data(), dy.data(),
                         k_dx.data());
 
-      if (!options.adaptive_step_size) break;
+      if (!adaptive) {
+        // ||z - T(z)||^2, which the adaptive rule computes as a side effect and
+        // the restart tests below need either way.
+        movement = backend.weighted_norm_squared(n, m, dx.data(), dy.data(), omega);
+        break;
+      }
 
       // PDLP's rule: the step is safe while eta is below the local curvature
       // limit eta_bar, and the new step size may fall fast but grow only slowly.
@@ -643,6 +668,17 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
     }
 
     backend.advance_kx(m, k_x_bar.data(), k_x.data());
+
+    // Reflection: R(z) = T(z) + gamma (T(z) - z). T(z) - z is dx and dy, and
+    // K R(z) = K T(z) + gamma K dx with K T(z) sitting in k_x after the line
+    // above and K dx in k_dx from the dual step. No product, three updates.
+    if (reflection > 0.0) {
+      const double g = reflection;
+      backend.accumulate(n, g, dx.data(), x_next.data());
+      backend.accumulate(m, g, dy.data(), y_next.data());
+      backend.accumulate(m, g, k_dx.data(), k_x.data());
+    }
+
     std::swap(d_x, x_next);
     std::swap(d_y, y_next);
     ++iterations_since_restart;
@@ -714,7 +750,18 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
 
     // The candidate is whichever of the current iterate and the running average
     // has the smaller KKT error. Both restarting and stopping are judged on it.
-    const double current_kkt = weighted_kkt_error(lp, host_x, host_y, omega, &kkt_work);
+    //
+    // Only two things read this, and with the defaults neither is on: the
+    // average-versus-current comparison needs the averaged scheme, and the
+    // restart test needs the KKT rule rather than the fixed-point one. Left
+    // unguarded it is two matrix products per termination check spent on a
+    // number nothing looks at - and on the GPU those two run on the host, which
+    // is where the time was going.
+    const bool need_kkt = (options.restarts && !halpern) ||
+                          (options.restarts && !options.restart_on_fixed_point) ||
+                          options.verbose;
+    const double current_kkt =
+        need_kkt ? weighted_kkt_error(lp, host_x, host_y, omega, &kkt_work) : 0.0;
     bool use_average = false;
     double candidate_kkt = current_kkt;
     if (options.restarts && !halpern && sum_weight > 0.0) {
@@ -812,13 +859,27 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
 
     if (!options.restarts) continue;
 
-    // cuPDLP's three restart conditions, with its constants.
-    const bool sufficient = candidate_kkt <= 0.2 * kkt_at_restart;
-    const bool necessary = candidate_kkt <= 0.8 * kkt_at_restart &&
-                           candidate_kkt > last_candidate_kkt;
+
+    // cuPDLP's three restart conditions, with its constants. cuPDLPx keeps the
+    // shape and changes what is measured: the fixed-point residual
+    // ||z - T(z)|| instead of the KKT error. The residual is already computed
+    // every iteration for the step size, so measuring it costs nothing, where
+    // the KKT error costs two matrix products per check.
+    const double residual = std::sqrt(std::fmax(movement, 0.0));
+    const bool by_residual = options.restart_on_fixed_point;
+    if (by_residual && !std::isfinite(residual_at_restart)) {
+      residual_at_restart = residual;
+    }
+    const double measure = by_residual ? residual : candidate_kkt;
+    const double at_restart = by_residual ? residual_at_restart : kkt_at_restart;
+    const double previous = by_residual ? last_residual : last_candidate_kkt;
+
+    const bool sufficient = measure <= 0.2 * at_restart;
+    const bool necessary = measure <= 0.8 * at_restart && measure > previous;
     const bool too_long =
         static_cast<double>(iterations_since_restart) >= 0.36 * static_cast<double>(iteration + 1);
     last_candidate_kkt = candidate_kkt;
+    last_residual = residual;
 
     if (!(sufficient || necessary || too_long)) continue;
 
@@ -826,24 +887,47 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
     backend.multiply(lp.k, d_x.data(), k_x.data());
 
     if (options.primal_weight_updates && have_previous_restart) {
-      // Exponential smoothing in log space, theta = 0.5, so the new weight is
-      // the geometric mean of the old one and the ratio of how far the primal
-      // and dual moved over the last restart period.
+      // How far each side moved. The smoothing rule measures that over the last
+      // two restart periods; the PID one measures it over the current epoch,
+      // which is the x^{n,t} - x^{n,0} of the paper.
+      const std::vector<double>& base_x =
+          options.pid_primal_weight ? restart_x : previous_restart_x;
+      const std::vector<double>& base_y =
+          options.pid_primal_weight ? restart_y : previous_restart_y;
       double delta_x_sq = 0.0;
       double delta_y_sq = 0.0;
       for (Int j = 0; j < n; ++j) {
-        const double d = host_x[sz(j)] - previous_restart_x[sz(j)];
+        const double d = host_x[sz(j)] - base_x[sz(j)];
         delta_x_sq += d * d;
       }
       for (Int i = 0; i < m; ++i) {
-        const double d = host_y[sz(i)] - previous_restart_y[sz(i)];
+        const double d = host_y[sz(i)] - base_y[sz(i)];
         delta_y_sq += d * d;
       }
       const double delta_x = std::sqrt(delta_x_sq);
       const double delta_y = std::sqrt(delta_y_sq);
       if (delta_x > 1e-12 && delta_y > 1e-12) {
-        const double candidate = std::exp(0.5 * std::log(delta_y / delta_x) +
-                                          0.5 * std::log(omega));
+        double candidate = 0.0;
+        if (options.pid_primal_weight) {
+          // e is the imbalance in log space: positive when the primal moved
+          // further than the dual, which is when the weight should come down.
+          // With Kp = 0.5 and the other two at zero this is the smoothing rule
+          // it replaces, written as a controller.
+          const double e = std::log(omega * delta_x / delta_y);
+          weight_error_sum += e;
+          const double correction = options.primal_weight_kp * e +
+                                    options.primal_weight_ki * weight_error_sum +
+                                    options.primal_weight_kd *
+                                        (e - weight_error_previous);
+          weight_error_previous = e;
+          candidate = std::exp(std::log(omega) - correction);
+        } else {
+          // Exponential smoothing in log space, theta = 0.5, so the new weight
+          // is the geometric mean of the old one and the ratio of how far the
+          // primal and dual moved over the last restart period.
+          candidate = std::exp(0.5 * std::log(delta_y / delta_x) +
+                               0.5 * std::log(omega));
+        }
         if (std::isfinite(candidate) && candidate > 1e-12 && candidate < 1e12) {
           omega = candidate;
         }
@@ -862,7 +946,13 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
     anchor_needs_reset = true;
     iterations_since_restart = 0;
     last_candidate_kkt = kInf;
-    kkt_at_restart = weighted_kkt_error(lp, host_x, host_y, omega, &kkt_work);
+    last_residual = kInf;
+    residual_at_restart = std::sqrt(std::fmax(movement, 0.0));
+    // The KKT error is what the other restart rule measures against, and it
+    // costs two matrix products, so it is only paid for when it is used.
+    if (!options.restart_on_fixed_point) {
+      kkt_at_restart = weighted_kkt_error(lp, host_x, host_y, omega, &kkt_work);
+    }
     ++result.restarts;
   }
 

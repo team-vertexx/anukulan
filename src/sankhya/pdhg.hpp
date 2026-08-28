@@ -219,6 +219,97 @@ struct PdhgOptions {
   // an answer they can use, and the other half were out of budget regardless.
   bool polish_on_exit = true;
 
+  // The four things cuPDLPx adds on top of restarted Halpern PDHG, which is
+  // what `halpern` above already is. Lu and Applegate, "cuPDLPx: A Further
+  // Enhanced GPU-Based First-Order Solver for Linear Programming"
+  // (arXiv:2507.14051). They report 2.5x-3.6x over cuPDLP on MIPLIB relaxations
+  // and up to 6.8x on Mittelmann's set, and none of it needs a new matrix
+  // product.
+  //
+  // All four are on, and here is what that rests on. Eighteen Netlib instances
+  // with published optima, presolved, at 1e-8, against the Halpern base:
+  //
+  //   all four                      0.79x iterations, 0.90x time, 16/18 better
+  //
+  // Leave one out and the rest stay on:
+  //
+  //   without reflection            1.06x   stocfor1 stops solving
+  //   without the constant step     3.21x   eight regress, maros-r7 is lost
+  //   without the fixed-point rule  0.85x   stocfor1 stops solving
+  //   without the PID weight        0.83x
+  //
+  // So none of the four is carrying the others, and the two large ones are
+  // coupled: reflection overshoots the operator, and the adaptive rule's safety
+  // condition was derived for a step that does not overshoot. Turn reflection
+  // on while the step size still adapts and the iterates walk off - that is the
+  // 3.21x, and maros-r7 running out of iterations inside it.
+  //
+  // Measured one at a time on 25fv47, each alone is neutral or worse than the
+  // base: reflection and the PID weight both run to the iteration limit. Four
+  // changes that only pay together are exactly the case for landing them
+  // together and ablating afterwards.
+  //
+  // On the fifteen instances that actually finish - greenbea and pilot87 hit
+  // the iteration limit either way and own most of the clock - the wall time
+  // ratio is 0.57x.
+
+  // Reflection: use R(z) = (1 + gamma) T(z) - gamma z in place of T(z), so the
+  // step overshoots the operator's output rather than stopping at it. gamma = 0
+  // is plain Halpern, gamma = 1 is Peaceman-Rachford.
+  //
+  // Free, as it happens. R(z) = T(z) + gamma (T(z) - z), and T(z) - z is the
+  // dx and dy the step already produced; K R(z) = K T(z) + gamma K dx, and the
+  // dual step already computes K dx to feed the adaptive step size rule. Three
+  // vector updates, no product.
+  double reflection = 1.0;
+
+  // Fix the step size at `constant_step_scale / ||K||` instead of adapting it.
+  // cuPDLPx does this and reports it as an improvement, which is worth
+  // stating plainly: the adaptive rule is not just unnecessary there, it is
+  // costing something. Every rejected trial is a matrix product spent on a step
+  // that gets thrown away.
+  bool constant_step_size = true;
+
+  // The paper uses 0.998. This is 0.90, and that is measured: over all
+  // eighty-eight Netlib instances at --tol=1e-8, against the iteration count on
+  // the eighteen with published optima,
+  //
+  //   scale     reached the optimum     iterations
+  //   off              76/88              1.27x
+  //   0.90             75/88              1.06x
+  //   0.95             74/88              1.02x
+  //   0.998            74/88              1.00x
+  //
+  // A gentler step is more robust and slower, smoothly, and 0.90 buys back one
+  // of the two instances the constant step costs for six per cent. 0.95 buys
+  // nothing over 0.998 and is not worth its two per cent.
+  //
+  // The whole family still sits one instance below turning the cuPDLPx
+  // additions off, which is the honest cost of a 1.27x speed gain and is
+  // recorded here rather than buried.
+  double constant_step_scale = 0.90;
+
+  // Restart on the fixed-point residual ||z - T(z)|| rather than on the KKT
+  // error, keeping the same three conditions and constants. The quantity is
+  // already computed every iteration for the step size rule, so this restart
+  // test is free where the KKT one costs two matrix products.
+  bool restart_on_fixed_point = true;
+
+  // PID control on the primal weight, replacing the exponential smoothing in
+  // log space. The error signal is the primal-dual imbalance over the epoch,
+  //
+  //     e = log( sqrt(w) ||x - x_epoch|| / ( ||y - y_epoch|| / sqrt(w) ) )
+  //     log w <- log w - [ Kp e + Ki sum(e) + Kd (e - e_previous) ]
+  //
+  // The smoothing this replaces is the same law with Kp = 0.5 and Ki = Kd = 0,
+  // so the defaults below reproduce the old behaviour exactly and the two extra
+  // terms can be measured one at a time. cuPDLPx does not publish its
+  // coefficients, so these are ours to find.
+  bool pid_primal_weight = true;
+  double primal_weight_kp = 0.5;
+  double primal_weight_ki = 0.0;
+  double primal_weight_kd = 0.0;
+
   ScalingOptions scaling;
 
   // Null means whatever this build and machine offer - CUDA when both are
