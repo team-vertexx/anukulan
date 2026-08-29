@@ -48,6 +48,36 @@ struct QpOptions {
   double rho = 0.1;      // initial step size
   double equality_rho_multiplier = 1e3;  // equalities are active at the optimum
 
+  // On, and it is worth more than it looks: 35 of the 40 smallest
+  // Maros-Meszaros instances against 28 with rho held fixed, and 34s against
+  // 87s. Nine instances need it.
+  //
+  // It also has a failure mode, and two attempts at fixing it are recorded here
+  // so they are not repeated. On PRIMALC1 the rule drives rho from 1e-01 to
+  // 1.9e-05 inside five hundred iterations and leaves it near 2e-03; the primal
+  // residual is still 74 at iteration 16,500, where the same instance with rho
+  // held at 1e-01 converges in 7,000 iterations to the published optimum. Four
+  // of the five instances that fail here are the PRIMALC family, whose DUALC
+  // counterparts all solve.
+  //
+  // The mechanism looks clear enough: once the weaker primal step has let the
+  // primal residual grow to match the dual one, the ratio sits near one, no
+  // update passes the threshold gate below, and rho stays wherever it was left.
+  // The gate that stops it thrashing also stops it recovering.
+  //
+  // Neither fix that follows from that worked. Limiting how far rho may drift
+  // from its initial value made things monotonically worse - 35/40 unlimited,
+  // 35 at a factor of 1e3, 33 at 1e2, 30 at 10 - because the instances that
+  // need a large rho change need it more than PRIMALC1 needs protection.
+  // Relaxing the gate after a long stretch without an update, so a small ratio
+  // could move rho again, changed nothing at all: all five still ran to the
+  // iteration limit at every setting tried.
+  //
+  // So the diagnosis is probably right and the remedy is not in the update
+  // rule's constants. What is untried: OSQP normalises the two residuals by the
+  // scale of the terms that make them up rather than by the tolerances, which
+  // is what this does, and that is the more likely place for the difference to
+  // live.
   bool adaptive_rho = true;
   double rho_update_threshold = 5.0;  // only update on a change this large
 

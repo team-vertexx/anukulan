@@ -492,7 +492,31 @@ build/sankhya milp data/miplib/gt2.mps
 
 ## 7. QP
 
-21 of the 24 smallest Maros–Meszaros instances. Direct sparse LDL' is 1.52×
+**35 of the 40 smallest Maros–Meszaros instances.** The five that fail are
+`PRIMALC1`, `PRIMALC2`, `PRIMALC5`, `PRIMALC8` and `QPCBOEI2` — four of them one
+family, whose `DUALC` counterparts all solve.
+
+The adaptive rho update is both why the other 35 work and why those four do not:
+
+| | optimal | time |
+|---|---|---|
+| adaptive rho | **35/40** | 33.8 s |
+| rho held fixed | 28/40 | 87.3 s |
+
+Fixed rho solves `PRIMALC1` and `PRIMALC8` exactly — to the published optima —
+and loses nine others. On `PRIMALC1` the rule takes rho from 1e-01 to 1.9e-05
+within five hundred iterations and leaves it near 2e-03; the primal residual is
+still 74 at iteration 16,500, where a fixed rho converges in 7,000.
+
+The mechanism is that the threshold gate which stops rho thrashing also stops it
+recovering — once the primal residual has grown to match the dual one the ratio
+sits near one and nothing fires. **Two fixes that follow from that were tried and
+neither worked**: limiting rho's drift from its starting value made things
+monotonically worse (35/40 unlimited, 33 at a factor of 100, 30 at 10), and
+relaxing the gate after a long stretch without an update changed nothing at all.
+Both are recorded next to `adaptive_rho` in `qp.hpp`. What is untried is OSQP's
+own normalisation, which divides the residuals by the scale of the terms that
+make them up rather than by the tolerances. Direct sparse LDL' is 1.52×
 over conjugate gradient. Polishing accepted on 16 of 24, error at least halved
 on 15, worsened on none (`dualc5` 3.3e-05 → 7.6e-09; `hs118` primal
 9.0e-05 → 5.0e-21).
