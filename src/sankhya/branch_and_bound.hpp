@@ -128,6 +128,17 @@ struct BranchAndBoundOptions {
   // Costs one transpose product per node on top of the relaxation, which is
   // small against a node solve, and it gets stronger as the tree deepens and
   // the gap closes.
+  // A solution known to be feasible and optimal, for debugging. When set, every
+  // point at which a node could be discarded checks whether that solution is
+  // inside the node's box first, and reports the first place one that contains
+  // it is thrown away.
+  //
+  // A branch-and-bound that returns a wrong answer has pruned the optimum, and
+  // there is no way to reason backwards from the wrong answer to the prune that
+  // caused it. This turns that question into a printed line. SCIP carries the
+  // same facility for the same reason.
+  const std::vector<double>* debug_solution = nullptr;
+
   bool reduced_cost_fixing = true;
 
   // Propagate bounds into each child as it is created. Branching has just
@@ -241,6 +252,10 @@ struct BranchAndBoundOptions {
   // overfitted; what argues against that is the mechanism, which is not a
   // correlation - cuts that do not move the bound have made every node more
   // expensive and bought nothing.
+  // Individually switchable so an invalid cut can be traced to its family.
+  bool cover_cuts = true;
+  bool mir_cuts = true;
+
   bool adaptive_cuts = true;
   double cut_bound_improvement = 0.02;
 

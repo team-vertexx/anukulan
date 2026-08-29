@@ -133,8 +133,24 @@ bool propagate_bounds(const StandardLp& lp, const std::vector<bool>& integral,
 
 bool provably_infeasible(const StandardLp& lp, const std::vector<double>& lower,
                          const std::vector<double>& upper) {
+  // A crossed bound is only a proof of infeasibility if it is a real crossing.
+  // Propagation writes bounds computed as (q - rest) / a and accepts a box
+  // whose bounds cross by up to 1e-7; this used to reject one that crossed by
+  // anything at all, including by the last bit of a double.
+  //
+  // On fiber that difference lost the answer. A column came out of propagation
+  // with lower 6.0000000000000018 against upper 6 - a gap of 1.8e-15, which is
+  // rounding and nothing else - and the subtree holding the optimum was
+  // discarded as proved infeasible. The solver then reported 652,748.78 as a
+  // proved optimum against a true 405,935.18, with a matching dual bound and no
+  // warning, because every step after the bad prune was consistent with it.
+  //
+  // The two tests have to agree about what an empty box is. This one now uses
+  // the same tolerance propagation does, scaled by the bound's own magnitude.
   for (std::size_t j = 0; j < lower.size(); ++j) {
-    if (lower[j] > upper[j]) return true;
+    const double give = 1e-7 * std::fmax(1.0, std::fmax(std::fabs(lower[j]),
+                                                        std::fabs(upper[j])));
+    if (lower[j] > upper[j] + give) return true;
   }
   for (Int i = 0; i < lp.k.rows(); ++i) {
     double min_activity = 0.0;
@@ -159,9 +175,31 @@ bool provably_infeasible(const StandardLp& lp, const std::vector<double>& lower,
       if (!min_finite && !max_finite) break;
     }
     const double q = lp.q[sz(i)];
-    // Every standard-form row is either an equality or a >= row.
-    if (max_finite && max_activity < q - 1e-9) return true;
-    if (i < lp.num_equalities && min_finite && min_activity > q + 1e-9) return true;
+    // The tolerance has to scale with the row, and this is the whole of the
+    // reason: an absolute 1e-9 is below the noise floor of the arithmetic that
+    // produced these numbers. A row whose activity is around 1e6 carries about
+    // 1e-10 of rounding per term in double precision, and a few hundred terms
+    // put that past 1e-9 - so a row that is exactly tight computes as violated
+    // and the whole subtree under it is discarded as proved infeasible.
+    //
+    // fiber is where this surfaced. With cuts appended - which raise the
+    // coefficient magnitudes - a node holding the optimum was declared
+    // infeasible here, and the solver reported 652,748.78 as a proved optimum
+    // against a true 405,935.18. Nothing downstream can catch that: the answer
+    // is confident, self-consistent and wrong.
+    //
+    // Same shape as the presolve bug earlier in this repository, where a 1e-9
+    // bound relaxation manufactured forcing rows. An absolute tolerance on a
+    // quantity whose scale the caller chooses is always this bug waiting.
+    const double scale =
+        std::fmax(1.0, std::fmax(std::fabs(q), max_finite ? std::fabs(max_activity)
+                                                          : 0.0));
+    if (max_finite && max_activity < q - 1e-9 * scale) return true;
+    const double min_scale =
+        std::fmax(1.0, std::fmax(std::fabs(q), min_finite ? std::fabs(min_activity)
+                                                          : 0.0));
+    if (i < lp.num_equalities && min_finite && min_activity > q + 1e-9 * min_scale)
+      return true;
   }
   return false;
 }
@@ -276,6 +314,10 @@ BranchAndBoundResult solve_milp(const Model& model,
     out->x = p.x;
     return out->optimal;
   };
+  // Which cut produced which appended row, so an invalid one can be named.
+  const Int rows_before_cuts = working.num_rows();
+  std::vector<std::string> cut_family;
+
   if (options.root_cuts && !integer_columns.empty()) {
     // Kept so the whole cut effort can be undone if it turns out not to have
     // paid. Measured in the standard form, where the objective is always a
@@ -311,6 +353,9 @@ BranchAndBoundResult solve_milp(const Model& model,
 
       CutOptions cut_options;
       cut_options.max_cuts = options.cuts_per_round;
+      cut_options.cover_cuts = options.cover_cuts;
+      cut_options.separate_only_before_row = rows_before_cuts;
+      cut_options.mir_cuts = options.mir_cuts;
       std::vector<Cut> cuts =
           separate_cuts(working, is_integral, root_solve.x, cut_options);
 
@@ -350,6 +395,9 @@ BranchAndBoundResult solve_milp(const Model& model,
           break;
         }
       }
+      for (const Cut& c : cuts)
+        cut_family.push_back(std::string(c.family) + " round " +
+                             std::to_string(round + 1));
       result.cuts_added += static_cast<Int>(cuts.size());
     }
 
@@ -372,6 +420,55 @@ BranchAndBoundResult solve_milp(const Model& model,
         // The cuts cost every node below here and bought nothing measurable.
         working = uncut;
         result.cuts_discarded = true;
+      }
+    }
+  }
+
+  // Debug-solution tracking. `contains` asks whether the reference solution
+  // lies inside a node's box; `report` names the first prune that discards a
+  // box holding it, which is the prune that lost the answer.
+  bool debug_lost = false;
+  auto contains = [&](const std::vector<double>& lo,
+                      const std::vector<double>& hi) {
+    const std::vector<double>* d = options.debug_solution;
+    if (d == nullptr) return false;
+    const Int n = std::min<Int>(working.num_cols(), static_cast<Int>(d->size()));
+    for (Int j = 0; j < n; ++j) {
+      const double v = (*d)[sz(j)];
+      if (v < lo[sz(j)] - 1e-6 || v > hi[sz(j)] + 1e-6) return false;
+    }
+    return true;
+  };
+  auto report = [&](const std::vector<double>& lo, const std::vector<double>& hi,
+                    const char* why, double extra) {
+    if (debug_lost || !contains(lo, hi)) return;
+    debug_lost = true;
+    std::printf("DEBUG SOLUTION LOST: %s (value %.10g)\n", why, extra);
+  };
+
+  // The cut loop is finished, so `working` is the model the tree will search.
+  // If the reference solution does not satisfy it, a cut that was kept is
+  // invalid, and everything after this is searching the wrong problem.
+  if (options.debug_solution != nullptr) {
+    std::vector<double> ref = *options.debug_solution;
+    ref.resize(sz(working.num_cols()), 0.0);
+    std::vector<double> scratch;
+    double two = 0.0, inf = 0.0;
+    working.primal_residual(ref, &scratch, &two, &inf);
+    std::printf("after cuts: the reference solution violates the model by %.6e%s\n",
+                inf, inf > 1e-6 ? "   <- A KEPT CUT IS INVALID" : "");
+    if (inf > 1e-6) {
+      for (Int i = rows_before_cuts; i < working.num_rows(); ++i) {
+        double act = 0.0;
+        for (Int e = working.k.row_begin(i); e < working.k.row_end(i); ++e)
+          act += working.k.value()[sz(e)] * ref[sz(working.k.index()[sz(e)])];
+        if (working.q[sz(i)] - act > 1e-6) {
+          const Int which = i - rows_before_cuts;
+          std::printf("  the offending row came from %s\n",
+                      which < static_cast<Int>(cut_family.size())
+                          ? cut_family[sz(which)].c_str() : "an unknown cut");
+          break;
+        }
       }
     }
   }
@@ -425,9 +522,13 @@ BranchAndBoundResult solve_milp(const Model& model,
     result.max_depth = std::max(result.max_depth, node.depth);
 
     // Nothing below this node can beat the incumbent.
-    if (node.parent_bound >= incumbent) continue;
+    if (node.parent_bound >= incumbent) {
+      report(node.lower, node.upper, "pruned on the parent bound", node.parent_bound);
+      continue;
+    }
 
     if (provably_infeasible(working, node.lower, node.upper)) {
+      report(node.lower, node.upper, "declared infeasible by interval arithmetic", 0.0);
       result.nodes_proved_infeasible++;
       continue;
     }
@@ -467,7 +568,11 @@ BranchAndBoundResult solve_milp(const Model& model,
       }
     }
 
-    if (node_objective >= incumbent) continue;  // bound prune
+    if (node_objective >= incumbent) {
+      report(node.lower, node.upper, "pruned on its own relaxation bound",
+             node_objective);
+      continue;  // bound prune
+    }
     if (stack.empty()) open_bound = node_objective;
 
     // Before branching, try to turn this relaxation into a feasible point.
@@ -757,6 +862,13 @@ BranchAndBoundResult solve_milp(const Model& model,
       }
     }
 
+    // Branching itself always excludes the solution from one of the two
+    // children, which is not a loss. Reduced-cost fixing narrowing the box out
+    // from under it is.
+    if (contains(node.lower, node.upper) && !contains(child_lower, child_upper)) {
+      report(node.lower, node.upper, "reduced-cost fixing excluded it", incumbent);
+    }
+
     // Depth first, and the child nearer the relaxation value is explored first,
     // because it is the likelier place to find a feasible point early.
     const bool up_first = (value - floor_value) > 0.5;
@@ -792,8 +904,11 @@ BranchAndBoundResult solve_milp(const Model& model,
           if (std::isfinite(child.lower[sz(j)])) ++before;
           if (std::isfinite(child.upper[sz(j)])) ++before;
         }
+        const std::vector<double> before_lo = child.lower;
+        const std::vector<double> before_hi = child.upper;
         if (!propagate_bounds(working, is_integral, &child.lower, &child.upper,
                               options.node_propagation_rounds)) {
+          report(before_lo, before_hi, "propagation declared the child infeasible", 0.0);
           // Infeasible, and proved so by interval arithmetic rather than by a
           // relaxation that had to be solved first.
           ++result.children_pruned_by_propagation;

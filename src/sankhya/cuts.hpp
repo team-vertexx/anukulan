@@ -41,6 +41,15 @@ struct CutOptions {
   // discarded. A numerically wide cut buys a little tightening and costs a lot
   // of conditioning, which a first-order method feels more than simplex does.
   double max_dynamic_range = 1e6;
+  // Rows past this index are cuts added in an earlier round rather than rows of
+  // the model. Zero means "no limit", which is what this did before.
+  //
+  // Separating a cover from a previously generated cut is where fiber lost its
+  // answer: in round 8 a cover taken off an earlier cut row produced an
+  // inequality the optimum violates by 1.0, and the solver then proved a wrong
+  // optimum with a matching dual bound.
+  Int separate_only_before_row = 0;
+
   bool cover_cuts = true;
   bool mir_cuts = true;
   bool gomory_cuts = true;

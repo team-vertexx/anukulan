@@ -882,6 +882,10 @@ int command_milp(const std::vector<std::string>& args) {
       options.cut_bound_improvement = v;
     } else if (a == "--no-gomory") {
       options.gomory_cuts = false;
+    } else if (a == "--no-cover") {
+      options.cover_cuts = false;
+    } else if (a == "--no-mir") {
+      options.mir_cuts = false;
     } else if (a == "--no-cuts") {
       options.root_cuts = false;
     } else if (value_of(a, "--stall=", &v)) {

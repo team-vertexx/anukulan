@@ -242,6 +242,117 @@ void test_equality_rows() {
       "equality rows");
 }
 
+// Hand-written fixtures test the shapes someone thought of. This generates
+// many small integer programs instead and checks every cut against every
+// feasible point of each, which is how the c-MIR separator's equality-row bug
+// was found: fiber has 363 equality rows and 1,254 binaries, and the separator
+// produced a cut that removed the optimum, so the solver reported a confident
+// optimal objective 60.8% away from the published one.
+void test_random_integer_programs() {
+  std::mt19937 rng(20260829);
+  std::uniform_int_distribution<int> ncols(4, 8);
+  std::uniform_int_distribution<int> nrows(1, 3);
+  // fiber's coefficients run from 1 to 216, and a narrow range makes the MIR
+  // scalings all look alike, so this spreads them.
+  std::uniform_int_distribution<int> coef(-9, 9);
+  std::uniform_int_distribution<int> big(-40, 40);
+  std::uniform_int_distribution<int> use_big(0, 4);
+  std::uniform_int_distribution<int> kind(0, 2);   // 0 = E, 1 = L, 2 = G
+  std::uniform_int_distribution<int> rhs_pick(-6, 12);
+  // Binary columns as well as general integers: fiber is 1,254 binaries, and
+  // the complementation rule behaves differently on a range of one.
+  std::uniform_int_distribution<int> ub_pick(0, 1);
+
+  int generated = 0;
+  Int total_cuts = 0;
+  for (int trial = 0; trial < 120; ++trial) {
+    const int n = ncols(rng);
+    const int m = nrows(rng);
+    std::vector<std::vector<int>> a(sz(m), std::vector<int>(sz(n), 0));
+    std::vector<int> b(sz(m));
+    std::vector<char> rowtype(sz(m));
+    bool any_nonzero = false;
+    for (int i = 0; i < m; ++i) {
+      for (int j = 0; j < n; ++j) {
+        a[sz(i)][sz(j)] = (use_big(rng) == 0) ? big(rng) : coef(rng);
+        if (a[sz(i)][sz(j)] != 0) any_nonzero = true;
+      }
+      b[sz(i)] = rhs_pick(rng);
+      rowtype[sz(i)] = "ELG"[sz(kind(rng))];
+    }
+    if (!any_nonzero) continue;
+
+    std::ostringstream mps;
+    mps << "NAME          RAND\nROWS\n N  COST\n";
+    for (int i = 0; i < m; ++i) mps << " " << rowtype[sz(i)] << "  R" << i << "\n";
+    mps << "COLUMNS\n    MARKER                 'MARKER'                 'INTORG'\n";
+    for (int j = 0; j < n; ++j) {
+      mps << "    X" << j << "  COST  " << (coef(rng)) << ".0\n";
+      for (int i = 0; i < m; ++i) {
+        if (a[sz(i)][sz(j)] == 0) continue;
+        mps << "    X" << j << "  R" << i << "  " << a[sz(i)][sz(j)] << ".0\n";
+      }
+    }
+    mps << "    MARKER                 'MARKER'                 'INTEND'\nRHS\n";
+    for (int i = 0; i < m; ++i) mps << "    RHS  R" << i << "  " << b[sz(i)] << ".0\n";
+    mps << "BOUNDS\n";
+    const int ub = ub_pick(rng) ? 1 : 3;
+    for (int j = 0; j < n; ++j)
+      mps << " UP BND       X" << j << "  " << ub << ".0\n";
+    mps << "ENDATA\n";
+
+    // Only usable as a fixture when it has feasible integer points at all.
+    const StandardFormResult sf = build(mps.str());
+    if (!sf.ok) continue;
+    std::istringstream in(mps.str());
+    const Model model = sankhya::read_mps_stream(in, "<rand>").model;
+    std::vector<std::vector<double>> feasible;
+    enumerate(sf.lp, integrality(model), &feasible,
+              std::vector<double>(sz(sf.lp.num_cols()), 0.0), 0);
+    if (feasible.empty()) continue;
+
+    ++generated;
+
+    // Separate at many points rather than only the relaxation optimum, and
+    // check every cut against every feasible integer point. Most of these
+    // fixtures are small enough that nothing is separated at all, which is why
+    // the cut count is asserted over the whole run rather than per fixture.
+    std::uniform_real_distribution<double> pick(0.0, 1.0);
+    for (int trial2 = 0; trial2 < 40; ++trial2) {
+      std::vector<double> x(sz(sf.lp.num_cols()));
+      for (Int j = 0; j < sf.lp.num_cols(); ++j) {
+        const double lo = sf.lp.lower[sz(j)];
+        const double hi = sf.lp.upper[sz(j)];
+        x[sz(j)] = std::isfinite(lo) && std::isfinite(hi)
+                       ? lo + pick(rng) * (hi - lo)
+                       : (std::isfinite(lo) ? lo + pick(rng) * 4.0 : pick(rng));
+      }
+      const std::vector<Cut> cuts =
+          sankhya::separate_cuts(sf.lp, integrality(model), x);
+      total_cuts += static_cast<Int>(cuts.size());
+      for (const Cut& cut : cuts) {
+        for (const std::vector<double>& point : feasible) {
+          double activity = 0.0;
+          for (std::size_t idx = 0; idx < cut.columns.size(); ++idx)
+            activity += cut.coefficients[idx] * point[sz(cut.columns[idx])];
+          if (activity < cut.rhs - 1e-7) {
+            std::fprintf(stderr,
+                         "random program %d: a %s cut removes a feasible "
+                         "integer point (activity %.10g < rhs %.10g)\n",
+                         trial, cut.family, activity, cut.rhs);
+            CHECK(activity >= cut.rhs - 1e-7);
+            return;
+          }
+        }
+      }
+    }
+  }
+  // If the generator stopped producing usable fixtures, or stopped provoking
+  // any separation, the test would pass while checking nothing.
+  CHECK(generated >= 20);
+  CHECK(total_cuts > 0);
+}
+
 void test_cuts_actually_tighten() {
   // Validity is necessary but useless on its own: a separator that returns
   // nothing is trivially valid. This checks the cuts do cut, by confirming the
@@ -370,6 +481,7 @@ int main() {
   test_binary_knapsack();
   test_general_integer_rows();
   test_equality_rows();
+  test_random_integer_programs();
   test_cuts_actually_tighten();
   return sankhya_test::finish("test_cuts");
 }

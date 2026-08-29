@@ -334,7 +334,9 @@ std::vector<Cut> separate_cuts(const StandardLp& lp, const std::vector<bool>& in
     const bool equality = row < lp.num_equalities;
     for (const double scale : (equality ? std::vector<double>{1.0, -1.0}
                                         : std::vector<double>{1.0})) {
-      if (options.cover_cuts &&
+      const bool original_row = options.separate_only_before_row <= 0 ||
+                                row < options.separate_only_before_row;
+      if (options.cover_cuts && original_row &&
           cover_from_row(lp, integral, x, row, scale, options, &candidate)) {
         cuts.push_back(candidate);
         continue;  // a cover from this row is stronger than a MIR from it
