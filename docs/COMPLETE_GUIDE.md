@@ -11,6 +11,53 @@ linestretch: 1.05
 
 \newpage
 
+# How to read this
+
+Nothing here assumes you have seen optimisation before. If you can solve two
+equations in two unknowns and you are comfortable with an inequality like
+$2x + 3y \le 12$, you have enough.
+
+Every theorem is done twice: once in plain words with actual numbers you can
+check on paper, and once in the general form the code uses. If a formula looks
+heavy, the sentence above it says the same thing in English — read that first and
+come back.
+
+**One example runs through the whole document.** A tiny refinery with two
+products. It is small enough to solve by hand, and every idea — duality, shadow
+prices, reduced costs, branching, cuts — will be demonstrated on it before being
+stated in general.
+
+## The symbols, once
+
+Optimisation is written with vectors and matrices because a refinery has ten
+thousand variables and nobody is writing those out one at a time. But every
+symbol below is shorthand for something you already know.
+
+| Symbol | Means |
+|---|---|
+| $x$ | a **vector** — just a list of numbers, $x = (x_1, x_2, \dots, x_n)$. Our decisions. |
+| $c$ | another list, the same length — the profit or cost of each decision |
+| $A$ | a **matrix** — a table of numbers, one row per rule, one column per decision |
+| $A_{ij}$ | the number in row $i$, column $j$ of that table |
+| $c^\top x$ | multiply matching entries and add: $c_1x_1 + c_2x_2 + \dots$ |
+| $Ax$ | do that for every row at once: row $i$ gives $A_{i1}x_1 + A_{i2}x_2 + \dots$ |
+| $A^\top$ | the table flipped — rows become columns |
+| $x \ge 0$ | **every** entry of $x$ is $\ge 0$ |
+| $\|x\|$ | the length of the list: $\sqrt{x_1^2 + x_2^2 + \dots}$ — Pythagoras, extended |
+| $\sum_j$ | "add up over all $j$" |
+| $\min_x f(x)$ | the smallest value $f$ can take, choosing $x$ |
+| $\Pi_{[l,u]}(v)$ | **clamp** $v$ into $[l,u]$: below $l$ becomes $l$, above $u$ becomes $u$ |
+
+So when you see
+
+$$\min_x \ c^\top x \quad \text{such that} \quad Ax \le b, \ x \ge 0$$
+
+read it as: *choose the numbers $x$, all of them non-negative, so that every rule
+in the table $A$ is respected, and the total cost is as small as possible.* That
+is the entire subject.
+
+\newpage
+
 # Part I — The problem
 
 ## 1. What MRPL actually asked for
@@ -41,17 +88,65 @@ times a day with different crude prices.
 "GPU-accelerated" means: it has to actually use the hardware, which turns out to
 constrain the choice of algorithm heavily — more on that in Part III.
 
-## 2. Three problem classes, and why all three are needed
+## 2. The tiny refinery we will use throughout
 
-**Linear program (LP).** Everything linear.
+Strip a refinery down to the smallest thing that still behaves like one.
+
+We make two products, in kilolitres per day:
+
+- $x_1$ = petrol
+- $x_2$ = diesel
+
+Petrol earns Rs 4 per kL of margin, diesel Rs 3. We want the most margin.
+
+Three limits:
+
+| | rule | why |
+|---|---|---|
+| Unit A (cracker) | $2x_1 + x_2 \le 100$ | petrol needs 2 hours per kL here, diesel 1; 100 hours a day |
+| Unit B (blender) | $x_1 + x_2 \le 80$ | both need 1 hour per kL; 80 hours a day |
+| Market | $x_1 \le 40$ | we can only sell 40 kL of petrol |
+
+And you cannot make a negative amount: $x_1, x_2 \ge 0$.
+
+The whole problem:
+
+$$\max \ 4x_1 + 3x_2 \quad \text{s.t.} \quad
+\begin{cases}
+2x_1 + x_2 \le 100\\
+x_1 + x_2 \le 80\\
+x_1 \le 40\\
+x_1, x_2 \ge 0
+\end{cases}$$
+
+**Solve it by hand.** Try the corners of the allowed region:
+
+| plan | Unit A used | Unit B used | margin |
+|---|---|---|---|
+| $(0,0)$ | 0 | 0 | 0 |
+| $(40, 0)$ | 80 | 40 | 160 |
+| $(40, 20)$ | 100 | 60 | 220 |
+| $(0, 80)$ | 80 | 80 | 240 |
+| $\mathbf{(20, 60)}$ | **100** | **80** | **260** |
+
+The best plan is **20 kL petrol and 60 kL diesel, margin Rs 260/day**, and it
+uses Unit A and Unit B completely while leaving the market limit slack (we sell
+20 of the 40 petrol we could).
+
+Keep those numbers. Everything in Part II is proved on them.
+
+## 3. Three problem classes, and why all three are needed
+
+**Linear program (LP).** Everything linear, like the example above.
 
 $$\min_x \; c^\top x \quad \text{subject to} \quad l \le Ax \le u, \quad lo \le x \le hi$$
 
-$x$ is the vector of decisions, $c$ the cost of each, $A$ the constraint matrix.
-This is the core planning problem.
+(Writing it as a minimisation is the convention; maximising $4x_1+3x_2$ is the
+same as minimising $-4x_1-3x_2$. The solver works in min form and flips the sign
+back at the end.)
 
 **Mixed-integer program (MILP).** The same, but some variables must be whole
-numbers.
+numbers:
 
 $$x_j \in \mathbb{Z} \quad \text{for } j \in I$$
 
@@ -60,147 +155,436 @@ or not, buy this crude cargo or not, use this blending recipe or not. Also for
 anything piecewise-linear, which is how a nonlinear blending curve gets
 approximated.
 
-**Quadratic program (QP).** A squared term in the objective.
+**Quadratic program (QP).** A squared term in the objective:
 
 $$\min_x \; \tfrac{1}{2} x^\top Q x + c^\top x$$
 
-Needed when you are penalising deviation — "stay close to last month's plan",
-"minimise the squared error against a target blend". Risk terms are quadratic
-too.
+A squared term is what you write when you are penalising *deviation*. "Stay close
+to last month's plan" means minimise $(x - x_{\text{last}})^2$, and a squared
+error is quadratic. Risk is quadratic too.
 
 A planning tool that only does LP is a demo. A refinery needs at least LP and
 MILP, and QP the moment anything is a least-squares fit.
 
 \newpage
 
-# Part II — The mathematics you need
+# Part II — The mathematics, from scratch
 
-This part is the whole background. If you know LP duality, skip to Part III.
+Five ideas. Corner solutions, duality, Farkas' lemma, why integers are hard, and
+projection. Every method in Part III is one of these five turned into a loop.
 
-## 3. Why a linear program has a corner solution
+## 4. Theorem 1 — the answer is always at a corner
 
-The feasible region $\{x : l \le Ax \le u,\; lo \le x \le hi\}$ is an
-intersection of half-spaces — a **polyhedron**. The objective $c^\top x$ is
-linear, so its contours are parallel hyperplanes.
+### 4.1 In plain words
 
-Push a hyperplane in the direction $-c$ as far as it will go while still touching
-the polyhedron. The last point of contact is either a **vertex**, or a whole face
-(if $c$ happens to be parallel to it) — and if it is a face, one of its vertices
-is also optimal.
+Draw the tiny refinery on graph paper. $x_1$ across, $x_2$ up. Each rule
+$2x_1 + x_2 \le 100$ is a straight line with everything on one side of it
+allowed. Three rules plus the two non-negativity rules cut out a five-sided
+region — the set of plans you are permitted to run.
 
-**Consequence:** there is always an optimal solution at a vertex. You never have
-to search the interior. That single fact is what the simplex method is built on.
+Now the margin. $4x_1 + 3x_2 = 120$ is also a straight line. So is
+$4x_1 + 3x_2 = 200$, and $= 260$. They are all **parallel** — same slope,
+different positions. Higher margin means further out.
 
-## 4. Duality — the idea the whole solver rests on
+So the question becomes: slide a ruler outward, keeping it parallel, until it is
+just about to leave the region. Where does it last touch?
 
-This is the most important concept in the document. Everything — how the simplex
-knows it is finished, how branch-and-bound prunes, what a shadow price is, why
-presolve can fix a variable — is duality.
+**It touches at a corner.** It has to. If it touched only at a point in the
+middle of an edge, you could slide it a hair further and still touch — so that
+was not the last touch. The only way to get stuck is at a corner, or (if the
+ruler happens to be exactly parallel to an edge) along a whole edge — and then
+the two corners at its ends are just as good.
 
-### 4.1 The idea
+### 4.2 The statement
 
-Take the LP in the form
+> **Theorem.** If a linear program has an optimal solution, then at least one
+> optimal solution is a **vertex** (corner) of the feasible region.
 
-$$\min_x c^\top x \quad \text{s.t.} \quad Ax \ge b, \quad x \ge 0$$
+### 4.3 Why this matters more than it looks
 
-Suppose I claim the optimum is at least 50. How would I prove it to you without
-solving the problem?
+A region has infinitely many points and only finitely many corners. This theorem
+turns "search an infinite set" into "check a finite list".
 
-Take a non-negative combination of the constraints. Pick weights $y \ge 0$ and
-add up the rows:
+In our example the corners were $(0,0), (40,0), (40,20), (0,80), (20,60)$ — five
+of them, and we found the answer by checking all five.
 
-$$y^\top A x \ge y^\top b$$
+**But** the count explodes. A corner is where $n$ of the rules hold with equality
+at once, so with $m$ rules and $n$ variables there can be up to $\binom{m}{n}$
+corners. For a small refinery model with 200 rules and 100 variables that is more
+corners than there are atoms in the observable universe. Checking all of them is
+not a plan.
 
-Now, if it happened that $y^\top A \le c^\top$ componentwise, then for any
-feasible $x \ge 0$:
+The **simplex method** (Section 10) is the fix: start at one corner and walk to a
+neighbouring corner that is better, repeatedly. It never enumerates; it climbs.
+And because the region has no dents — it is *convex*, being an intersection of
+half-planes — a corner with no better neighbour is the global best, not a local
+trap. That last sentence is the whole reason the walk is allowed to stop.
 
-$$c^\top x \ge y^\top A x \ge y^\top b$$
+## 5. Theorem 2 — duality
 
-So $y^\top b$ is a **lower bound on the optimum**, and I proved it just by
-producing $y$. Naturally I want the best such bound, which is another LP:
+This is the most important idea in the document. The simplex's stopping rule,
+branch-and-bound's pruning, shadow prices, and half of presolve are all this one
+idea wearing different clothes. So it is worth doing slowly, on the numbers we
+already have.
 
-$$\max_y \; b^\top y \quad \text{s.t.} \quad A^\top y \le c, \quad y \ge 0$$
+### 5.1 The guessing game
 
-That is the **dual**. The original is the **primal**.
+You claim the best possible margin is Rs 260 per day. I do not believe you. **How
+do you prove no plan can beat 260, without checking every plan?**
 
-### 4.2 The two theorems
+Here is the trick, and it is genuinely all there is to duality.
 
-**Weak duality.** Any feasible $y$ gives a bound: $b^\top y \le c^\top x$ for
-every feasible pair. This is the derivation above, and it needs no assumptions.
+Our rules are:
 
-**Strong duality.** At the optimum the two are *equal*: $b^\top y^\star = c^\top
-x^\star$. The best bound is exactly the answer.
+$$\text{(A)} \quad 2x_1 + x_2 \le 100 \qquad
+\text{(B)} \quad x_1 + x_2 \le 80 \qquad
+\text{(C)} \quad x_1 \le 40$$
 
-Strong duality is why a solver can ever say "this is optimal, and here is the
-proof". It produces both $x$ and $y$, checks that their objectives match, and the
-matching is the certificate.
+Multiply any of them by a **non-negative** number and they stay true. Add true
+inequalities and they stay true. So let us mix them and see what falls out.
 
-### 4.3 Reduced costs and complementary slackness
+**First attempt.** Take rule (B) and multiply by 4:
 
-Define the **reduced cost** of variable $j$:
+$$4x_1 + 4x_2 \le 320$$
+
+Now, since $x_2 \ge 0$ we know $3x_2 \le 4x_2$, and therefore
+
+$$4x_1 + 3x_2 \ \le\ 4x_1 + 4x_2 \ \le\ 320$$
+
+**Margin can never exceed 320.** That is a proof. It took one line and no
+searching. It is also loose — 320 is well above the 260 we found.
+
+**Second attempt.** Take 1 × rule (A) plus 2 × rule (B):
+
+$$\begin{aligned}
+1 \times (2x_1 + x_2) &\le 1 \times 100\\
+2 \times (x_1 + x_2) &\le 2 \times 80\\ \hline
+4x_1 + 3x_2 &\le 260
+\end{aligned}$$
+
+Look at the left side: $2x_1 + x_2 + 2x_1 + 2x_2 = 4x_1 + 3x_2$. That is
+**exactly the margin**, no slack, nothing thrown away. So:
+
+$$\textbf{margin} \le 260$$
+
+And we already have a plan that *achieves* 260. Therefore 260 is optimal, and we
+have proved it. Nobody has to trust the search.
+
+### 5.2 What just happened, in general
+
+We chose a weight for each rule — call them $y_1, y_2, y_3$, all $\ge 0$ — and
+added up the weighted rules. For the result to be a bound on $4x_1 + 3x_2$, the
+weighted left side has to dominate the objective coefficient by coefficient:
+
+$$\begin{aligned}
+\text{coefficient of } x_1: \quad & 2y_1 + y_2 + y_3 \ \ge\ 4\\
+\text{coefficient of } x_2: \quad & \ \ y_1 + y_2 \qquad\ \ \ge\ 3
+\end{aligned}$$
+
+and then the bound we get is the weighted right side, $100y_1 + 80y_2 + 40y_3$.
+
+Naturally we want the *tightest* such bound — the smallest one. That is itself an
+optimisation problem:
+
+$$\min \ 100y_1 + 80y_2 + 40y_3 \quad \text{s.t.} \quad
+\begin{cases}
+2y_1 + y_2 + y_3 \ge 4\\
+y_1 + y_2 \ge 3\\
+y_1, y_2, y_3 \ge 0
+\end{cases}$$
+
+**This is the dual problem.** The original is the **primal**. Notice what
+happened structurally, because it is worth recognising:
+
+- one dual variable per primal **rule** (3 rules → 3 dual variables)
+- one dual rule per primal **variable** (2 variables → 2 dual rules)
+- the table $A$ appears flipped: $A^\top$
+- max becomes min, $\le$ becomes $\ge$
+- the objective and the right-hand side swap jobs
+
+Our second attempt was $y = (1, 2, 0)$. Check it: $2(1) + 2 + 0 = 4 \ge 4$ $\checkmark$ and
+$1 + 2 = 3 \ge 3$ $\checkmark$, giving $100(1) + 80(2) + 40(0) = 260$. Our first attempt was
+$y = (0, 4, 0)$, giving 320. Both legal, one better.
+
+### 5.3 Weak duality
+
+> **Theorem (weak duality).** Every feasible $y$ gives a bound on every feasible
+> $x$. For a maximising primal: $c^\top x \le b^\top y$.
+
+**Proof, three lines, and it is exactly what we did above:**
+
+$$c^\top x \ \le\ (A^\top y)^\top x \ =\ y^\top (Ax) \ \le\ y^\top b$$
+
+The first $\le$ holds because $A^\top y \ge c$ and $x \ge 0$ — replacing each
+coefficient by something bigger, multiplied by something non-negative, can only
+increase. The middle is just rebracketing. The last $\le$ holds because $Ax \le b$
+and $y \ge 0$.
+
+No assumptions, no conditions. Any dual-feasible $y$ is a certificate anyone can
+check with one multiplication.
+
+**Consequence worth naming:** the primal is always below the dual. There is a
+"gap" between them, and it never goes negative.
+
+### 5.4 Strong duality
+
+> **Theorem (strong duality).** If both problems have feasible points, then at
+> the optimum the two are **equal**: $c^\top x^\star = b^\top y^\star$.
+
+The gap closes completely. The best proof is exactly as strong as the truth.
+
+This is not obvious and it is not free — the proof needs the separating
+hyperplane theorem, or Farkas' lemma from Section 6. But its *consequence* is the
+thing to remember:
+
+**A solver can prove it is done.** It produces a plan $x$ and a set of weights
+$y$, checks that both are feasible, checks that their objectives match, and hands
+you all three. If the numbers match, no better plan exists. That is what
+"optimal" means in this document — not "the search stopped", but "here is the
+proof, check it yourself".
+
+Every claim of optimality in this project is that check.
+
+### 5.5 Shadow prices — what the dual numbers *are*
+
+We found $y = (1, 2, 0)$. Those numbers mean something concrete.
+
+$y_1 = 1$ belongs to Unit A, which has 100 hours. Suppose we rented one more
+hour, making it 101. Re-solve: the new optimum is 261. **One more hour of Unit A
+is worth Rs 1.**
+
+$y_2 = 2$ belongs to Unit B. One more hour there and the margin goes to 262.
+**Unit B hours are worth twice as much as Unit A hours.**
+
+$y_3 = 0$ belongs to the market limit of 40 kL petrol. We are only selling 20, so
+raising the limit to 41 changes nothing. **It is worth zero.**
+
+That is why $y_i$ is called the **shadow price** of a constraint: the margin per
+extra unit of that resource. It answers "where should we spend capital?" and it
+falls out of the same solve, for free.
+
+If a plant manager can only debottleneck one unit, this tells them which — and
+notice it is Unit B, which is *not* the one with fewer hours. Intuition would
+have got that wrong; the dual does not.
+
+**This is why the solver works hard to recover duals through presolve, and says
+so when a recovery is only approximate.** Someone may size capital on these
+numbers. A shadow price you cannot trust is worse than none.
+
+### 5.6 Reduced costs — "is this product worth making?"
+
+Suppose someone proposes a third product, kerosene ($x_3$), margin Rs 2 per kL,
+needing 1 hour on Unit A and 1 hour on Unit B.
+
+Should we make it? Do not re-solve. Just price the ingredients using the shadow
+prices we already have:
+
+$$\text{what it consumes} = 1 \times \underbrace{y_1}_{1} + 1 \times \underbrace{y_2}_{2} = 3$$
+
+Kerosene *earns* 2 but *uses up* 3 rupees' worth of capacity. Making it loses
+Rs 1 per kL. Do not make it.
+
+That number — earnings minus internal cost — is the **reduced cost**:
 
 $$d_j = c_j - (A^\top y)_j$$
 
-Read it as: the true cost of $x_j$, minus what the constraints will pay you for
-using it. If $d_j > 0$, increasing $x_j$ makes the objective worse. If $d_j < 0$,
-increasing it helps.
+(Our sign convention is minimisation, so in the code $d_j > 0$ means "not worth
+using". In the maximising story above the sign is flipped; the meaning is
+identical.)
 
-At an optimum, **complementary slackness** holds:
+The reduced cost is the single most-used quantity in the whole solver:
 
-- if $x_j > lo_j$ strictly, then $d_j \le 0$ is impossible — the variable would
-  want to go up further; so $d_j = 0$ or it sits at a bound
-- if $d_j > 0$, then $x_j$ sits at its **lower** bound
-- if $d_j < 0$, then $x_j$ sits at its **upper** bound
+- **The simplex** prices on it. A variable with a favourable reduced cost is
+  worth bringing into the plan; when none is left, the plan is optimal.
+- **Presolve** fixes variables using it.
+- **Branch-and-bound** eliminates variables with it (Section 12.2).
 
-That is the optimality test, and it is exactly what the solver checks before
-claiming optimality. Section 14 records what happened the one time it did not.
+### 5.7 Complementary slackness
 
-### 4.4 What a dual value *means* to a refinery
+Put Sections 5.5 and 5.6 together and a pattern appears:
 
-For a capacity row, $y_i$ is the **shadow price**: how much more margin you would
-make per extra unit of that capacity.
+- Unit A is **fully used** (100 of 100 hours) and its price is **non-zero** (1)
+- Unit B is **fully used** (80 of 80 hours) and its price is **non-zero** (2)
+- The market limit is **not** fully used (20 of 40) and its price is **zero**
 
-If the crude distillation unit has $y_i = 525$, then one more barrel per day of
-CDU capacity is worth Rs 525/day of margin. That is a direct answer to "where
-should we spend capital", and it comes out of the solve for free.
+> **Theorem (complementary slackness).** At the optimum, for every constraint:
+> either it is tight, or its dual value is zero. And for every variable: either
+> it is strictly between its bounds, or its reduced cost may be non-zero.
 
-This is why the solver goes to real trouble to recover dual values through
-presolve — and says so when the recovery is only approximate. A shadow price you
-cannot trust is worse than none.
+$$y_i \cdot (\text{slack in row } i) = 0 \qquad\text{and}\qquad d_j \cdot (\text{distance of } x_j \text{ from its bound}) = 0$$
 
-## 5. Why integrality makes it hard
+**In plain words:** *a resource you are not using up is free, and anything you are
+actively doing must be exactly break-even at the margin.* Both halves are obvious
+once said aloud — if the market cap were worth something we would be pushing
+against it; if kerosene were worth making we would already be making some.
 
-Add $x_j \in \mathbb{Z}$ and the feasible set stops being a polyhedron. It
-becomes a lattice of points inside one, and the corner argument of Section 3
-collapses — the optimal integer point need not be at a vertex of the relaxation,
-and usually is not.
+This is the **optimality test the solver runs on itself**. It is not decoration.
+The dual simplex once returned `fit1p` as 33,609 when the true answer is
+9,146.38 — feasible, row violation $2.8 \times 10^{-14}$, and completely wrong.
+The check that caught it is this one, and it caught it on the first run.
+Section 17 tells that story.
 
-There is no known algorithm that solves this in polynomial time in general; MILP
-is NP-hard. What is done instead:
+## 6. Theorem 3 — Farkas' lemma, or how to prove there is *no* answer
 
-1. **Relax.** Drop the integrality and solve the LP. Its optimum is a *bound* —
-   for a minimisation, the true integer optimum can only be higher.
-2. **Branch.** Pick a variable that came out fractional, say $x_j = 3.4$. Any
-   integer solution has either $x_j \le 3$ or $x_j \ge 4$. Make two subproblems.
-3. **Bound and prune.** If a subproblem's relaxation bound is already worse than
-   the best integer solution found so far, nothing inside it can beat that
-   solution. Discard it without exploring.
-4. Repeat.
+A solver that can only say "here is the best plan" is half a tool. Planners
+over-constrain models constantly. The useful reply is not "I could not find
+anything" — that might just mean the solver gave up. It is *"these rules
+contradict each other, and here is the proof."*
 
-The whole game is in step 3. A better bound prunes more. That is why cuts,
-presolve and good branching matter so much — every one of them is a way of
-making the bound tighter so more of the tree disappears.
+### 6.1 On numbers first
 
-**And it is why a wrong bound is catastrophic.** If a bound is too high by even a
-rounding error, step 3 discards a subtree that contained the answer, and the
-solver then proves an optimum that is not one. The `fiber` failure in Section 14
-is exactly this.
+Suppose someone hands you these requirements:
+
+$$2x_1 + x_2 \le 10, \qquad x_1 + 2x_2 \le 10, \qquad x_1 + x_2 \ge 8, \qquad x_1, x_2 \ge 0$$
+
+Is there a plan? You could search for a while and find nothing, which proves
+nothing. Instead, add the first two rules together:
+
+$$3x_1 + 3x_2 \le 20 \qquad\Longrightarrow\qquad x_1 + x_2 \le 6.67$$
+
+But the third rule demands $x_1 + x_2 \ge 8$. And $8 > 6.67$. **Contradiction.**
+
+Notice the shape of that proof: it is a list of multipliers — $\tfrac13$ on the
+first rule, $\tfrac13$ on the second, 1 on the third — and anyone can verify it in
+one line without trusting me at all. That list is the whole proof object.
+
+### 6.2 The statement
+
+> **Farkas' lemma.** Exactly one of these is true:
+>
+> $$\text{(i) } \exists\, x \ge 0 \text{ with } Ax = b
+> \qquad\text{or}\qquad
+> \text{(ii) } \exists\, y \text{ with } A^\top y \le 0 \text{ and } b^\top y > 0$$
+
+"Exactly one" is the strong part. Not just *at most* one — they cannot both hold,
+which is easy — but *at least* one. **If no solution exists, a proof of that
+always exists**, and it is always this simple form.
+
+Why they cannot both hold: if $Ax = b$ with $x \ge 0$, then
+$b^\top y = (Ax)^\top y = x^\top(A^\top y) \le 0$, since $x \ge 0$ and
+$A^\top y \le 0$. That contradicts $b^\top y > 0$.
+
+### 6.3 What the solver does with it
+
+The $y$ in case (ii) is an **infeasibility certificate**. The solver attaches it
+to the answer, and it can be checked with a single matrix-vector product by
+someone who does not trust the solver at all.
+
+It is also where strong duality (Section 5.4) actually comes from — apply Farkas
+to the system "primal feasible AND dual feasible AND objectives equal", and the
+alternative turns out to be impossible.
+
+And it is the practical difference between a solver saying *"infeasible"* and a
+solver saying *"rows 4, 17 and 88 cannot all hold — here are the multipliers."*
+Only the second is useful to the person who has to fix the model.
+
+## 7. Why whole numbers make it hard
+
+### 7.1 The obvious idea, and why it fails
+
+Take this problem, all integers:
+
+$$\max \ 5x_1 + 4x_2 \quad \text{s.t.} \quad 4x_1 + 5x_2 \le 20, \quad 3x_1 + 2x_2 \le 12, \quad x_1, x_2 \ge 0 \text{ integer}$$
+
+**Step 1: ignore the integer requirement** and solve the LP. Both rules bind, and
+solving the two equations gives
+
+$$x_1 = 2.857, \qquad x_2 = 1.714, \qquad \text{margin} = 21.14$$
+
+**Step 2: round it.** This is what everybody tries first.
+
+| rounded plan | rule 1 ($\le 20$) | rule 2 ($\le 12$) | margin |
+|---|---|---|---|
+| $(3, 2)$ | $22$ $\times$ | $13$ $\times$ | infeasible |
+| $(3, 1)$ | 17 $\checkmark$ | 11 $\checkmark$ | 19 |
+| $(2, 2)$ | 18 $\checkmark$ | 10 $\checkmark$ | 18 |
+| $(2, 1)$ | 13 $\checkmark$ | 8 $\checkmark$ | 14 |
+
+Best from rounding: **19**.
+
+**Step 3: the actual answer.** It is $(4, 0)$, with margin **20**.
+
+Check it: $4(4) + 5(0) = 16 \le 20$ $\checkmark$, $3(4) + 2(0) = 12 \le 12$ $\checkmark$.
+
+The true answer has $x_2 = 0$, while the LP said $x_2 = 1.714$. Rounding was
+never going to find it — the integer optimum is not near the fractional one. The
+geometry from Section 4 has broken: the feasible set is no longer a region with
+corners, it is a scatter of dots inside one, and the best dot need not be near
+any corner.
+
+There is no known algorithm that solves this in polynomial time. MILP is
+**NP-hard**.
+
+### 7.2 What is done instead: branch and bound
+
+1. **Relax.** Drop the integer requirement and solve the LP. Here: 21.14. This is
+   a genuine **bound** — the LP is allowed strictly more plans than the MILP, so
+   the true integer answer can never exceed it.
+2. **Branch.** $x_1$ came out 2.857, which no integer can be. Every integer
+   solution has either $x_1 \le 2$ or $x_1 \ge 3$. Two subproblems. Between them
+   they cover every possibility, and neither contains 2.857.
+3. **Bound and prune.** Solve each subproblem's LP. If a subproblem's bound is
+   already no better than the best integer plan found so far, **nothing inside it
+   can beat that plan** — throw the whole subproblem away without exploring it.
+4. Repeat on whatever is left.
+
+Run it: the $x_1 \ge 3$ branch gives an LP bound of 20.67, the $x_1 \le 2$ branch
+gives 18. Once we have found $(4,0)$ with 20, the $x_1 \le 2$ branch is dead
+immediately — its *best possible* is 18, worse than 20 in hand. An entire half of
+the tree disappears on one comparison.
+
+**The whole game is step 3.** A tighter bound prunes more. That is why cuts,
+presolve and good branching matter so much: every one of them is a way of pushing
+the bound closer to the truth so that more of the tree evaporates.
+
+### 7.3 And why a wrong bound is a catastrophe
+
+Step 3 discards subtrees *without looking inside them*. That is its power and its
+danger. If a bound is wrong by even a rounding error in the unsafe direction, the
+solver throws away the subtree containing the answer — and then confidently
+proves optimality for something that is not optimal, with a matching dual bound
+and no complaint at all.
+
+This happened. On `fiber` the solver returned 652,748.78 against a true
+405,935.18 — **60.8% wrong**, and it looked perfectly healthy. Section 17 has the
+two bugs.
+
+## 8. Projection — the one operation the GPU method needs
+
+The last idea, and the shortest.
+
+**Projection onto a set** means: given a point, find the nearest point that is
+allowed. For an interval it is just clamping.
+
+$$\Pi_{[0,10]}(13) = 10, \qquad \Pi_{[0,10]}(-4) = 0, \qquad \Pi_{[0,10]}(7) = 7$$
+
+That is it. Three cases, no loops, no dependence on any other entry of the
+vector. And because there is no dependence, projecting a million numbers is a
+million independent operations — which is exactly the shape of work a GPU is
+built for.
+
+The method in Section 11 is built entirely out of two operations: *multiply by
+the matrix* and *clamp*. Both are perfectly parallel. That is not a coincidence,
+it is the design constraint that chose the algorithm.
+
+The useful property, and the reason the method converges at all:
+
+> **Projection onto a convex set never increases distance.** If $p$ and $q$ are
+> two points, $\|\Pi(p) - \Pi(q)\| \le \|p - q\|$.
+
+Clamping two numbers can only bring them closer together, never push them apart —
+try it. So each iteration is a step that can overshoot, followed by a clamp that
+cannot make things worse. Repeat enough times and you converge. Section 11.5 uses
+exactly this property to justify feasibility polishing.
 
 \newpage
 
 # Part III — The methods, and why these ones
 
-## 6. Three ways to solve an LP
+Part II gave five ideas. Each method below is one of them turned into a loop that
+a computer can run for a million iterations.
+
+## 9. Three ways to solve an LP
 
 | | how it works | strength | weakness |
 |---|---|---|---|
@@ -208,10 +592,50 @@ is exactly this.
 | **Interior point** | cut through the middle | fast on large problems | needs a sparse factorisation each step; no warm start |
 | **First-order** | matrix-vector products only | massively parallel; GPU | slow to high accuracy |
 
-This project implements **simplex** and **first-order**. Section 13.1 gives the
+This project implements **simplex** and **first-order**. Section 16.1 gives the
 full argument for why interior point was left out, from both sides.
 
-## 7. The simplex method, concretely
+## 10. The simplex method, concretely
+
+### 10.0 In plain words first
+
+Section 4 said the answer is at a corner and the trick is to walk from corner to
+corner. The simplex method is that walk. Everything below is bookkeeping for it.
+
+**What is a corner, in numbers?** In our tiny refinery, the best plan $(20, 60)$
+sat where Unit A and Unit B were *both* exactly full. A corner is where enough
+rules hold with equality to pin the point down completely — two rules for two
+variables, $n$ rules for $n$ variables.
+
+The method's bookkeeping turns that around. Rewrite every $\le$ rule as an
+equality by adding a **slack** variable — leftover capacity:
+
+$$2x_1 + x_2 + s_A = 100, \qquad x_1 + x_2 + s_B = 80, \qquad x_1 + s_M = 40$$
+
+Now there are five variables ($x_1, x_2, s_A, s_B, s_M$) and three equations. Pick
+**three** variables to be "in the plan" (**basic**) and force the other two to
+zero (**nonbasic**). Three equations, three unknowns — solve, and you get a
+corner. That is the entire correspondence:
+
+> **a choice of which variables are allowed to be non-zero = a corner**
+
+At our optimum, $s_A = 0$ and $s_B = 0$ (both units full), so the basic set is
+$\{x_1, x_2, s_M\}$ and the nonbasic set is $\{s_A, s_B\}$. Solving gives
+$x_1 = 20$, $x_2 = 60$, $s_M = 20$ — the 20 kL of unsold petrol capacity.
+
+**Walking to the next corner** then means: let one nonbasic variable start rising
+from zero (it *enters*), and stop when some basic variable is forced down to a
+bound (it *leaves*). Swap them. That is one iteration, and it is one step along
+one edge of the region.
+
+Three questions per step, and the rest of Section 10 is the three answers:
+
+1. Which variable should enter? — **pricing** (Section 10.2)
+2. How far can it go before something breaks? — **the ratio test** (Section 10.1)
+3. How do we re-solve the three equations cheaply after the swap? — **the
+   factorisation** (Section 10.5)
+
+Now the same thing in the notation the code uses.
 
 Write the LP with slacks so that $Ax = b$, $x \ge 0$, with $A$ having $m$ rows.
 
@@ -226,7 +650,7 @@ and the nonbasic variables are determined by which bound they are at.
 
 1. **Price.** Compute duals $y^\top = c_B^\top B^{-1}$ and reduced costs
    $d_j = c_j - y^\top A_j$ for nonbasic $j$. If every $d_j$ has the right sign
-   (Section 4.3), we are optimal — stop.
+   (Section 5.7), we are optimal — stop.
 2. **Choose an entering variable** $q$ with a favourable $d_q$.
 3. **Ratio test.** Increasing $x_q$ changes the basics along
    $\alpha_q = B^{-1} A_q$. Increase $x_q$ until the first basic variable hits a
@@ -239,7 +663,18 @@ Three things dominate the cost, and each has a name in the code:
 - **BTRAN** — solving $B^\top y = c_B$
 - **PRICE** — forming $d_j$ for every nonbasic column
 
-### 7.1 The ratio test, written out
+### 10.1 The ratio test, written out
+
+**In plain words.** We are raising one variable from zero. Everything else moves
+in response — some go up, some go down. The question is: *which one hits a wall
+first, and how far did we get?*
+
+On our refinery, suppose we are at $(0, 0)$ and start raising diesel $x_2$. Unit A
+allows $x_2 \le 100$, Unit B allows $x_2 \le 80$. Unit B binds first, at 80. So
+the step is 80, and $s_B$ is the variable that leaves. One ratio per rule, take
+the smallest — that is the whole test. The algebra below just does it for every
+row at once and handles both bounds.
+
 
 This is where correctness lives, so it is worth the algebra. Increasing the
 entering variable by $t \ge 0$ moves the basics:
@@ -267,7 +702,19 @@ Two practical points that are not decoration:
   EXPAND scheme allows a tiny, slowly growing bound relaxation so a strictly
   positive step is always available.
 
-### 7.2 Devex, written out
+### 10.2 Devex, written out
+
+**In plain words.** Which variable should we bring in? The obvious answer is
+"whichever earns the most per unit". But that is like choosing a road by its
+gradient without asking how long it is: a steep road that ends after ten metres
+beats nothing, and loses to a gentle road that runs for a kilometre.
+
+What we actually want is gain *per step actually taken*, and the length of the
+step depends on how strongly that variable disturbs everything else. Measuring
+that exactly costs as much as taking the step. Devex is the cheap estimate: keep
+a running guess of each variable's "disturbance", and update the guesses from
+information the pivot already produced.
+
 
 Dantzig picks $\arg\max_j |d_j|$. That is the steepest *slope*, but the true
 descent per unit distance moved is $d_j / \|\alpha_j\|$, and computing every
@@ -286,9 +733,9 @@ w_q \leftarrow \max\!\left(\frac{w_q}{\alpha_{rq}^2},\; 1\right)$$
 When the weights drift too far from the truth, the framework is reset and all
 weights return to 1. This is the cheap approximation to steepest edge, and the
 reason it is affordable is that $\alpha_{rj}$ — the pivot row — is computed once
-and serves both the weight update and, as Section 7.3 shows, the reduced costs.
+and serves both the weight update and, as Section 10.3 shows, the reduced costs.
 
-### 7.3 The two refinements that matter most here
+### 10.3 The two refinements that matter most here
 
 **Devex pricing.** Choosing the entering variable by the most negative $d_q$ (the
 textbook Dantzig rule) ignores that different columns move the solution by
@@ -304,7 +751,27 @@ and $\alpha_{rj}$ is exactly what the Devex update already computes. So two pass
 over the matrix become one. Measured: **0.80× the time** across the Netlib set,
 with `degen3` going from 85.2 s to 66.2 s.
 
-### 7.4 The dual simplex — the one that actually runs the MILP
+### 10.4 The dual simplex — the one that actually runs the MILP
+
+**In plain words.** There are two ways to reach an optimum, and they are mirror
+images.
+
+The ordinary (primal) simplex keeps the plan **runnable** at every step and works
+on making it **profitable**. It walks along the edge of the allowed region,
+always legal, getting better.
+
+The dual simplex does the opposite: it keeps the plan **profitable-looking** —
+the prices are already consistent with optimality — and works on making it
+**legal**. It walks through illegal plans, fixing violations one at a time, and
+stops when nothing is violated.
+
+Why would you ever want the second one? Because of what happens in
+branch-and-bound. We solve a problem, then add one new rule ($x_1 \le 2$) and
+re-solve. Adding a rule can make the old plan illegal — but it does **not** change
+any price, because the objective did not change. So the old answer is *already*
+in exactly the state the dual simplex wants: prices right, one rule broken. It
+repairs that in a couple of steps instead of solving from scratch.
+
 
 The primal simplex keeps $x$ feasible and works toward dual feasibility. The
 **dual simplex** does the mirror: it keeps the reduced costs valid and works
@@ -329,7 +796,7 @@ handful of pivots.
 
 Measured: **18,772 of 18,775** node relaxations warm start, averaging about
 **three pivots** each. A cold solve would be hundreds. This single fact is the
-reason branch-and-bound is affordable, and Section 13.1 turns on it.
+reason branch-and-bound is affordable, and Section 16.1 turns on it.
 
 **And it is where the worst bug lived.** Bland's anti-cycling rule — pick the
 lowest index among candidates — is safe in the primal, where pricing and the
@@ -340,7 +807,30 @@ correctly. Overriding it produced `fit1p` at 33,609 against a true 9,146.38 —
 feasible, row violation $2.8\times10^{-14}$, and reported optimal. Removing the
 override took the suite from 13/16 to **16/16**.
 
-### 7.5 Underneath everything: the LU factorisation
+### 10.5 Underneath everything: the LU factorisation
+
+**In plain words.** Every iteration needs to solve a system of equations — the
+same system as last time, with one column swapped. Solving from scratch each time
+would dominate everything.
+
+The standard trick is to do the elimination *once* and store the recipe.
+Gaussian elimination on a matrix $B$ produces two triangular tables, $L$ and $U$,
+with $B = LU$; and a triangular system is trivial to solve by substituting one
+unknown at a time. So the expensive part is paid once and every later solve is
+two cheap sweeps.
+
+Two complications, and both have a name below:
+
+**Fill-in.** Refinery matrices are almost all zeros — a rule mentions five
+variables out of ten thousand. Elimination *creates* new non-zeros where there
+were none, and a bad elimination order can turn a nearly-empty table into a full
+one. Choosing the order well is worth orders of magnitude, and that is what
+Markowitz does.
+
+**Small pivots.** Elimination divides by the entry it eliminates on. Divide by
+$10^{-14}$ and the rounding error swamps the answer. So the sparsest choice is
+sometimes refused for the safer one — that trade is the threshold in the rule.
+
 
 $B^{-1}$ is never formed. $B$ is factorised as $B = LU$ with a **Markowitz**
 pivot rule, which at each elimination step picks the entry minimising
@@ -362,9 +852,25 @@ and FTRAN/BTRAN simply pass through the accumulated list. The list grows, so the
 basis is refactorised periodically — every ~100 pivots, or immediately when a
 stability check fails.
 
-## 8. The first-order method — the piece that runs on a GPU
+## 11. The first-order method — the piece that runs on a GPU
 
-### 8.1 Why a saddle point
+### 11.1 Why a saddle point
+
+**In plain words.** The simplex walks the *edge* of the region, so it needs to
+know which rules are tight — bookkeeping that is inherently sequential and that a
+GPU cannot help with.
+
+The alternative is to stop tracking corners entirely and turn the constraints into
+a *penalty*. Imagine a referee whose whole job is to punish you for breaking a
+rule, and who gets to choose how hard. You pick a plan to maximise profit; the
+referee picks penalties to punish violations. Neither of you can win outright, and
+the standoff you settle into is exactly the optimal plan with its shadow prices.
+
+That standoff is a **saddle point**: the lowest point along one direction and the
+highest along another, like the middle of a horse's saddle or a mountain pass.
+Writing the problem this way replaces "which rules are tight" with "keep adjusting
+both sides" — and adjusting is arithmetic, which parallelises.
+
 
 Write the LP as a min-max problem. For $Kx \ge q$:
 
@@ -374,7 +880,27 @@ If $x$ violates a constraint, $y$ can push the inner term to $+\infty$, so the
 outer minimisation will not tolerate it. The saddle point of this is exactly the
 primal-dual optimum.
 
-### 8.2 PDHG
+### 11.2 PDHG
+
+**In plain words.** One iteration is four steps, and each is something you can
+picture:
+
+1. The planner moves the plan a little in the direction that improves profit,
+   pushing against the current penalties.
+2. The plan is **clamped** back inside its own bounds (Section 8) — you cannot
+   produce negative petrol.
+3. The referee looks at how badly the rules are now broken and raises the
+   penalties on the broken ones.
+4. The penalties are clamped too — a rule that is not tight gets no penalty.
+
+Then repeat, a hundred thousand times. Both sides keep adjusting until neither
+wants to move, which by Section 11.1 is the answer.
+
+The extrapolated point $\bar{x} = 2x^{k+1} - x^k$ in step 3 is a small but
+essential trick: the referee reacts to *where the planner is heading* rather than
+where they were, which is what makes the whole thing converge rather than
+oscillate.
+
 
 Primal-dual hybrid gradient alternates a gradient step in each variable, each
 projected back onto its own constraint:
@@ -394,7 +920,22 @@ embarrassingly parallel.
 The step sizes must satisfy $\tau\sigma\|K\|^2 \le 1$; the split between them is
 the **primal weight** $\omega$, with $\tau = \eta/\omega$ and $\sigma = \eta\omega$.
 
-### 8.3 Restarts and Halpern
+### 11.3 Restarts and Halpern
+
+**In plain words**, before the formulas:
+
+- **Restarting** is starting the method again from the good point you have
+  reached. This sounds like it does nothing — same method, same place. It is not
+  nothing, because how fast this method closes in depends on *how far it is from
+  the answer*, and restarting from a closer point resets that distance. It is the
+  difference between a rate that decays and a rate that keeps re-earning itself.
+- **Halpern** ties a rubber band from the current point back to where the epoch
+  started. Early on the band pulls hard and stops the iterates wandering; the
+  weight $\frac{1}{k+2}$ shrinks each step, so the band lets go and it becomes
+  ordinary PDHG again.
+- **Reflection** is "if that step helped, take some more of it" — go past where
+  the step landed, in the same direction.
+
 
 Plain PDHG converges slowly. Two accelerations:
 
@@ -418,7 +959,7 @@ $$R(z) = (1+\gamma)\,T(z) - \gamma z, \qquad \gamma \in [0,1]$$
 This costs nothing extra: $R(z) = T(z) + \gamma\,(T(z) - z)$, and $T(z) - z$ is
 already computed.
 
-### 8.4 What this method actually is
+### 11.4 What this method actually is
 
 This matters for how the project is described. Chen, Sun, Yuan, Zhang and Zhao,
 [arXiv:2509.23903](https://arxiv.org/abs/2509.23903), **Proposition 3.1**: the
@@ -437,7 +978,7 @@ HPR-LP about 1.1× faster; on MIPLIB relaxations HPR-LP solves two more and is
 1.8× faster. Their conclusion is that both are effective realisations of the same
 method and **the difference is implementation, not algorithm**.
 
-### 8.5 Feasibility polishing
+### 11.5 Feasibility polishing
 
 First-order methods reach moderate accuracy quickly and high accuracy slowly.
 For a refinery that is the wrong shape of error: a plan that violates a capacity
@@ -471,7 +1012,23 @@ Eleven times fewer iterations for a violation 114 times smaller, at the cost of 
 0.45% gap. A plan that overruns a unit is not a plan; a plan that leaves half a
 percent on the table is.
 
-### 8.6 Scaling — the step that decides whether any of it works
+### 11.6 Scaling — the step that decides whether any of it works
+
+**In plain words.** Suppose one rule is measured in barrels per day (numbers
+around $100{,}000$) and the next in sulphur fraction (numbers around $0.01$). A
+step that meaningfully moves the first is invisible to the second, and a step
+that moves the second takes forever on the first. But this method uses **one step
+size for everything**.
+
+The fix is to change units. Divide the barrel row by 100,000 and multiply the
+sulphur row by 100 and now both are around 1 — same problem, same answer,
+comfortable numbers. That is all scaling is: choosing units so nothing is
+enormous and nothing is tiny.
+
+The simplex does not need this nearly as much, because it works with exact
+equalities and one entering variable at a time. For a first-order method it is
+load-bearing.
+
 
 A refinery model mixes barrels ($10^5$), fractions ($10^{-2}$) and rupees
 ($10^7$) in the same matrix. A first-order method takes a *single* step size for
@@ -504,7 +1061,7 @@ what the algorithm actually needs.
 Both are applied, Ruiz first. On the refinery model the matrix norm drops by more
 than an order of magnitude, and with it the number of iterations.
 
-### 8.7 When to stop — the termination test
+### 11.7 When to stop — the termination test
 
 The solver may not stop when "the numbers stop moving". It stops when it can
 show the three conditions of optimality are met to a stated tolerance. Unscale
@@ -523,7 +1080,7 @@ $$r_d = \big\|\, c - A^\top y - \lambda \,\big\|_2$$
 where $\lambda$ is the part of the reduced cost that a variable at a bound is
 allowed to absorb.
 
-**Duality gap** — the two objectives must meet (Section 4.2):
+**Duality gap** — the two objectives must meet (Section 5.4):
 
 $$g = \big|\, c^\top x - \big(q^\top y + \text{bound terms}\big) \,\big|$$
 
@@ -539,7 +1096,7 @@ an honest reason: the gap is the slowest of the three to close, and a planner
 usually wants a strictly runnable plan sooner rather than a provably-last-rupee
 plan later.
 
-### 8.8 Proving there is no answer
+### 11.8 Proving there is no answer
 
 A solver that only ever says "here is the optimum" is half a tool. If a planner
 over-constrains a model, the useful reply is *"these constraints cannot all
@@ -563,7 +1120,20 @@ direction satisfies the Farkas conditions to tolerance, reports infeasibility
 with the certificate attached. Unboundedness is the mirror image, with the primal
 difference giving a ray of improvement.
 
-### 8.9 Step size, primal weight, restarts — the three tuned quantities
+### 11.9 Step size, primal weight, restarts — the three tuned quantities
+
+**In plain words**, these three answer:
+
+- **step size** — how big a move to make each iteration. Too small and it crawls;
+  too big and it overshoots and never settles.
+- **primal weight** — the plan and the penalties are different kinds of number
+  and do not need equally sized steps. This is the dial that splits one step size
+  between them.
+- **restart** — when to stop the current epoch and begin again from here.
+
+Every one of them has a formula that was tuned by measurement, not taken on
+faith. The sweep table below is the point of the section.
+
 
 These three are where a first-order LP solver is won or lost, and each is one
 formula.
@@ -579,11 +1149,19 @@ $$\bar\eta = \frac{\|\Delta z\|_\omega^2}{2\,|\Delta y^\top A\,\Delta x|}$$
 then accept if $\eta \le \bar\eta$ and propose the next $\eta$ from $\bar\eta$
 with a decaying exploration term. Costs one extra product per rejected step.
 
-*Constant* — estimate $\|A\|_2$ once by power iteration and set
+*Constant* — estimate $\|A\|_2$ once and set
 
 $$\eta = \frac{\theta}{\|A\|_2}$$
 
 cuPDLPx uses $\theta = 0.998$. Both were implemented and swept over Netlib:
+
+($\|A\|_2$ — the largest factor by which $A$ can stretch any vector — is found by
+**power iteration**: start from a random vector, multiply by $A^\top A$ over and
+over, and normalise. Each multiplication amplifies the stretchiest direction most,
+so the vector lines up with it and the growth factor converges to $\|A\|_2^2$.
+Twenty multiplications is usually plenty, and each one is the same
+matrix-vector product the main loop already does.)
+
 
 | $\theta$ | instances solved (of 88) |
 |---|---|
@@ -625,9 +1203,48 @@ $\|z - T(z)\|$ has fallen by a fixed factor since the epoch began. Cheaper, sinc
 $z - T(z)$ is already computed for the reflection, and it does not need the gap.
 Both are implemented; the fixed-point rule is the default.
 
-## 9. Branch and cut, concretely
+## 12. Branch and cut, concretely
 
-### 9.1 Cuts
+Section 7.2 gave the skeleton: relax, branch, bound, prune. This section is the
+four things that make the bound tighter — because by Section 7.2 the bound is the
+only thing that matters.
+
+
+### 12.1 Cuts
+
+**In plain words.** A cut is a rule that was *always* true for whole-number plans,
+but which the LP relaxation did not know. Adding it does not remove a single
+integer solution — but it does chop off the fractional point the LP handed back,
+forcing a better bound next time.
+
+**Cover cut, on numbers.** A bag holds 10 kg. Three items weigh 6, 7 and 8 kg, and
+$x_j = 1$ means "take item $j$":
+
+$$6x_1 + 7x_2 + 8x_3 \le 10, \qquad x_j \in \{0,1\}$$
+
+Any *two* of these exceed 10 ($6+7 = 13$, $6+8 = 14$, $7+8 = 15$). So at most one
+item can be taken:
+
+$$x_1 + x_2 + x_3 \le 1$$
+
+That is a **cover cut**. It is obvious to a person and invisible to the LP, which
+is perfectly happy with $x = (0.6,\ 0.4,\ 0.4)$: the weight is
+$3.6 + 2.8 + 3.2 = 9.6 \le 10$, so the original row is satisfied. But the cut
+says $0.6 + 0.4 + 0.4 = 1.4 \le 1$, which is false — so that point is gone, and
+the LP is forced to return something closer to an actual whole-number plan.
+
+**Rounding cut, on numbers.** Take a row that the LP produced:
+
+$$x + s = 2.5, \qquad x \text{ whole}, \ s \ge 0$$
+
+Since $s \ge 0$ we get $x \le 2.5$, and since $x$ is whole, $x \le 2$. Feed that
+back: $s = 2.5 - x \ge 0.5$. **The leftover must be at least 0.5** — a fact the
+original row never stated, and one that cuts off the LP's answer of $s = 0$.
+
+That single move — use integrality to round, then read the consequence back out —
+is the whole idea behind Gomory and MIR cuts. Everything below is that move done
+carefully enough to survive continuous variables and negative coefficients.
+
 
 A **cutting plane** is an inequality valid for every integer feasible point but
 violated by the current fractional relaxation solution. Adding it tightens the
@@ -650,7 +1267,15 @@ $$\sum_{j \in I}\left(\lfloor a_j \rfloor + \frac{\max(0, f_j - f)}{1-f}\right) 
 tableau rather than a row of the model, which lets them see combinations the
 model's own rows cannot.
 
-### 9.2 Reduced-cost fixing
+### 12.2 Reduced-cost fixing
+
+**In plain words.** Section 5.6 gave us a per-unit price for moving any variable
+away from where it sits. Suppose the best plan found so far earns 100, and this
+branch's LP bound says the best it could possibly do is 108 — a slack of 8. If
+moving $x_j$ costs 4 per unit, then $x_j$ can move at most 2 units before this
+branch is definitely worse than what we already have. So tighten its bound to
+$l_j + 2$ and hand that to the children. Free information, no LP solved.
+
 
 Once there is an incumbent with objective $z_{\text{inc}}$ and a node with bound
 $z_{\text{node}}$, a nonbasic variable at its lower bound with reduced cost
@@ -662,7 +1287,15 @@ cannot beat the incumbent. Tighten the bound for the children.
 
 Measured: `gt2` from 7,901 nodes to **1,167**.
 
-### 9.3 Node propagation
+### 12.3 Node propagation
+
+**In plain words.** Branching pinned $x_1 \le 2$. Now walk each rule and ask what
+that implies. In our refinery, if $x_1 \le 2$ then Unit A's rule
+$2x_1 + x_2 \le 100$ forces $x_2 \le 96$, and if some other rule needed
+$x_2 \ge 97$ the branch is dead — proved, without solving anything. It is the
+same interval arithmetic a person does in their head, run over every rule a few
+times until nothing more tightens.
+
 
 After branching pins $x_j \le 3$, interval arithmetic on each row can often
 tighten other variables — and sometimes prove the child infeasible before its
@@ -674,7 +1307,7 @@ and if $\text{maxact} < q$ the row cannot be satisfied.
 
 Measured: `flugpl` from 28,917 nodes to **477**.
 
-### 9.4 Reliability branching
+### 12.4 Reliability branching
 
 Pseudocost branching estimates, from history, how much the bound rises when a
 variable is branched. But a variable never branched has no history and gets the
@@ -691,9 +1324,9 @@ Near the root a decision shapes the tree; deep down it settles a subtree about t
 be pruned anyway, and the greedy one-level-ahead choice is not the one that makes
 the smallest tree.
 
-## 10. QP by ADMM, written out
+## 13. QP by ADMM, written out
 
-### 10.1 The splitting
+### 13.1 The splitting
 
 The problem is
 
@@ -720,7 +1353,22 @@ y^{k+1} &= y^k + \rho\big(\alpha \tilde{z}^{k+1} + (1-\alpha)z^k - z^{k+1}\big)
 
 $\alpha$ is relaxation (1.6 works well), $\rho$ the penalty on the link.
 
-### 10.2 The linear system, and why it always factorises
+### 13.2 The linear system, and why it always factorises
+
+**In plain words.** ADMM's cost is one system of equations per iteration, and the
+same system every time. So the question is whether we can eliminate it once and
+reuse the recipe forever.
+
+Normally you cannot promise that. Gaussian elimination can hit a zero on the
+diagonal and be forced to swap rows, and the swap depends on the *numbers*, which
+means you cannot decide the ordering in advance. That kills the reuse.
+
+Here we get a promise. The matrix has a special shape — positive on the top
+block, negative on the bottom — and for that shape there is a theorem saying
+**elimination never hits a zero, in any order**. So the order can be chosen purely
+to keep the matrix sparse, computed once before any arithmetic, and reused for
+every iteration. That promise is the reason this method is fast.
+
 
 Every iteration solves the same KKT system:
 
@@ -745,7 +1393,21 @@ and reused. No numerical pivoting, no symbolic re-analysis per iteration.
 That is the entire reason this method is fast, and it is why $\sigma$ exists at
 all — it is not regularisation for its own sake, it is what buys the theorem.
 
-### 10.3 The factorisation itself
+### 13.3 The factorisation itself
+
+**In plain words.** The factorisation is done in two passes, and the split is the
+clever part.
+
+The **first pass touches no numbers at all** — it only looks at *where* the
+non-zeros are and works out where the non-zeros of the answer will be. It does
+this by building a small tree ("if I eliminate row 7, which row does that
+disturb next?"), and walking that tree gives the answer's shape directly.
+
+The **second pass** then fills those known slots with actual numbers. Because the
+shape was settled first, memory is allocated exactly once and there is no
+searching during the arithmetic. It also means the first pass runs *once* while
+the second may run again if $\rho$ changes.
+
 
 Up-looking sparse $LDL^\top$ (Davis, Algorithm 849). Two phases:
 
@@ -763,7 +1425,7 @@ $$D_k = K_{kk} - \sum_{j \in \text{pattern}} L_{kj}^2 D_j$$
 Measured against solving the same system iteratively with conjugate gradients:
 **1.52× faster**, and without CG's dependence on conditioning.
 
-### 10.4 Adaptive $\rho$, and where it breaks
+### 13.4 Adaptive $\rho$, and where it breaks
 
 $\rho$ balances how hard the link is enforced. Too small and the copy drifts from
 $Ax$; too large and the objective is ignored. The standard rule rescales it from
@@ -781,10 +1443,10 @@ exceeds 5, so the factorisation is not thrown away every iteration).
 **This is the part that fails on five instances**, four of them the PRIMALC
 family. Traced: $\rho$ falls from $10^{-1}$ to $1.9\times10^{-5}$ within 500
 iterations, and the same gate that stops it oscillating also stops it climbing
-back. Section 13.8 records the two fixes that followed from that diagnosis and
+back. Section 16.8 records the two fixes that followed from that diagnosis and
 the measurements that killed both.
 
-### 10.5 Polishing
+### 13.5 Polishing
 
 ADMM converges to moderate accuracy quickly, like every first-order method. But
 once it has converged, the *active set* — which constraints are tight — is
@@ -795,13 +1457,23 @@ constraints, keep it. It is the same trade as feasibility polishing in Section
 8.5 — use the cheap method to find the *structure*, then solve the small exact
 problem that structure implies.
 
-## 11. Presolve, with the algebra
+## 14. Presolve, with the algebra
 
-Presolve shrinks the model before it is ever solved. On Netlib it removes about
-**19% of rows and 12% of columns** without changing a single answer. It is the
-cheapest speedup in the whole solver, and the most dangerous — every reduction is
-a claim that some solutions can be discarded, and a wrong claim discards the
-answer.
+**In plain words.** Before solving anything, read the model and delete the parts
+that were never in question.
+
+A rule like $3x_1 \le 12$ mentions one variable — that is not a rule, that is a
+bound, $x_1 \le 4$. Delete the row. A variable that appears in no rule at all is
+decided purely by its own price — set it and delete the column. A rule whose
+worst case still satisfies it can never bind — delete it. Do this repeatedly,
+because each deletion can expose the next.
+
+On the standard Netlib test set this removes about **19% of rows and 12% of
+columns** without changing a single answer. It is the cheapest speedup in the
+solver — and the most dangerous, because every reduction is a claim that certain
+solutions can be discarded, and one wrong claim discards the answer. The very
+first wrong answer this project produced came from here.
+
 
 Eleven reductions are implemented. Here is what each actually computes.
 
@@ -859,7 +1531,7 @@ back exactly:
 $$y_r = \frac{c_i - \sum_{k \ne r} A_{ki}\,y_k}{a}$$
 
 Without implied-freeness the dual is not recoverable and the shadow prices of
-Section 4.4 would be quietly wrong.
+Section 5.5 would be quietly wrong.
 
 Two bugs lived here. The staleness guard ran *after* the liveness check — but a
 column that has been substituted away is also a dead column, so the guard never
@@ -880,7 +1552,7 @@ objective already prefers*.
 **Free/implied-free column substitution**, **duplicate rows**, and
 **singleton-column-in-equality** round out the eleven.
 
-### 11.1 Postsolve is a replay, not an inverse
+### 14.1 Postsolve is a replay, not an inverse
 
 Reductions are pushed onto a stack as they fire. Postsolve pops them in reverse,
 each one reconstructing what it removed. Primal recovery is mechanical.
@@ -889,10 +1561,10 @@ each one reconstructing what it removed. Primal recovery is mechanical.
 doubleton with implied-freeness); some do not. The implementation carries a
 `dual_is_exact()` flag per reduction, and when a run contains an inexact one the
 solver *says so* rather than reporting a shadow price it cannot stand behind.
-Given Section 4.4 — a planner may be sizing capital on these numbers — that is
+Given Section 5.5 — a planner may be sizing capital on these numbers — that is
 not pedantry.
 
-## 12. How the pieces fit together
+## 15. How the pieces fit together
 
 For an **LP**: read → presolve → scale → solve (simplex, or first-order on the
 GPU) → unscale → postsolve → verify optimality conditions → report $x$, $y$, and
@@ -900,10 +1572,10 @@ the reduced costs.
 
 For a **MILP**: presolve once at the root, solve the root relaxation, then
 repeatedly — select a node, propagate bounds into it, solve its relaxation with
-the **dual simplex warm started from the parent** (Section 7.4), separate cuts if
+the **dual simplex warm started from the parent** (Section 10.4), separate cuts if
 it is worth it, apply reduced-cost fixing against the incumbent, and either prune
 it or branch. The LP solver is called tens of thousands of times; everything in
-Section 9 exists to reduce that count.
+Section 12 exists to reduce that count.
 
 For a **QP**: presolve → scale → ADMM with a single cached $LDL^\top$ → polish.
 
@@ -911,7 +1583,7 @@ The GPU sits underneath as a backend: the same first-order algorithm, with the
 vectors resident on the device and the matrix-vector products, reductions and
 clamps as kernels. Measured **2.70×–7.09×** over the same algorithm on CPU on a
 Tesla T4. Two things learned the hard way — `cudaMalloc` does *not* zero its
-memory where the CPU allocator value-initialises (Section 14), and on one
+memory where the CPU allocator value-initialises (Section 17), and on one
 instance **79% of solve time was outside the kernels**, in the convergence check
 that still runs on the host. That is the top remaining performance item.
 
@@ -921,9 +1593,9 @@ This is the part that is usually missing from a project write-up. Each of these
 is standard, respectable and in the textbooks. Each was measured against *this*
 instance set and each lost.
 
-## 13. Rejected, with the numbers
+## 16. Rejected, with the numbers
 
-### 13.1 Interior point methods — the full argument
+### 16.1 Interior point methods — the full argument
 
 The plan disposed of this in eight words. Here it is from every side.
 
@@ -975,7 +1647,7 @@ three to four weeks.
 impractical *and* tight accuracy is required. Written down so the decision gets
 revisited on evidence.
 
-### 13.2 Hypersparsity
+### 16.2 Hypersparsity
 
 Hall and McKinnon report a **5.2× mean speedup** from exploiting it. Their
 criterion: an instance is hyper-sparse when more than 60% of FTRAN/BTRAN results
@@ -995,24 +1667,24 @@ Four of twenty-one clear the threshold. Their 5.2× came from a test set
 *selected* for the property (KEN-18, PDS-20, STOCFOR3 — network-structured).
 Netlib is not that. Six to eight weeks of work to help four instances.
 
-### 13.3 Forrest–Tomlin updates
+### 16.3 Forrest–Tomlin updates
 
 A sampling profile of `degen3`, the slowest instance at 66 s, puts 67% of samples
 in one place and `LuFactor::factorize` at **11 samples out of ~4,500**. Basis
 updates are not where the time goes. Aimed at something that is not hot.
 
-### 13.4 Bound-flipping ratio test
+### 16.4 Bound-flipping ratio test
 
 Needs boxed columns. Measured: `pilot87` 36.8%, `80bau3b` 35.6%, `fit1p` 23.8% —
 and **0%** for afiro, sctap1, degen3, 25fv47, woodw, stocfor2 and maros-r7.
 
-### 13.5 Coefficient tightening
+### 16.5 Coefficient tightening
 
 Implemented in full. Fires **three times** across seven MIPLIB instances, all on
 one, and moves that instance's root bound from 6875.00000004 to 6875.00000002 —
 which is noise. Kept in the source, switched off, with the measurement beside it.
 
-### 13.6 Parallel column merging
+### 16.6 Parallel column merging
 
 20% of Netlib columns are parallel to another — 31,954 of 159,369, all
 continuous, which is the safe case. Compelling until the merge condition is
@@ -1023,11 +1695,11 @@ applied: it also needs the objective in the same ratio, which cuts it to
 columns from one merged value — the most dangerous part of this codebase to
 extend. Measured, not built.
 
-### 13.7 Harris ratio test without EXPAND
+### 16.7 Harris ratio test without EXPAND
 
 Three instances better, six worse, and `blend` stopped solving entirely.
 
-### 13.8 Two fixes for a QP convergence failure
+### 16.8 Two fixes for a QP convergence failure
 
 Five QP instances fail, four of them the PRIMALC family whose DUALC counterparts
 all solve. Diagnosis was clear: the adaptive step-size rule drives $\rho$ from
@@ -1043,7 +1715,7 @@ the measurements kept where the option would have been.
 
 # Part V — What went wrong, and what it taught
 
-## 14. Six times the solver was confidently wrong
+## 17. Six times the solver was confidently wrong
 
 The plan's risk register had eleven risks and ten were about *finishing on time*.
 That risk never materialised. This one did, repeatedly.
@@ -1085,7 +1757,7 @@ whatever `cudaMalloc` returned. The CPU allocator zeroes; CUDA does not.
    family was valid alone — only the combination broke, because only the combined
    run reached the point that produced the bad cut.
 
-## 15. The tools that exist because something got through
+## 18. The tools that exist because something got through
 
 - A **dual-feasibility check** the simplex runs on itself before claiming
   optimality. It found the Bland bug on its first run.
@@ -1101,7 +1773,7 @@ whatever `cudaMalloc` returned. The CPU allocator zeroes; CUDA does not.
   facility. It found both `fiber` bugs in minutes after four layers of manual
   elimination had found neither.
 
-## 16. Traps in measuring, not in the code
+## 19. Traps in measuring, not in the code
 
 - **`zsh` does not word-split unquoted variables.** A variable holding two flags
   arrives as one argument, the program rejects it, and the checker silently reads
@@ -1115,7 +1787,7 @@ whatever `cudaMalloc` returned. The CPU allocator zeroes; CUDA does not.
 
 # Part VI — Where it stands and what is next
 
-## 17. Verified against published answers
+## 20. Verified against published answers
 
 - Reader matches HiGHS on all 88 Netlib instances, 1.4–1.5× faster.
 - Primal and dual simplex both correct on all 16 Netlib instances with published
@@ -1127,7 +1799,7 @@ whatever `cudaMalloc` returned. The CPU allocator zeroes; CUDA does not.
   does not prove, the *solution* is already the published optimum.
 - QP solves 35 of the 40 smallest Maros–Meszaros instances.
 
-## 18. The benchmark to be judged against
+## 21. The benchmark to be judged against
 
 [Mittelmann's LPfeas benchmark](https://plato.asu.edu/ftp/lpfeas.html) is where
 cuPDLPx and HPR-LP — the two papers this method comes from — are actually scored.
@@ -1140,7 +1812,7 @@ method is not automatically good. The implementation is most of it.
 Eight of its forty public instances are already here. Reporting solved-or-not at
 $10^{-6}$ against that published table is a comparison a reader can check.
 
-## 19. What is next, in order
+## 22. What is next, in order
 
 1. **Verify on a GPU.** Nothing built since the last run has been tested on
    hardware, and the CPU hides a class of bug that only appears on the device.
@@ -1158,7 +1830,7 @@ Deliberately **not** on that list, each for a measured reason in Part IV:
 interior point, hypersparsity, Forrest–Tomlin, bound-flipping ratio test,
 parallel columns, coefficient tightening.
 
-## 20. The one thing worth taking away
+## 23. The one thing worth taking away
 
 The algorithms were not the hard part. They are in papers and they work.
 
@@ -1169,4 +1841,4 @@ A slow solver tells you it is slow. A wrong one tells you nothing: it hands back
 a confident number with a matching bound and no complaint. On `fiber` it was
 wrong by 60% and looked completely healthy.
 
-Every checking tool in Section 15 exists because something got through.
+Every checking tool in Section 18 exists because something got through.
