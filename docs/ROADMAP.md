@@ -73,8 +73,25 @@ Remaining:
 - [*Presolving for GPU-Accelerated First-Order LP Solvers*](https://arxiv.org/pdf/2604.23951)
   — directly this combination
 
-Missing reductions, roughly in value order: dominated columns, parallel columns,
-probing, dual fixing, clique merging, implied-integer detection, sparsify.
+Missing reductions: dominated columns, probing, clique merging,
+implied-integer detection, sparsify, SimplifyIneq, Stuffing.
+
+**Parallel columns was measured and not built**, and the numbers are worth
+keeping because the headline is misleading. Across the 88 Netlib instances,
+31,954 of 159,369 columns are parallel to another — 20%, and all of them
+continuous, which is the safe case. But merging needs the objective to follow
+the same ratio as the coefficients, and that cuts it to **1,471**: `standata`
+goes from 606 parallel to 12 mergeable, `shell` from 104 to 5.
+
+1,471 columns is 0.9% of the set. Presolve carries 8% of the composite, so the
+whole reduction is worth about a quarter of a point — against needing a new
+postsolve entry kind that writes two columns from one merged value, which is
+the most dangerous part of this codebase to extend. The doubleton substitution
+put `stocfor2` 189 units outside the original model before its second bug was
+found.
+
+Worth doing eventually. Not worth doing before QP and the simplex, which carry
+12% and 16% and have twenty and fifteen points of headroom each.
 
 One structural note: the doubleton pass runs **after** the main loop and does not
 re-enter it, because it is the only reduction that rewrites A and re-entering
