@@ -682,6 +682,30 @@ BranchAndBoundResult solve_milp(const Model& model,
             std::fmin(child.upper[sz(branch_column)], floor_value);
       }
       if (child.lower[sz(branch_column)] > child.upper[sz(branch_column)]) continue;
+
+      // The branch has just pinned this column to one side; propagation is what
+      // turns that into information about the others.
+      if (options.node_propagation) {
+        Int before = 0;
+        for (Int j = 0; j < working.num_cols(); ++j) {
+          if (std::isfinite(child.lower[sz(j)])) ++before;
+          if (std::isfinite(child.upper[sz(j)])) ++before;
+        }
+        if (!propagate_bounds(working, is_integral, &child.lower, &child.upper,
+                              options.node_propagation_rounds)) {
+          // Infeasible, and proved so by interval arithmetic rather than by a
+          // relaxation that had to be solved first.
+          ++result.children_pruned_by_propagation;
+          continue;
+        }
+        Int after = 0;
+        for (Int j = 0; j < working.num_cols(); ++j) {
+          if (std::isfinite(child.lower[sz(j)])) ++after;
+          if (std::isfinite(child.upper[sz(j)])) ++after;
+        }
+        if (after > before) result.propagation_tightenings += after - before;
+      }
+
       stack.push_back(std::move(child));
     }
   }

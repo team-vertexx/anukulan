@@ -290,6 +290,37 @@ That is a dual-bound problem, which means cuts, not heuristics or nodes.
 
 Warm starts on 18,772 of 18,775 relaxations, 2.9 simplex iterations per node.
 
+### Node propagation
+
+Branching pins a variable to one side of its fractional value, which is exactly
+the moment interval arithmetic on the rows has something new to say. Propagating
+into each child as it is created tightens the other variables, and sometimes
+proves the child infeasible before its relaxation is ever solved.
+
+The machinery is the same `propagate_bounds` the fix-and-propagate heuristic
+already used; this only points it at the children. Six instances, 45 s budget —
+nodes where it solves, remaining gap where it does not:
+
+| instance | off | 1 round | 2 rounds | **4 rounds** |
+|---|---|---|---|---|
+| **flugpl** | 28,917 | 2,283 | 979 | **477** |
+| gt2 | 1,181 | 826 | 789 | **783** |
+| khb05250 | 143 | 143 | 142 | 142 |
+| **p0201** | **6.076% — does not finish** | 2,364 | 2,212 | 2,282 |
+| gen-ip054 | 1.700% | 1.700% | 1.700% | 1.700% |
+| mas76 | 4.192% | 4.192% | 4.192% | 4.192% |
+
+**No instance is worse for it and two are transformed.** flugpl needs a
+sixty-first of the tree; p0201 stops failing to finish inside the budget. More
+rounds keeps helping where it helps at all, and the only cost anywhere is
+p0201's seventy extra nodes against flugpl's five hundred saved. Default 4.
+
+An earlier run of this reported `gen-ip054` as *worse* under propagation —
+1.700% against 1.284%. Re-measured on a quiet machine it is 1.700% at every
+setting including off. That is the second false regression this session produced
+by measuring three sixty-second solves per instance back to back, and both times
+the solver was fine and the harness was not.
+
 ### Reduced-cost fixing
 
 Once there is an incumbent, a node's own bound and reduced costs say how far a

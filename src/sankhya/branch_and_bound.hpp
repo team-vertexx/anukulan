@@ -130,6 +130,35 @@ struct BranchAndBoundOptions {
   // the gap closes.
   bool reduced_cost_fixing = true;
 
+  // Propagate bounds into each child as it is created. Branching has just
+  // pinned a variable to one side of its fractional value, which is precisely
+  // the moment interval arithmetic on the rows has something new to work with -
+  // it can tighten other variables, and sometimes prove the child infeasible
+  // before its relaxation is ever solved.
+  //
+  // The machinery is the same `propagate_bounds` the fix-and-propagate
+  // heuristic uses; this only points it at the children. Rounds are kept low
+  // because this runs at every node and the first round finds most of it.
+  // On, and the round count is measured. Six MIPLIB instances at a 45 second
+  // budget, in nodes where the instance solves and in remaining gap where it
+  // does not:
+  //
+  //                 off    1 round   2 rounds   4 rounds
+  //   flugpl      28917      2283        979        477
+  //   gt2          1181       826        789        783
+  //   khb05250      143       143        142        142
+  //   p0201      6.076%      2364       2212       2282
+  //   gen-ip054  1.700%    1.700%     1.700%     1.700%
+  //   mas76      4.192%    4.192%     4.192%     4.192%
+  //
+  // No instance is worse for it, and two are transformed: flugpl needs a
+  // sixty-first of the tree, and p0201 stops failing to finish inside the
+  // budget. More rounds keeps helping where it helps at all - flugpl halves
+  // again from two rounds to four - and the only cost anywhere is p0201's
+  // seventy extra nodes, against flugpl's five hundred saved.
+  bool node_propagation = true;
+  int node_propagation_rounds = 4;
+
   // Whether a cut family is worth its cost is a property of the instance, not
   // of the family. Gomory takes khb05250 from 4,247 nodes to 143 and makes four
   // other instances worse, and no single on-or-off answer expresses that.
@@ -225,6 +254,10 @@ struct BranchAndBoundResult {
   Int reduced_cost_tightenings = 0;
   Int reduced_cost_fixings = 0;
   // Cuts generated and then thrown away because they did not move the bound.
+  // Children proved infeasible by propagation, so never solved at all, and
+  // bounds tightened on the ones that survived.
+  Int children_pruned_by_propagation = 0;
+  Int propagation_tightenings = 0;
   bool cuts_discarded = false;
   double root_bound_rise = 0.0;
   Int dives_run = 0;

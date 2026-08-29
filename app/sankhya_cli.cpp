@@ -849,6 +849,10 @@ int command_milp(const std::vector<std::string>& args) {
       options.gomory_cuts = true;
     } else if (a == "--no-reduced-cost-fixing") {
       options.reduced_cost_fixing = false;
+    } else if (a == "--no-node-propagation") {
+      options.node_propagation = false;
+    } else if (value_of(a, "--propagation-rounds=", &v)) {
+      options.node_propagation_rounds = static_cast<int>(v);
     } else if (a == "--no-adaptive-cuts") {
       options.adaptive_cuts = false;
     } else if (value_of(a, "--cut-threshold=", &v)) {
@@ -932,6 +936,9 @@ int command_milp(const std::vector<std::string>& args) {
         << "\"heuristic_successes\":" << r.heuristic_successes << ","
         << "\"cuts_added\":" << r.cuts_added << ","
         << "\"gomory_cuts_added\":" << r.gomory_cuts_added << ","
+        << "\"children_pruned_by_propagation\":"
+        << r.children_pruned_by_propagation << ","
+        << "\"propagation_tightenings\":" << r.propagation_tightenings << ","
         << "\"cuts_discarded\":" << (r.cuts_discarded ? "true" : "false") << ","
         << "\"root_bound_rise\":" << r.root_bound_rise << ","
         << "\"warm_started_nodes\":" << r.warm_started_nodes << ","
