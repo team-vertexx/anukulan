@@ -233,6 +233,11 @@ struct Workspace {
   std::vector<Substitution> subs;
   std::vector<Int> sub_of_col;  // -1, or an index into subs
 
+  // Coefficients rewritten by tightening, keyed by their position in A's value
+  // array. Applied when the reduced matrix is assembled, for the same reason
+  // the substitutions are: A itself stays const for every other reduction.
+  std::vector<std::pair<Int, double>> coefficient_overrides;
+
   PostsolveStack* stack = nullptr;
   PresolveCounts* counts = nullptr;
   double tol = 1e-9;    // a reduction may fire
@@ -814,6 +819,73 @@ bool merge_duplicate_rows(Workspace& w) {
   return changed;
 }
 
+// Coefficient tightening. A row that can only be violated when one integer
+// column is at its bound is really a weaker row than it looks: the coefficient
+// and the bound can both come down by the slack, which leaves every integer
+// point where it was and pulls the LP relaxation in.
+//
+// Runs on the two-sided form directly. A row with a finite upper bound is
+// treated as sum a_j x_j <= rup; one with a finite lower bound is the mirror
+// image, and an equality has both and is left alone - there is no slack in an
+// equality to take.
+bool tighten_coefficients(Workspace& w, const PresolveOptions& opt,
+                          const std::vector<char>& integral) {
+  if (!opt.coefficient_tightening) return false;
+  bool changed = false;
+  for (Int i = 0; i < w.rows(); ++i) {
+    if (!w.row_alive[sz(i)] || w.row_count[sz(i)] < 2) continue;
+    const double lo = w.rlo[sz(i)];
+    const double hi = w.rup[sz(i)];
+    const bool has_lo = !std::isinf(lo);
+    const bool has_hi = !std::isinf(hi);
+    if (has_lo && has_hi) continue;  // equality or range: no slack to take
+    if (!has_lo && !has_hi) continue;
+
+    const Activity act = row_activity(w, i);
+    if (act.max_infinite > 0 || act.min_infinite > 0) continue;
+
+    for (Int e = w.a->row_begin(i); e < w.a->row_end(i); ++e) {
+      const Int j = w.a->index()[sz(e)];
+      if (!w.col_alive[sz(j)] || !integral[sz(j)]) continue;
+      if (!w.sub_of_col.empty() && w.sub_of_col[sz(j)] >= 0) continue;
+      const double a = w.a->value()[sz(e)];
+      if (a == 0.0) continue;
+      const double cl = w.clo[sz(j)];
+      const double cu = w.cup[sz(j)];
+      if (std::isinf(cl) || std::isinf(cu) || cu - cl < 1.0 - 1e-9) continue;
+
+      // The row read as an upper bound. For a >= row, negate everything.
+      const double sign = has_hi ? 1.0 : -1.0;
+      const double coeff = sign * a;
+      const double bound = has_hi ? hi : -lo;
+      // Activity of the row in that reading, excluding this column.
+      const double max_here = (coeff > 0.0) ? coeff * cu : coeff * cl;
+      const double max_rest = (has_hi ? act.max_value : -act.min_value) - max_here;
+
+      if (coeff <= 0.0) continue;  // the mirror case needs the other bound
+      const double span = cu - cl;
+      // Only binding when this column is at its top, and then only just.
+      const double d = max_rest + coeff * cu - bound;
+      if (!(d > w.tol * scale_of(bound))) continue;   // already tight
+      if (max_rest + coeff * cl > bound - w.tol * scale_of(bound)) continue;
+      if (d >= coeff * span) continue;  // would flip the coefficient's sign
+
+      const double new_coeff = coeff - d;
+      if (!(new_coeff > 0.0)) continue;
+      w.coefficient_overrides.push_back({e, sign * new_coeff});
+      if (has_hi) {
+        w.rup[sz(i)] = hi - d;
+      } else {
+        w.rlo[sz(i)] = lo + d;
+      }
+      ++w.counts->coefficients_tightened;
+      changed = true;
+      break;  // the row's activity is now stale; leave the rest for a later run
+    }
+  }
+  return changed;
+}
+
 // Doubleton equality substitution. A row a*xi + b*xj = c with the eliminated
 // column implied free: xi = (c - b*xj)/a, so every other row k holding xi
 // trades A_ki*xi for a constant A_ki*c/a - moved into that row's bounds here -
@@ -961,7 +1033,10 @@ Model build_reduced(const Workspace& w, const Model& model, ObjSense sense,
     if (!w.row_alive[sz(i)]) continue;
     for (Int e = w.a->row_begin(i); e < w.a->row_end(i); ++e) {
       const Int j = w.a->index()[sz(e)];
-      const double v = w.a->value()[sz(e)];
+      double v = w.a->value()[sz(e)];
+      for (const auto& ov : w.coefficient_overrides) {
+        if (ov.first == e) { v = ov.second; break; }
+      }
       const Int sub = w.sub_of_col.empty() ? -1 : w.sub_of_col[sz(j)];
       if (sub >= 0) {
         // This column was substituted out. Its share of the row becomes a
@@ -1093,6 +1168,7 @@ PresolveResult presolve(const Model& model, const PresolveOptions& options) {
     if (!changed) break;
   }
 
+  if (!w.infeasible && !w.unbounded) tighten_coefficients(w, options, w.integral);
   if (!w.infeasible && !w.unbounded) substitute_doubletons(w, options, allow_removal);
 
   if (w.unbounded) {

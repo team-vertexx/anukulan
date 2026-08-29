@@ -289,6 +289,8 @@ int command_presolve(const std::vector<std::string>& args) {
       options.free_column_singletons = false;
     } else if (a == "--no-dual-fixing") {
       options.dual_fixing = false;
+    } else if (a == "--no-coeff-tightening") {
+      options.coefficient_tightening = false;
     } else if (a == "--no-doubletons") {
       options.doubleton_equations = false;
     } else if (a == "--rows-only") {
@@ -334,6 +336,7 @@ int command_presolve(const std::vector<std::string>& args) {
         << "\"free_column_singletons\":" << c.free_column_singletons << ","
         << "\"doubleton_equations\":" << c.doubleton_equations << ","
         << "\"dual_fixed_columns\":" << c.dual_fixed_columns << ","
+        << "\"coefficients_tightened\":" << c.coefficients_tightened << ","
         << "\"bounds_tightened\":" << c.bounds_tightened << ","
         << "\"rounds\":" << c.rounds << ","
         << "\"seconds\":" << r.seconds << "}\n";
@@ -596,6 +599,9 @@ int command_solve(const std::vector<std::string>& args) {
     } else if (a == "--presolve-no-dual-fixing") {
       use_presolve = true;
       presolve_options.dual_fixing = false;
+    } else if (a == "--presolve-no-coeff-tightening") {
+      use_presolve = true;
+      presolve_options.coefficient_tightening = false;
     } else if (a == "--presolve-no-doubletons") {
       use_presolve = true;
       presolve_options.doubleton_equations = false;

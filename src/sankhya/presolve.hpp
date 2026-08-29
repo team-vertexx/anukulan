@@ -120,6 +120,41 @@ struct PresolveOptions {
   // bounds honest. What that leaves on the table has not been measured.
   bool doubleton_equations = true;
 
+  // Coefficient tightening on rows holding integer columns. Where a row can
+  // only be violated when one integer column sits at its bound, that column's
+  // coefficient and the row's bound can both come down by the same amount:
+  //
+  //   for  sum a_j x_j <= b  with a_k > 0, x_k integer, and
+  //        maxact without k <= b  <  maxact without k + a_k
+  //   let  d = maxact without k + a_k - b
+  //   then a_k := a_k - d  and  b := b - d
+  //
+  // Every integer-feasible point survives - at x_k below its upper bound the
+  // row was already slack and still is, and at the upper bound both sides move
+  // by d - while the LP relaxation gets strictly tighter. Achterberg et al.
+  // 2019, section 3.3.
+  //
+  // This is the second reduction here that rewrites A, so like the doubleton it
+  // runs after the others and is applied when the reduced matrix is assembled.
+  // It does nothing on a pure LP, since it needs an integer column to stand on.
+  //
+  // Off, and that is measured rather than assumed. Across the seven MIPLIB
+  // instances it fires three times, all on p0201, and nowhere else. Those three
+  // move p0201's root LP bound from 6875.00000004 to 6875.00000002 - which is
+  // to say they move nothing, the difference being noise. A reduction that
+  // fires on one instance in seven and changes no bound has not earned a place
+  // in the default path, and the cost of asking is a pass over the rows.
+  //
+  // It is kept because it is correct and because the shape is right; what is
+  // missing is coverage. As written it only handles a positive coefficient in
+  // the <= reading, so the mirror case - a negative coefficient, which is the
+  // same rule after reflecting the column about its bounds - is skipped
+  // entirely, and it stops after the first tightening in a row because the
+  // row's activity is stale by then. Fixing both would perhaps double the three
+  // hits. Three that move nothing doubled is six that move nothing, which is
+  // why that was not done.
+  bool coefficient_tightening = false;
+
   Int max_rounds = 30;
 
   // How close a reduction has to be to exact before it is allowed to fire.
@@ -288,6 +323,7 @@ struct PresolveCounts {
   Int free_column_singletons = 0;
   Int doubleton_equations = 0;
   Int dual_fixed_columns = 0;
+  Int coefficients_tightened = 0;
   Int bounds_tightened = 0;
   Int bounds_made_finite = 0;   // was infinite, now is not
   double largest_new_finite_bound = 0.0;

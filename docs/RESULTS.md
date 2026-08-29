@@ -96,6 +96,18 @@ Worth recording how nearly this was written off: the first four instances it was
 checked on all reported zero, which reads exactly like a reduction that does not
 fire. Four is not a sample.
 
+**Coefficient tightening is implemented and off**, which is the opposite outcome
+and worth recording for the same reason. Across the seven MIPLIB instances it
+fires three times, all on `p0201`, and those three move its root LP bound from
+6875.00000004 to 6875.00000002 — noise. A reduction that fires on one instance
+in seven and moves no bound does not belong in the default path.
+
+It is kept rather than deleted because it is correct and the shape is right;
+what it lacks is coverage. As written it handles only a positive coefficient in
+the `≤` reading, skipping the mirror case, and stops after one tightening per
+row. Fixing both might double three hits, and six hits that move nothing is
+still nothing — which is why that was not done.
+
 Round trip over all 88 instances, presolved answer against plain, `--tol=1e-6`:
 
 | | off | on |
