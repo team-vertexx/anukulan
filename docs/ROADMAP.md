@@ -203,6 +203,25 @@ than only a CLI.
 
 ---
 
+## The benchmark to be measured against
+
+[Mittelmann's LPfeas benchmark](https://plato.asu.edu/ftp/lpfeas.html) is where
+cuPDLPx and HPR-LP — the two papers this solver's first-order method comes from
+— are actually scored. The reference table is copied into
+[data/reference/lpfeas_mittelmann.md](../data/reference/lpfeas_mittelmann.md) so
+our runs have something external to be checked against.
+
+Eight of its forty public instances are already in this repository. Running them
+at `--tol=1e-6` and reporting solved-or-not against that table is a comparison a
+reader can check, and it is worth more than any number computed against a rubric
+we wrote ourselves. Wall-clock will not compare — their GPU runs are on a B200
+and their CPU runs on an i7-11700K — which is exactly why solved-or-not is the
+line to report.
+
+One number from it worth keeping in view: OR-Tools' PDLP, the same algorithm
+family this implements, solves 50 of 65 there while HiGHS solves 55 and cuPDLPx
+57. The method is not automatically good. The implementation is most of it.
+
 ## For SIH specifically
 
 The competition timeline is not the same as the engineering one, and conflating
