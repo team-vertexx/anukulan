@@ -502,3 +502,226 @@ If Phase A is still red on 5 Sep, that week's work is Phase A and nothing else.
 3. Start Phase 1: CMake skeleton, sparse types, MPS reader.
 
 Phase 1 is ready to start as soon as this plan is approved.
+
+---
+---
+
+# Part II — The plan revisited, 30 August 2026
+
+Everything above is what I thought on 22 August, before writing a line of solver
+code. I am leaving it exactly as it was, because a plan that gets quietly edited
+to match what happened is not a record of anything.
+
+This part is the honest review: what the plan got right, where it was thinking
+in one direction only, and what I would write differently now.
+
+## 13. Where the plan turned out to be right
+
+- **Reader first.** Correct, and for the reason given: nothing could be checked
+  until models could be read. Every later measurement rests on it.
+- **Scaling before anything else in the first-order method.** Non-negotiable, as
+  written. Netlib has instances spanning ten orders of magnitude and the method
+  does not converge on them unscaled.
+- **Checking against published optima rather than against itself.** This is the
+  single most valuable rule in the document. Almost every bug found since was
+  found because an external number disagreed.
+- **R6 — "GMI cuts silently invalid, validate against known optimal integer
+  solutions before trusting any of it."** This was the most prescient line in
+  the plan. A cut generator did ship invalid, twice.
+
+## 14. Where the plan was thinking in one direction
+
+### 14.1 Every risk was about finishing. None was about being wrong.
+
+Read the risk register again. R2 solo capacity, R5 simplex slips, R10 September
+disappears — ten of eleven risks are variations of *will I get it built in
+time*. The tiering, the cut rule, the "first thing cut if the schedule slips" —
+all of it is scheduling.
+
+The schedule risk did not materialise. Everything through T4 was built, and
+built earlier than planned. **MILP, explicitly named as the first thing to cut,
+is instead where the most recent and strongest work went.**
+
+What did materialise, repeatedly, is the risk the register almost entirely
+missed: **the solver being confidently wrong.**
+
+- Presolve declared a feasible model infeasible, because my own 1e-9 bound
+  padding manufactured forcing rows.
+- The dual simplex reported a wrong answer as optimal — `fit1p` at 33,609
+  against a true 9,146.38, feasible, with a row violation of 2.8e-14.
+- A cover cut removed feasible integer points whenever a binary sat at exactly
+  0.5, and 426 separations at random points never landed there.
+- A sparse LDL' silently became a diagonal factorisation, and its test passed.
+- The GPU never uploaded the dual iterate, which was invisible for as long as
+  everything started at zero.
+- `fiber` came back as a *proved* optimum 60.8% away from the published one,
+  with a matching dual bound and no numerical complaint — two separate bugs,
+  a bound crossing of 1.78e-15 treated as a proof of infeasibility, and a cover
+  cut derived from an earlier cut.
+
+R6 was right in spirit and far too narrow in scope. It named one cut family. The
+correct version of that risk is: **any component that can discard part of the
+search space can discard the answer, and none of them will tell you.** A slow
+solver announces itself. A wrong one hands you a confident number.
+
+If I were writing the register today, R0 would be that, and the mitigation would
+be the tooling rather than the vigilance: cut validity by enumeration over small
+programs, a dual-feasibility check the simplex runs on itself before claiming
+optimality, a survey against a hundred published optima rather than seven, and a
+debug-solution tracker that names the exact step at which a known-correct answer
+is thrown away. Each of those exists now, and each exists because something got
+through.
+
+### 14.2 "Build it, then measure" should have been "measure, then decide"
+
+The plan sequences work by tier and by week. It never asks, before a piece of
+work, **how much is actually available on our instances**.
+
+That question, asked late, has since saved weeks:
+
+- **Coefficient tightening** — implemented in full, fires three times across
+  seven instances, moves the root bound by nothing. Off.
+- **Parallel column merging** — 20% of Netlib columns are parallel, which looks
+  compelling until the objective condition cuts it to 1,471 columns out of
+  159,369. Measured, not built.
+- **Hypersparsity** — the literature reports a 5.2× mean speedup. Their test set
+  was selected for the property. On ours only 4 of 21 instances qualify and the
+  overall rate is 15.4% against a 60% threshold. Six to eight weeks of work to
+  help four instances.
+- **Forrest–Tomlin updates** — a sampling profile of the slowest instance puts
+  `LuFactor::factorize` at 11 samples out of about 4,500. It is aimed at
+  something that is not hot.
+
+None of these would have been caught by the plan as written. All four are
+standard, respectable, in every textbook. The only thing that separates the ones
+worth building from the ones that are not is a measurement taken **first**.
+
+### 14.3 T3's reasoning was overturned by measurement
+
+The plan chose "QP by ADMM, **indirect variant**" and gave the reason: it reuses
+the existing SpMV and "saves me writing a sparse LDL' with AMD ordering. That is
+a week of solo time saved."
+
+The direct sparse LDL' got written anyway, and it is **1.52× faster** than the
+indirect solve. The week was worth spending.
+
+But the more interesting half is what the measurement said next: raising the
+fill budget, which puts *more* instances on the direct path, makes the whole set
+**slower** — 20× budget gives 62.15 s, 50× gives 58.86 s, 200× gives 60.01 s.
+Which means AMD ordering, the thing the plan was avoiding, would improve exactly
+the instances that gain nothing from being on the direct path at all.
+
+The plan's conclusion was wrong and its instinct about cost was right, and only
+measurement separates those.
+
+## 15. The interior-point decision, from every side
+
+The plan disposes of this in eight words: *"no interior-point method — roadmap
+slide, stated openly"*. Honest, but not reasoned. Here it is properly.
+
+**The case against, as the plan implicitly had it.** An IPM needs a sparse
+Cholesky of `A·D·Aᵀ` (or an LDL' of the augmented system) at every iteration,
+with a fill-reducing ordering. That is a large piece of machinery that nothing
+else in the project reuses.
+
+**The case against that the plan did not state, and which is stronger.** It
+serves neither of the two goals:
+
+- **MILP needs warm starts.** The dual simplex restarts from the parent's basis
+  and finishes a child in about three pivots — 18,772 of 18,775 relaxations warm
+  start on the measured set. An IPM does not warm start usefully, so every node
+  would solve from scratch. Branch-and-bound as built would not survive it.
+- **The GPU needs matrix-vector products.** An IPM's time goes into a sparse
+  factorisation, which is the part that parallelises worst.
+
+**The case *for*, which the plan never considered at all.** First-order methods
+converge linearly, and that is precisely where this solver is weakest — it is
+why `--gap-tol` exists and why feasibility polishing had to be built. A
+second-order method gives high accuracy natively. The recent literature makes
+this argument explicitly: the linear rate of first-order methods restricts them
+where fast convergence to tight tolerances is required, which is the motivation
+given for revisiting second-order methods on GPUs.
+
+**And the ground has moved since 22 August.** Three things I did not know then:
+
+- NVIDIA shipped **cuDSS**, a GPU direct sparse solver with Cholesky, LDL' and
+  LU — so the factorisation an IPM needs is now available on the device rather
+  than being a research problem.
+- **Condensed-space IPM** methods reshape the KKT system into a
+  symmetric-positive-definite form that factorises far better on a GPU, and the
+  reported result is that the structure of the condensed system offsets the
+  ill-conditioning it introduces
+  ([arXiv:2405.14236](https://arxiv.org/html/2405.14236v2),
+  [Math Prog Comp](https://link.springer.com/article/10.1007/s12532-026-00335-0)).
+- There is active 2025–26 work on exactly this
+  ([GPU Implementation of Second-Order LP and NLP Solvers, arXiv:2508.16094](https://arxiv.org/pdf/2508.16094)).
+
+**So does the decision still hold? Yes — but for a different reason than the
+plan gave.**
+
+It does not hold because "IPM cannot work on a GPU". That was never quite true
+and is less true now. It holds because:
+
+1. The accuracy gap an IPM would fill **is already filled by the simplex**,
+   which is built, exact, and gets 16 of 16 Netlib instances with published
+   optima on both algorithms.
+2. Even with cuDSS and condensed-space methods, the reported gains for fully
+   GPU-based interior-point LP solvers **remain modest** — the sparse
+   factorisation is still the bottleneck and still the part GPUs are worst at.
+3. It would still not warm start for branch-and-bound.
+
+That is a decision I can defend under questioning. "We did not have time" is
+not, and it is what the original line would have forced me to say.
+
+**What would change it:** if the refinery model grew to a size where the simplex
+becomes impractical *and* high accuracy is genuinely required, a condensed-space
+IPM on cuDSS becomes the right third path. That is the trigger, written down, so
+the decision can be revisited on evidence rather than on mood.
+
+## 16. The risk register, rewritten
+
+| # | Risk | Why it is here now |
+|---|---|---|
+| **R0** | **A component that prunes, reduces or cuts discards the answer, and reports success** | This is what actually happened, six times. Mitigation is tooling, not care: enumeration tests for cuts, a self-check before any optimality claim, a hundred published optima rather than seven, and a debug-solution tracker |
+| **R0b** | **A tuned constant is fitted to too few instances** | Every branch-and-bound default was chosen against seven instances and every commit that set one says so. The wider set found a wrong answer within minutes of existing. Re-fit against the hundred |
+| **R0c** | **A measurement is wrong and a good change gets discarded** | Twice a benchmark reported a regression that did not exist, because it ran three sixty-second solves per instance back to back. Both times the change was a pure improvement. Measure on a quiet machine, and re-run anything surprising alone before believing it |
+| R4 | GPU box unavailable at the finale | Unchanged and still live. Recorded fallback stays mandatory |
+| R7 | Jury reads "from scratch" more strictly than I do | Unchanged. Strengthened by the fact that the method now has a name: Proposition 3.1 of [arXiv:2509.23903](https://arxiv.org/abs/2509.23903) shows what is implemented here **is** a Halpern Peaceman–Rachford method, not an approximation of one |
+| R9 | Benchmark numbers not reproducible under questioning | Stronger now than the plan hoped: every table has the command that regenerates it, and the external reference tables are copied into the repository so they cannot drift |
+| ~~R2, R5, R10~~ | Solo capacity, simplex slipping, September disappearing | Did not materialise. Everything through T4 was built ahead of schedule |
+
+## 17. What actually remains
+
+Not a schedule this time. An ordered list, with the reason each one is in that
+position — and the first item is not an improvement at all.
+
+1. **Verify on a GPU.** Nothing built since the last run has been tested on
+   hardware, and the CPU genuinely hides a class of bug that only appears on the
+   device. This is closing a risk, not adding a feature.
+2. **Re-fit the branch-and-bound constants against a hundred instances rather
+   than seven.** The tooling now exists. The seven-instance fits are the largest
+   remaining source of the kind of error that does not announce itself.
+3. **Move the convergence check onto the device.** On one instance 79% of solve
+   time is outside the kernels. Half of this is done.
+4. **Report against Mittelmann's LPfeas benchmark.** Eight of its forty public
+   instances are already here and the reference table is in
+   `data/reference/`. Solved-or-not at 1e-6 against a published table is worth
+   more than any number computed against a rubric of our own.
+5. **Continuous integration.** The test suite is good and nothing runs it
+   automatically.
+
+What is deliberately *not* on this list, each for a measured reason given above:
+interior point, hypersparsity, Forrest–Tomlin, parallel columns, coefficient
+tightening.
+
+## 18. The one line I would add to the top of the original plan
+
+The plan opens by fixing scope so that under pressure I cut from the bottom
+instead of half-finishing four things. That was right.
+
+What it should also have said: **a feature that is missing is visible, and a
+feature that is wrong is not.** Every hour spent on something that makes
+wrongness visible — a test that enumerates, a check the solver runs on itself, a
+wider instance set, a tool that names the step where an answer was lost — bought
+more than an hour spent on the next feature. That is not a lesson I had on 22
+August, and it is the one I would most want to have had.
