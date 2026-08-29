@@ -31,11 +31,16 @@ double inf_norm(const std::vector<double>& v) {
 // from below needs lambda_j >= 0; only from above needs lambda_j <= 0; a free
 // variable needs lambda_j = 0. Whatever is left over is the dual residual.
 void reduced_costs(const StandardLp& lp, const std::vector<double>& y,
-                   std::vector<double>* lambda, std::vector<double>* scratch) {
-  scratch->resize(sz(lp.num_cols()));
-  lp.kt.multiply(y.data(), scratch->data());
+                   std::vector<double>* lambda, std::vector<double>* scratch,
+                   const std::vector<double>* kty = nullptr) {
+  const std::vector<double>* product = kty;
+  if (product == nullptr || product->size() != sz(lp.num_cols())) {
+    scratch->resize(sz(lp.num_cols()));
+    lp.kt.multiply(y.data(), scratch->data());
+    product = scratch;
+  }
   lambda->resize(sz(lp.num_cols()));
-  for (std::size_t j = 0; j < lambda->size(); ++j) (*lambda)[j] = lp.c[j] - (*scratch)[j];
+  for (std::size_t j = 0; j < lambda->size(); ++j) (*lambda)[j] = lp.c[j] - (*product)[j];
 }
 
 }  // namespace
@@ -58,14 +63,25 @@ std::string to_string(PdhgStatus status) {
 
 PdhgResidual evaluate_residual(const StandardLp& lp, const std::vector<double>& x,
                                const std::vector<double>& y) {
+  return evaluate_residual(lp, x, y, nullptr, nullptr);
+}
+
+PdhgResidual evaluate_residual(const StandardLp& lp, const std::vector<double>& x,
+                               const std::vector<double>& y,
+                               const std::vector<double>* kx,
+                               const std::vector<double>* kty) {
   PdhgResidual r;
   std::vector<double> scratch;
 
-  lp.primal_residual(x, &scratch, &r.primal_residual, &r.primal_residual_inf);
+  if (kx != nullptr && kx->size() == sz(lp.num_rows())) {
+    lp.primal_residual_from(*kx, &r.primal_residual, &r.primal_residual_inf);
+  } else {
+    lp.primal_residual(x, &scratch, &r.primal_residual, &r.primal_residual_inf);
+  }
 
   std::vector<double> lambda;
   std::vector<double> work;
-  reduced_costs(lp, y, &lambda, &work);
+  reduced_costs(lp, y, &lambda, &work, kty);
 
   double dual_sq = 0.0;
   double bound_term = 0.0;
@@ -479,6 +495,14 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
 
   std::vector<double> unscaled_x;
   std::vector<double> unscaled_y;
+  // K x and K' y for the unscaled problem, recovered from the products the
+  // iteration already holds rather than recomputed. K x is sitting in k_x at
+  // the end of every step; K' y costs one product, and it is the one the next
+  // iteration would have made anyway.
+  std::vector<double> host_kx;
+  std::vector<double> host_kty;
+  std::vector<double> unscaled_kx;
+  std::vector<double> unscaled_kty;
   std::vector<double> infeasibility_work;
 
   const double tolerance = options.tolerance;
@@ -791,7 +815,32 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
 
     result.scaling.scaling.unscale_primal(cand_x, &unscaled_x);
     result.scaling.scaling.unscale_dual(cand_y, &unscaled_y);
-    const PdhgResidual r = evaluate_residual(original, unscaled_x, unscaled_y);
+
+    // The averaged candidate is a different point from the one k_x belongs to,
+    // so the shortcut only applies when the current iterate is the candidate.
+    const std::vector<double>* kx_ptr = nullptr;
+    const std::vector<double>* kty_ptr = nullptr;
+    if (options.reuse_products && !use_average) {
+      // K x = (K~ x~) / D1 and K' y = (K~' y~) / D2, since K~ = D1 K D2 with
+      // x = D2 x~ and y = D1 y~.
+      k_x.download(&host_kx);
+      backend.multiply_transpose(lp.kt, d_y.data(), kt_y.data());
+      kt_y.download(&host_kty);
+      const auto& rs = result.scaling.scaling.row_scale;
+      const auto& cs = result.scaling.scaling.col_scale;
+      unscaled_kx.resize(host_kx.size());
+      for (std::size_t i = 0; i < host_kx.size(); ++i) {
+        unscaled_kx[i] = rs[i] != 0.0 ? host_kx[i] / rs[i] : host_kx[i];
+      }
+      unscaled_kty.resize(host_kty.size());
+      for (std::size_t j = 0; j < host_kty.size(); ++j) {
+        unscaled_kty[j] = cs[j] != 0.0 ? host_kty[j] / cs[j] : host_kty[j];
+      }
+      kx_ptr = &unscaled_kx;
+      kty_ptr = &unscaled_kty;
+    }
+    const PdhgResidual r =
+        evaluate_residual(original, unscaled_x, unscaled_y, kx_ptr, kty_ptr);
 
     if (!std::isfinite(r.primal_residual) || !std::isfinite(r.dual_residual)) {
       status = PdhgStatus::kNumericalError;

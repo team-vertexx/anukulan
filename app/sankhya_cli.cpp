@@ -558,6 +558,8 @@ int command_solve(const std::vector<std::string>& args) {
       options.pid_primal_weight = true;
     } else if (a == "--no-halpern") {
       options.halpern = false;
+    } else if (a == "--no-reuse-products") {
+      options.reuse_products = false;
     } else if (a == "--no-polish") {
       options.polish_feasibility = false;
     } else if (a == "--no-exit-polish") {

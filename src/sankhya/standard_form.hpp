@@ -55,6 +55,13 @@ struct StandardLp {
   void primal_residual(const std::vector<double>& x, std::vector<double>* scratch,
                        double* two_norm, double* inf_norm) const;
 
+  // The same, from a K x that has already been computed. On the GPU that
+  // product is sitting in device memory at the end of every iteration, so
+  // recomputing it on the host is the single largest cost of a convergence
+  // check - two thirds of the work of one, for a number already known.
+  void primal_residual_from(const std::vector<double>& kx, double* two_norm,
+                            double* inf_norm) const;
+
   bool validate(std::string* error) const;
 };
 

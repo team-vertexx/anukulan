@@ -19,11 +19,17 @@ void StandardLp::primal_residual(const std::vector<double>& x,
                                  double* inf_norm) const {
   scratch->resize(sz(k.rows()));
   k.multiply(x.data(), scratch->data());
+  primal_residual_from(*scratch, two_norm, inf_norm);
+}
 
+void StandardLp::primal_residual_from(const std::vector<double>& scratch_in,
+                                      double* two_norm, double* inf_norm) const {
+  const std::vector<double>* scratch_ptr = &scratch_in;
+  const std::vector<double>& scratch = *scratch_ptr;
   double sum_sq = 0.0;
   double worst = 0.0;
   for (Int i = 0; i < k.rows(); ++i) {
-    const double row = (*scratch)[sz(i)];
+    const double row = scratch[sz(i)];
     // Equality rows are violated in either direction; inequality rows only when
     // the activity falls below the right-hand side.
     const double violation =

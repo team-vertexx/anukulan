@@ -346,6 +346,11 @@ struct PdhgOptions {
   // it burns its whole budget and the caller has to guess. That is tolerable for
   // a standalone solve and ruinous inside branch and bound, where most nodes are
   // infeasible and a guess makes the dual bound worthless as a proof.
+  // Build the convergence check's residuals from the products the iteration
+  // already computed, rather than recomputing K x and K' y on the host. Off is
+  // the old behaviour and exists to measure this.
+  bool reuse_products = true;
+
   bool detect_infeasibility = true;
   double infeasibility_tolerance = 1e-8;
 
@@ -492,6 +497,19 @@ PdhgResult solve_pdhg(const StandardLp& lp, const PdhgOptions& options = {});
 // solver did not produce.
 PdhgResidual evaluate_residual(const StandardLp& lp, const std::vector<double>& x,
                                const std::vector<double>& y);
+
+// The same, given products that have already been computed: `kx` is K x and
+// `kty` is K' y, both for the unscaled problem. Either may be null, in which
+// case it is computed here.
+//
+// This exists for the GPU. A convergence check costs two sparse products, and
+// on the device both are already available or one cheap kernel away, while on
+// the host they are the bulk of the check. graph40-40 spends 79% of its solve
+// outside the kernels, and this is a large part of that.
+PdhgResidual evaluate_residual(const StandardLp& lp, const std::vector<double>& x,
+                               const std::vector<double>& y,
+                               const std::vector<double>* kx,
+                               const std::vector<double>* kty);
 
 // Largest singular value of K, by power iteration on K'K. Returns 0 for an empty
 // matrix.
