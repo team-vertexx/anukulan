@@ -277,6 +277,16 @@ BranchAndBoundResult solve_milp(const Model& model,
     return out->optimal;
   };
   if (options.root_cuts && !integer_columns.empty()) {
+    // Kept so the whole cut effort can be undone if it turns out not to have
+    // paid. Measured in the standard form, where the objective is always a
+    // minimisation and a valid cut can only raise the bound - the model-sense
+    // numbers reported below move in whichever direction the model's own sense
+    // implies, which is not what a threshold wants to read.
+    const StandardLp uncut = working;
+    double root_std_before = 0.0;
+    double root_std_after = 0.0;
+    bool have_root_std = false;
+
     for (Int round = 0; round < options.cut_rounds; ++round) {
       // Through the same solver the nodes use, because that is what makes the
       // tableau available - and Gomory cuts are read off the tableau.
@@ -293,6 +303,11 @@ BranchAndBoundResult solve_milp(const Model& model,
       result.root_bound_after_cuts =
           sf.lp.objective_scale * sf.lp.standard_objective(root_solve.x) +
           sf.lp.objective_offset;
+      root_std_after = working.standard_objective(root_solve.x);
+      if (!have_root_std) {
+        root_std_before = root_std_after;
+        have_root_std = true;
+      }
 
       CutOptions cut_options;
       cut_options.max_cuts = options.cuts_per_round;
@@ -336,6 +351,28 @@ BranchAndBoundResult solve_milp(const Model& model,
         }
       }
       result.cuts_added += static_cast<Int>(cuts.size());
+    }
+
+    // Did any of that move the bound? The final root solve is the one that
+    // answers it, since the loop above measures before adding the last round's
+    // cuts.
+    if (options.adaptive_cuts && have_root_std && result.cuts_added > 0) {
+      Node final_probe;
+      final_probe.lower = working.lower;
+      final_probe.upper = working.upper;
+      NodeSolution final_solve;
+      if (solve_node(final_probe, &final_solve)) {
+        root_std_after = working.standard_objective(final_solve.x);
+        result.root_bound_after_cuts =
+            sf.lp.objective_scale * root_std_after + sf.lp.objective_offset;
+      }
+      result.root_bound_rise = (root_std_after - root_std_before) /
+                               std::fmax(1.0, std::fabs(root_std_before));
+      if (result.root_bound_rise < options.cut_bound_improvement) {
+        // The cuts cost every node below here and bought nothing measurable.
+        working = uncut;
+        result.cuts_discarded = true;
+      }
     }
   }
 

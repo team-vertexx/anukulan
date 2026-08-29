@@ -849,6 +849,12 @@ int command_milp(const std::vector<std::string>& args) {
       options.gomory_cuts = true;
     } else if (a == "--no-reduced-cost-fixing") {
       options.reduced_cost_fixing = false;
+    } else if (a == "--no-adaptive-cuts") {
+      options.adaptive_cuts = false;
+    } else if (value_of(a, "--cut-threshold=", &v)) {
+      options.cut_bound_improvement = v;
+    } else if (a == "--no-gomory") {
+      options.gomory_cuts = false;
     } else if (a == "--no-cuts") {
       options.root_cuts = false;
     } else if (value_of(a, "--stall=", &v)) {
@@ -926,6 +932,8 @@ int command_milp(const std::vector<std::string>& args) {
         << "\"heuristic_successes\":" << r.heuristic_successes << ","
         << "\"cuts_added\":" << r.cuts_added << ","
         << "\"gomory_cuts_added\":" << r.gomory_cuts_added << ","
+        << "\"cuts_discarded\":" << (r.cuts_discarded ? "true" : "false") << ","
+        << "\"root_bound_rise\":" << r.root_bound_rise << ","
         << "\"warm_started_nodes\":" << r.warm_started_nodes << ","
         << "\"simplex_iterations\":" << r.simplex_iterations << ","
         << "\"reduced_cost_tightenings\":" << r.reduced_cost_tightenings << ","

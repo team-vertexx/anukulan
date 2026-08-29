@@ -316,25 +316,52 @@ build/sankhya milp data/miplib/gt2.mps --no-reduced-cost-fixing
 build/sankhya milp data/miplib/gt2.mps
 ```
 
-Gomory cuts **off** by default. That was first measured before reduced-cost
-fixing existed, so it was re-measured after — this codebase's rule is that a
-tuned number above a changed layer is stale — and the old answer survived:
+### Cuts, decided per instance
 
-| instance | no gomory | with gomory | |
+Whether a cut family pays is a property of the instance, not of the family.
+Gomory takes `khb05250` from 4,247 nodes to 143 and makes four other instances
+worse — no single on-or-off answer expresses that.
+
+What separates the two groups is how far the cuts move the root bound, measured
+as the relative rise in the standard-form root objective. It needs nothing the
+solver does not already have; in particular it does not need the optimum:
+
+| instance | root bound rise | tree with cuts | decision |
 |---|---|---|---|
-| **khb05250** | 4,247 nodes | **143 nodes** | **0.03×** |
-| p0201 | 2,569 | 2,263 | 0.88× |
-| gt2 | 1,167 | 1,181 | 1.01× |
-| flugpl | 28,917 | 37,953 | 1.31× |
-| neos5 | 13.333% gap | 15.054% | worse |
-| gen-ip054 | 1.231% gap | 1.730% | worse |
-| mas76 | 2.778% gap | 3.599% | worse |
+| gt2 | 55.1% | 1.01× | keep |
+| khb05250 | 10.2% | **0.03×** | keep |
+| p0201 | 4.7% | 0.88× | keep |
+| neos5 | 1.3% | worse | drop |
+| flugpl | 0.41% | 1.31× | drop |
+| mas76 | 0.17% | worse | drop |
+| gen-ip054 | 0.02% | worse | drop |
 
-Two better, four worse, one neutral — so it stays off. But khb05250 swinging by
-**thirty times** is worth staring at: cut usefulness varies enormously per
-instance, and a flag that is on or off for all of them is leaving that on the
-table. Deciding per instance, on whether the root bound actually moved, is what
-a production solver does and is not implemented here.
+The three that gain are the three largest rises; the four that lose are the four
+smallest; there is a factor of three between the classes. Threshold 0.02.
+
+Against both fixed alternatives:
+
+| instance | gomory off | gomory always | **adaptive** |
+|---|---|---|---|
+| flugpl | 28,917 | 37,953 | **28,917** |
+| gt2 | 1,167 | 1,181 | 1,181 |
+| khb05250 | 4,247 | **143** | **143** |
+| p0201 | 2,569 | **2,263** | **2,263** |
+| neos5 | 13.33% gap | 15.05% | **13.33%** |
+| gen-ip054 | 1.28% gap | 1.73% | **1.28%** |
+| mas76 | 2.78% gap | 3.60% | **2.78%** |
+
+**It picks the better of the two on all seven.** The cost when it decides to
+discard is the wasted cut generation — about 1.5% of nodes on mas76, which is
+what trying costs.
+
+Two things worth stating against this. Seven instances is a small sample to fit
+a threshold on, and it could be overfitted; what argues otherwise is that the
+mechanism is not a correlation — cuts that do not move the bound have made every
+node more expensive and bought nothing. And the first run of this comparison
+reported mas76 as *worse* under adaptive; re-running it alone gave 2.778% both
+ways, twice. That first run was doing three sixty-second solves per instance
+back to back, and a measurement taken under load is not a measurement.
 
 ```bash
 build/sankhya milp data/miplib/gt2.mps

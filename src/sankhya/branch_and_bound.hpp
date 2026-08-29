@@ -130,7 +130,36 @@ struct BranchAndBoundOptions {
   // the gap closes.
   bool reduced_cost_fixing = true;
 
-  bool gomory_cuts = false;
+  // Whether a cut family is worth its cost is a property of the instance, not
+  // of the family. Gomory takes khb05250 from 4,247 nodes to 143 and makes four
+  // other instances worse, and no single on-or-off answer expresses that.
+  //
+  // So: generate the cuts, then ask whether they moved the root bound, and keep
+  // them only if they did. The measure is the relative rise in the standard-form
+  // root objective, which needs nothing the solver does not already have - in
+  // particular it does not need the optimum.
+  //
+  // Over the seven instances, that rise sorts them exactly:
+  //
+  //   gt2        55%     tree 1.01x     keep
+  //   khb05250   10.2%        0.03x     keep
+  //   p0201       4.7%        0.88x     keep
+  //   neos5       1.3%        worse     drop
+  //   flugpl      0.43%       1.31x     drop
+  //   mas76       0.18%       worse     drop
+  //   gen-ip054   0.015%      worse     drop
+  //
+  // The three that gain are the three largest rises and the four that lose are
+  // the four smallest, with a factor of three between the classes. Seven
+  // instances is a small sample to fit a threshold on and this could be
+  // overfitted; what argues against that is the mechanism, which is not a
+  // correlation - cuts that do not move the bound have made every node more
+  // expensive and bought nothing.
+  bool adaptive_cuts = true;
+  double cut_bound_improvement = 0.02;
+
+  // Now on, because the rule above is what decides per instance.
+  bool gomory_cuts = true;
 
   // Rounds in which Gomory cuts are separated when they are on at all. They are
   // read off the tableau, and after the first round that tableau describes a
@@ -195,6 +224,9 @@ struct BranchAndBoundResult {
   // Bounds tightened by reduced-cost fixing, and how many closed a range to nothing.
   Int reduced_cost_tightenings = 0;
   Int reduced_cost_fixings = 0;
+  // Cuts generated and then thrown away because they did not move the bound.
+  bool cuts_discarded = false;
+  double root_bound_rise = 0.0;
   Int dives_run = 0;
   Int cuts_added = 0;
   // Of those, how many came off the tableau rather than the model's rows.
