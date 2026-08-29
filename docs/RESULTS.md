@@ -177,6 +177,42 @@ python3 bench/cupdlpx_sweep.py no-reflect 1e-8
 python3 bench/verify_presolve.py --tol=1e-8 --abs-tol=1e-6 --both-extra="--step-scale=0.90"
 ```
 
+### The primal weight controller
+
+cuPDLPx does not publish its PID coefficients, so they were swept here. Sixteen
+Netlib instances with published optima, presolved, `--tol=1e-8`, in total
+iterations against `Kp = 0.5, Ki = Kd = 0` — which is the exponential smoothing
+the controller replaces:
+
+| Ki | | Kd | | Kp (with Kd = 0.2) | |
+|---|---|---|---|---|---|
+| 0.02 | 1.039 | 0.1 | 0.968 | 0.3 | 1.031 |
+| 0.05 | 1.138 | 0.2 | 0.943 | 0.4 | 0.945 |
+| 0.1 | 1.077 | **0.3** | **0.893** | 0.5 | 1.000 |
+| 0.2 | 1.321 | 0.4 | 0.910 | 0.6 | 0.945 |
+| | | 0.5 | 1.043 | 0.7 | 1.010 |
+| | | 0.7 | 1.616 | | |
+
+**The integral term hurts monotonically** and is left at zero. **The derivative
+term has a clean minimum at 0.3** and turns hard on both sides of it — 0.7 is
+worse than having no controller at all.
+
+That shape is what an integral term would be expected to struggle with here. The
+primal weight is not tracking a fixed setpoint; it is chasing a ratio that
+legitimately moves as the solve progresses, so accumulated error is mostly stale
+information. The derivative term, which responds to how fast the imbalance is
+changing, has something real to act on.
+
+`Kd = 0.3` is the default and is worth **10.7% of the iteration count**.
+
+Not done: the sweep moved one coefficient at a time around `Kp = 0.5`. A proper
+2-D sweep of (Kp, Kd) has not been run, and there is no reason to think the two
+are independent.
+
+```bash
+python3 bench/pid_sweep.py
+```
+
 ---
 
 ## 5. Simplex

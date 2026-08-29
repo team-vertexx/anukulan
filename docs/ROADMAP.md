@@ -50,12 +50,14 @@ PID-controlled primal weight. All four are in; see
 
 Remaining:
 
-- **settle the step scale.** 0.998 is the paper's and is fastest; 0.90 recovers
-  an instance at 1e-8 for 6% more iterations. The sweep is in RESULTS; the
-  decision belongs next to `constant_step_scale` in `pdhg.hpp`.
-- **the paper's PID coefficients are not published.** Ours are `Kp = 0.5,
-  Ki = Kd = 0`, which reproduces the old smoothing exactly. Sweeping `Ki` and
-  `Kd` is untouched work and is cheap.
+- ~~settle the step scale~~ — done, 0.90, sweep recorded next to the constant.
+- ~~sweep the PID coefficients~~ — done. The integral term hurts monotonically
+  and stays at zero; the derivative term has a clean minimum at `Kd = 0.3` and
+  turns hard on both sides. 10.7% fewer iterations. Both sweeps are in
+  [RESULTS.md §4](RESULTS.md#4-first-order-lp).
+- **still open on the primal weight:** the sweep was one coefficient at a time
+  around `Kp = 0.5`. A proper 2-D sweep of (Kp, Kd) has not been run, and the
+  two are unlikely to be independent.
 - **non-kernel time.** On graph40-40 the kernels are 0.1386 s of a 0.67 s solve,
   so 79% is outside them. Making the KKT error lazy removed two host-side
   matrix products per termination check. The larger remaining item is computing
@@ -88,7 +90,47 @@ measurement rather than assumed.
 
 ### 4. Simplex 40 → 65
 
-Three papers, in order of value:
+**Start with this, before any of the papers below.** The primal simplex does
+*two* full O(nnz(A)) passes over the matrix every iteration, and one of them
+should not exist:
+
+- `SimplexBasis::compute_duals` recomputes **every** reduced cost from scratch,
+  `d_j = c_j − π'A_j` over all nonbasic columns. It is called at the top of the
+  loop, every iteration.
+- The Devex weight update then computes the full pivot row `α_rj = ρ'A_j`, again
+  over every nonbasic column.
+
+A revised simplex updates the reduced costs from the pivot row rather than
+recomputing them:
+
+```
+θ_d      = d_q / α_rq
+d_j     ← d_j − θ_d · α_rj      for nonbasic j
+d_leaving = −θ_d
+d_q       = 0
+```
+
+and `α_rj` is exactly what the Devex pass already has in hand. Fusing the two
+turns two passes into one, and the pricing pass then only has to run at
+refactorization, for drift.
+
+Two things to be careful about:
+
+- **Phase one changes the cost vector every iteration.** `phase_cost` is rebuilt
+  from the basis infeasibilities, and the piecewise-linear phase one walks
+  through breakpoints flipping several statuses in a single step. The
+  incremental update is only valid where the costs are fixed, so phase two gets
+  it and phase one keeps recomputing — at least until someone measures whether
+  tracking the cost changes explicitly is worth it.
+- **Drift.** Recompute at each refactorization and compare, the way the dual
+  steepest edge weights are already checked.
+
+Honest note on the payoff: the whole Netlib set solves in 0.75 s today, so the
+absolute saving is small and this will not show up in a demo. It matters because
+it is the difference between a revised simplex and one that recomputes what it
+already knows, and because everything below gets measured against it.
+
+Then, three papers in order of value:
 
 - **Hall and McKinnon (2005), hypersparsity** — the single biggest jump for
   Netlib-scale problems. When the right-hand side of an FTRAN/BTRAN is sparse,

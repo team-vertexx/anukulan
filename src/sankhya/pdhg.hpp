@@ -311,10 +311,28 @@ struct PdhgOptions {
   // so the defaults below reproduce the old behaviour exactly and the two extra
   // terms can be measured one at a time. cuPDLPx does not publish its
   // coefficients, so these are ours to find.
+  // cuPDLPx does not publish its coefficients, so these were swept here. Over
+  // sixteen Netlib instances with published optima, presolved, at 1e-8,
+  // measured in total iterations against Kp = 0.5 with the other two at zero -
+  // which is the exponential smoothing this replaces:
+  //
+  //   Ki  0.02  1.039     Kd  0.1  0.968      Kp  0.3  1.031
+  //       0.05  1.138         0.2  0.943          0.4  0.945 (with Kd 0.2)
+  //       0.1   1.077         0.3  0.893          0.5  1.000
+  //       0.2   1.321         0.4  0.910          0.6  0.945 (with Kd 0.2)
+  //                           0.5  1.043          0.7  1.010
+  //                           0.7  1.616
+  //
+  // The integral term hurts monotonically and is left at zero. The derivative
+  // term has a clean minimum at 0.3 and turns hard on both sides of it. That
+  // shape is what an integral term would be expected to cause trouble with
+  // here: the primal weight is not tracking a fixed setpoint, it is chasing a
+  // ratio that legitimately moves as the solve progresses, so accumulated error
+  // is mostly stale information.
   bool pid_primal_weight = true;
   double primal_weight_kp = 0.5;
   double primal_weight_ki = 0.0;
-  double primal_weight_kd = 0.0;
+  double primal_weight_kd = 0.3;
 
   ScalingOptions scaling;
 
