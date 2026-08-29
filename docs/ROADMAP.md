@@ -157,8 +157,28 @@ than it sounds.
 > qualitative ranking is confirmed by secondary sources; the specific numbers
 > are **not verified** and should not be quoted.
 
+**What the seven-instance set actually says is needed.** Diagnosed by raising
+the node limit and watching what moved:
+
+- `flugpl` was only ever stopped by the node limit. Fixed.
+- `mas76` and `neos5` **already hold the published optimum** and cannot prove it.
+  More search does not help; `neos5`'s bound is identical at 20,000 and 200,000
+  nodes. These need a stronger relaxation — cuts — not heuristics and not nodes.
+- `gen-ip054` improves slowly with search: 2.621% gap at 20k, 1.231% at 617k.
+
+So for this set, **primal heuristics are the wrong next thing** — the incumbents
+are already optimal on two of the three unsolved instances. The bound is what is
+missing. That may not generalise past seven instances, but it is what these say.
+
+**Cut usefulness varies enormously per instance.** Gomory takes khb05250 from
+4,247 nodes to 143 and makes four others worse. A single on/off flag cannot
+express that. Deciding per instance — enable a cut family, measure whether the
+root bound actually moved, keep it only if it did — is what production solvers
+do and is the highest-value cut work here.
+
 In order:
 
+- **per-instance cut selection** — see above; the 30× on khb05250 is sitting there
 - **node presolve** — bound tightening at each node
 - **reliability branching** — pseudocost plus strong branching, replacing plain pseudocost
 - **primal heuristics** — feasibility pump, RINS. See Berthold, *A computational

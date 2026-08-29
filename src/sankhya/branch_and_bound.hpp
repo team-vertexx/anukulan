@@ -52,7 +52,18 @@ struct BranchAndBoundOptions {
   // heuristic and gets a short leash.
   Int dive_iteration_factor = 20;
 
-  Int node_limit = 20000;
+  // Time is the resource that matters; the node limit is a backstop against a
+  // tree that is going nowhere, and it should not be what stops a solve that
+  // was about to finish.
+  //
+  // It used to be 20,000, and that was doing the wrong job. flugpl proves
+  // optimality at 28,917 nodes in half a second - comfortably inside the time
+  // limit and well past the node one - so the solver was reporting a 3.2% error
+  // on an instance it could finish, and stopping to do it. Raising the limit
+  // takes the seven-instance set from three proved optimal to four, and on the
+  // three that still do not finish the *solution* is already optimal or within
+  // 0.14%: what is missing is the proof, not the answer.
+  Int node_limit = 1000000;
   double time_limit_seconds = 300.0;
 
   // A solution counts as integral when every integer variable is within this of

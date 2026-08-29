@@ -262,15 +262,31 @@ Measured and **not** adopted, recorded so they are not retried:
 
 ## 6. MILP
 
-| instance | gap | nodes |
-|---|---|---|
-| flugpl | 0.000% | 29,927 |
-| gt2 | 0.000% | 7,961 |
-| khb05250 | 0.000% | 3,561 |
-| neos5 | 0.000% | 3,314 |
-| p0201 | 0.000% | 2,853 |
-| gen-ip054 | 0.330% | 304,799 |
-| mas76 | 0.562% | 128,547 |
+At the shipped defaults — node limit 1,000,000, 60 s here:
+
+| instance | status | nodes | gap | error vs published |
+|---|---|---|---|---|
+| flugpl | **optimal** | 28,917 | 0.000% | 0.000% |
+| gt2 | **optimal** | 1,167 | 0.000% | 0.000% |
+| khb05250 | **optimal** | 4,247 | 0.000% | 0.000% |
+| p0201 | **optimal** | 2,569 | 0.000% | 0.000% |
+| mas76 | time limit | 220,148 | 2.778% | **0.000%** |
+| neos5 | time limit | 9,937 | 13.333% | **0.000%** |
+| gen-ip054 | time limit | 617,387 | 1.231% | 0.140% |
+
+**Four of seven proved optimal; on the other three the solution is already
+optimal or within 0.14%.** What is missing there is the proof, not the answer —
+`neos5` and `mas76` both hold the published optimum and cannot show it.
+
+That distinction was invisible until the node limit was fixed. It used to be
+20,000, which stopped `flugpl` half a second before it would have proved
+optimality, and the table then reported a 3.2% error on an instance the solver
+can finish. Time is the resource that matters; a node limit that binds first is
+measuring the limit rather than the solver.
+
+`neos5` is the interesting one. Its bound does not move at all — 13.333% at
+20,000 nodes and 13.333% at 200,000 — so more search is not the answer there.
+That is a dual-bound problem, which means cuts, not heuristics or nodes.
 
 Warm starts on 18,772 of 18,775 relaxations, 2.9 simplex iterations per node.
 
@@ -300,14 +316,25 @@ build/sankhya milp data/miplib/gt2.mps --no-reduced-cost-fixing
 build/sankhya milp data/miplib/gt2.mps
 ```
 
-Gomory cuts **off** by default — better root bounds on all seven, worse tree on
-three:
+Gomory cuts **off** by default. That was first measured before reduced-cost
+fixing existed, so it was re-measured after — this codebase's rule is that a
+tuned number above a changed layer is stale — and the old answer survived:
 
-| | no gomory | with gomory |
-|---|---|---|
-| gen-ip054 | 0.528% | 0.847% |
-| gt2 | 5.556% | 11.112% |
-| mas76 | 0.562% | 1.593% |
+| instance | no gomory | with gomory | |
+|---|---|---|---|
+| **khb05250** | 4,247 nodes | **143 nodes** | **0.03×** |
+| p0201 | 2,569 | 2,263 | 0.88× |
+| gt2 | 1,167 | 1,181 | 1.01× |
+| flugpl | 28,917 | 37,953 | 1.31× |
+| neos5 | 13.333% gap | 15.054% | worse |
+| gen-ip054 | 1.231% gap | 1.730% | worse |
+| mas76 | 2.778% gap | 3.599% | worse |
+
+Two better, four worse, one neutral — so it stays off. But khb05250 swinging by
+**thirty times** is worth staring at: cut usefulness varies enormously per
+instance, and a flag that is on or off for all of them is leaving that on the
+table. Deciding per instance, on whether the root bound actually moved, is what
+a production solver does and is not implemented here.
 
 ```bash
 build/sankhya milp data/miplib/gt2.mps
