@@ -102,6 +102,23 @@ struct BranchAndBoundOptions {
   // restriction cost gt2 its exact answer, 0.000% to 5.556%, and cut the number
   // of cuts found from 77 to 32. A MIR of a valid inequality is valid; two
   // things were changed at once and the wrong one was blamed.
+  // Reduced-cost fixing. Once there is an incumbent, a node's own LP bound and
+  // its reduced costs together say how far a nonbasic variable can move before
+  // the subtree stops being worth exploring:
+  //
+  //   at its lower bound, d_j > 0:  x_j <= l_j + (incumbent - z_node) / d_j
+  //   at its upper bound, d_j < 0:  x_j >= u_j - (incumbent - z_node) / |d_j|
+  //
+  // Moving further than that costs more than the incumbent already achieves, so
+  // nothing below this node needs the rest of the range. The bound is tightened
+  // for the children only - it is valid in this subtree, not globally, because
+  // it is derived from this node's bound.
+  //
+  // Costs one transpose product per node on top of the relaxation, which is
+  // small against a node solve, and it gets stronger as the tree deepens and
+  // the gap closes.
+  bool reduced_cost_fixing = true;
+
   bool gomory_cuts = false;
 
   // Rounds in which Gomory cuts are separated when they are on at all. They are
@@ -164,6 +181,9 @@ struct BranchAndBoundResult {
   Int nodes_proved_infeasible = 0;
   Int nodes_relaxation_failed = 0;
   Int heuristic_successes = 0;
+  // Bounds tightened by reduced-cost fixing, and how many closed a range to nothing.
+  Int reduced_cost_tightenings = 0;
+  Int reduced_cost_fixings = 0;
   Int dives_run = 0;
   Int cuts_added = 0;
   // Of those, how many came off the tableau rather than the model's rows.

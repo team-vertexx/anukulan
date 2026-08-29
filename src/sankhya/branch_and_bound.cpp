@@ -35,6 +35,7 @@ struct NodeSolution {
   bool proved_infeasible = false;
   bool warm = false;
   std::vector<double> x;
+  std::vector<double> y;  // row duals, for reduced-cost fixing
   std::vector<Int> basic;
   std::vector<VarStatus> basis_status;
 };
@@ -262,6 +263,7 @@ BranchAndBoundResult solve_milp(const Model& model,
       out->proved_infeasible = r.status == SimplexStatus::kInfeasible;
       if (out->optimal) {
         out->x = r.x;
+        out->y = r.y;
         out->basic = r.final_basic;
         out->basis_status = r.final_status;
       }
@@ -566,14 +568,65 @@ BranchAndBoundResult solve_milp(const Model& model,
     const double floor_value = std::floor(value);
     const double ceil_value = std::ceil(value);
 
+    // Reduced-cost fixing, for the children only. This node's bound plus what
+    // it costs to move a variable off its bound is a lower bound on anything
+    // below here that moves it; where that exceeds the incumbent, the rest of
+    // the range is not worth carrying down.
+    //
+    // Which bound a variable sits at is read from the solution rather than from
+    // the basis status, because the status is in the simplex's own indexing -
+    // structurals and logicals together - and this only concerns structurals.
+    std::vector<double> child_lower = node.lower;
+    std::vector<double> child_upper = node.upper;
+    if (options.reduced_cost_fixing && incumbent < kInf &&
+        static_cast<Int>(relaxation.y.size()) == working.num_rows()) {
+      const double gap = incumbent - node_objective;
+      if (gap >= 0.0 && std::isfinite(gap)) {
+        std::vector<double> d = working.c;
+        for (Int i = 0; i < working.num_rows(); ++i) {
+          const double yi = relaxation.y[sz(i)];
+          if (yi == 0.0) continue;
+          for (Int e = working.k.row_begin(i); e < working.k.row_end(i); ++e) {
+            d[sz(working.k.index()[sz(e)])] -= working.k.value()[sz(e)] * yi;
+          }
+        }
+        const double at_bound = 1e-7;
+        for (Int j = 0; j < working.num_cols(); ++j) {
+          const double lo = child_lower[sz(j)];
+          const double hi = child_upper[sz(j)];
+          if (hi - lo <= at_bound) continue;  // already fixed
+          const double xj = relaxation.x[sz(j)];
+          const double dj = d[sz(j)];
+          const bool integral = j < static_cast<Int>(is_integral.size()) && is_integral[sz(j)];
+          if (std::isfinite(lo) && xj - lo <= at_bound && dj > 1e-9) {
+            double bound = lo + gap / dj;
+            if (integral) bound = std::floor(bound + 1e-9);
+            if (bound < hi) {
+              child_upper[sz(j)] = std::fmax(bound, lo);
+              ++result.reduced_cost_tightenings;
+              if (child_upper[sz(j)] - lo <= at_bound) ++result.reduced_cost_fixings;
+            }
+          } else if (std::isfinite(hi) && hi - xj <= at_bound && dj < -1e-9) {
+            double bound = hi - gap / (-dj);
+            if (integral) bound = std::ceil(bound - 1e-9);
+            if (bound > lo) {
+              child_lower[sz(j)] = std::fmin(bound, hi);
+              ++result.reduced_cost_tightenings;
+              if (hi - child_lower[sz(j)] <= at_bound) ++result.reduced_cost_fixings;
+            }
+          }
+        }
+      }
+    }
+
     // Depth first, and the child nearer the relaxation value is explored first,
     // because it is the likelier place to find a feasible point early.
     const bool up_first = (value - floor_value) > 0.5;
     for (int which = 0; which < 2; ++which) {
       const bool take_up = (which == 0) ? !up_first : up_first;
       Node child;
-      child.lower = node.lower;
-      child.upper = node.upper;
+      child.lower = child_lower;
+      child.upper = child_upper;
       child.depth = node.depth + 1;
       child.parent_bound = node_objective;
       child.branch_column = branch_column;

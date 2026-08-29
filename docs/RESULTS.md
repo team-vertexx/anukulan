@@ -274,6 +274,32 @@ Measured and **not** adopted, recorded so they are not retried:
 
 Warm starts on 18,772 of 18,775 relaxations, 2.9 simplex iterations per node.
 
+### Reduced-cost fixing
+
+Once there is an incumbent, a node's own bound and reduced costs say how far a
+nonbasic variable can move before the subtree stops being worth exploring. On
+the seven instances, against the same run with it off:
+
+| instance | status | nodes off → on | verdict |
+|---|---|---|---|
+| **gt2** | optimal | 7,901 → **1,167** | **0.15×** |
+| p0201 | optimal | 2,743 → 2,569 | 0.94× |
+| khb05250 | optimal | 3,525 → 4,247 | 1.20×, worse |
+| gen-ip054 | node limit | — | **better incumbent**, 1.637% → 1.569% error |
+| flugpl, neos5, mas76 | node limit | — | unchanged |
+
+No instance returns a different answer where optimality is proved. gt2 fixes
+7,322 variables outright and gets six times smaller for it; khb05250 loses 20%,
+which is the honest cost of changing the order in which the tree is explored.
+
+It costs one transpose product per node, which is small against a node solve,
+and it gets stronger as the tree deepens and the gap closes.
+
+```bash
+build/sankhya milp data/miplib/gt2.mps --no-reduced-cost-fixing
+build/sankhya milp data/miplib/gt2.mps
+```
+
 Gomory cuts **off** by default — better root bounds on all seven, worse tree on
 three:
 

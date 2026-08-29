@@ -847,6 +847,8 @@ int command_milp(const std::vector<std::string>& args) {
       options.gomory_rounds = static_cast<sankhya::Int>(v);
     } else if (a == "--gomory") {
       options.gomory_cuts = true;
+    } else if (a == "--no-reduced-cost-fixing") {
+      options.reduced_cost_fixing = false;
     } else if (a == "--no-cuts") {
       options.root_cuts = false;
     } else if (value_of(a, "--stall=", &v)) {
@@ -926,6 +928,8 @@ int command_milp(const std::vector<std::string>& args) {
         << "\"gomory_cuts_added\":" << r.gomory_cuts_added << ","
         << "\"warm_started_nodes\":" << r.warm_started_nodes << ","
         << "\"simplex_iterations\":" << r.simplex_iterations << ","
+        << "\"reduced_cost_tightenings\":" << r.reduced_cost_tightenings << ","
+        << "\"reduced_cost_fixings\":" << r.reduced_cost_fixings << ","
         << "\"root_before\":" << r.root_bound_before_cuts << ","
         << "\"root_after\":" << r.root_bound_after_cuts << ","
         << "\"seconds\":" << r.solve_seconds << "}\n";
