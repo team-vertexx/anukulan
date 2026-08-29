@@ -74,6 +74,31 @@ Files are at <https://plato.asu.edu/ftp/lptestset/> and some need expanding with
 Sixteen further instances in the benchmark are undisclosed and cannot be
 reproduced.
 
+## Where this solver's method sits
+
+Chen, Sun, Yuan, Zhang and Zhao, [*On the Relationships among GPU-Accelerated
+First-Order Methods for Solving Linear Programming*](https://arxiv.org/abs/2509.23903),
+settles what these methods actually are relative to each other. Proposition 3.1:
+**cuPDLPx's iteration with the reflection parameter at 1 is the Halpern
+Peaceman–Rachford method**, with the semi-proximal term taken as
+`T1 = lambda_A I - A A*`.
+
+Our default reflection is 1.0, so this repository implements an HPR method — not
+something adjacent to one. HPR-LP is the same algorithm with a freer choice of
+that term and a more developed restart and penalty-parameter strategy.
+
+The same paper measures the distance, at accuracy 1e-8:
+
+| | HPR-LP | cuPDLPx |
+|---|---|---|
+| Mittelmann LP benchmark (49) | 82.1 s, 44 solved | 90.7 s, 44 solved |
+| MIPLIB 2017 relaxations | +2 instances, 1.8× faster | — |
+
+Their conclusion, in their words, is that both are effective realizations of the
+same method and the difference is implementation rather than algorithm. That is
+the useful part: **the remaining gap to the frontier is tuning and engineering,
+not a method we do not have.**
+
 ## What to do with this
 
 Run our solver on the eight we have at `--tol=1e-6`, and report solved/not-solved

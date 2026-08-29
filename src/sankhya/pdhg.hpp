@@ -259,6 +259,27 @@ struct PdhgOptions {
   // the iteration limit either way and own most of the clock - the wall time
   // ratio is 0.57x.
 
+  // Worth knowing what this method is, now that the literature has sorted it
+  // out. Chen, Sun, Yuan, Zhang and Zhao, "On the Relationships among
+  // GPU-Accelerated First-Order Methods for Solving Linear Programming"
+  // (arXiv:2509.23903), Proposition 3.1: cuPDLPx's iteration with the
+  // reflection parameter at 1 *is* the Halpern Peaceman-Rachford method, with
+  // the semi-proximal term taken as T1 = lambda_A I - A A*, sigma = eta / omega
+  // and lambda_A = 1 / eta^2 >= ||A||^2.
+  //
+  // The default below is 1.0, so what this file implements is an HPR method,
+  // not merely something adjacent to one. HPR-LP is the same algorithm with a
+  // freer choice of T1 and a more developed restart and penalty-parameter
+  // strategy.
+  //
+  // How far ahead that is, from the same paper: on the Mittelmann LP benchmark
+  // both solve 44 of 49 with HPR-LP about 1.1x faster; on MIPLIB 2017
+  // relaxations HPR-LP solves two more and is 1.8x faster. The paper's own
+  // conclusion is that both are effective realizations of the same method and
+  // the difference is implementation rather than algorithm - which is the
+  // useful thing to know, because it says the remaining gap is tuning and
+  // engineering, not a method we are missing.
+
   // Reflection: use R(z) = (1 + gamma) T(z) - gamma z in place of T(z), so the
   // step overshoots the operator's output rather than stopping at it. gamma = 0
   // is plain Halpern, gamma = 1 is Peaceman-Rachford.
