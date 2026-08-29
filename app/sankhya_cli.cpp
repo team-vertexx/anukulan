@@ -377,6 +377,8 @@ int command_simplex(const std::vector<std::string>& args) {
       options.algorithm = sankhya::SimplexOptions::Algorithm::kDual;
     } else if (a == "--primal") {
       options.algorithm = sankhya::SimplexOptions::Algorithm::kPrimal;
+    } else if (a == "--no-incremental-pricing") {
+      options.incremental_pricing = false;
     } else if (a == "--piecewise-phase-one") {
       options.piecewise_phase_one = true;
     } else if (a == "--dantzig") {
@@ -441,6 +443,7 @@ int command_simplex(const std::vector<std::string>& args) {
         << "\"objective\":" << r.objective << ","
         << "\"iterations\":" << r.iterations << ","
         << "\"phase_one_iterations\":" << r.phase_one_iterations << ","
+        << "\"incremental_prices\":" << r.incremental_prices << ","
         << "\"refactorizations\":" << r.refactorizations << ","
         << "\"bland_switches\":" << r.bland_switches << ","
         << "\"worst_update_growth\":" << r.worst_update_growth << ","

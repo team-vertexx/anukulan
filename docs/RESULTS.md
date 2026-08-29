@@ -241,16 +241,48 @@ python3 bench/pid_sweep.py
 
 ## 5. Simplex
 
-Sixteen Netlib instances with published optima:
+Sixteen Netlib instances with published optima, **presolved** — which the
+commands below now say, because they did not and the claim does not hold
+without it. Plain, `woodw` and `stocfor2` both run into the 200,000 iteration
+limit; presolved they take 1,782 and 3,668 iterations.
 
-| algorithm | correct | time |
-|---|---|---|
-| primal | **16/16** | 0.75 s total |
-| dual | **16/16** | — |
+| algorithm | correct |
+|---|---|
+| primal | **16/16** |
+| dual | **16/16** |
 
 ```bash
-build/sankhya simplex data/netlib/sctap1.mps
-build/sankhya simplex data/netlib/fit1p.mps --dual
+build/sankhya simplex data/netlib/sctap1.mps --presolve
+build/sankhya simplex data/netlib/fit1p.mps --presolve --dual
+```
+
+### Incremental pricing
+
+The primal simplex used to make two full passes over the matrix every
+iteration. `compute_duals` recomputed every reduced cost from scratch, and the
+Devex weight update then made a pass of exactly the same shape for the pivot row
+`α_rj = ρ'a_j` — which is precisely what an incremental reduced-cost update
+needs. The two are now one pass:
+
+| | recompute | incremental |
+|---|---|---|
+| iterations | 154,739 | **126,502** (0.818×) |
+| time | 99.1 s | **79.4 s** (0.801×) |
+| correct | 16/16 | 16/16 |
+
+`degen3` carries most of it — 133,657 iterations and 85.2 s become 105,433 and
+66.2 s.
+
+It runs in phase two only: phase one rebuilds its cost vector from the basis
+infeasibilities every iteration, and nothing incremental survives a cost vector
+that moves underneath it. It needs Devex, since that is what computes the pivot
+row. And it is thrown away and recomputed at every refactorisation, at the phase
+transition, and whenever a pivot fails — that last set is the drift control, and
+it is why the iteration counts move at all rather than being identical.
+
+```bash
+build/sankhya simplex data/netlib/degen3.mps --presolve --no-incremental-pricing
+build/sankhya simplex data/netlib/degen3.mps --presolve
 ```
 
 Measured and **not** adopted, recorded so they are not retried:

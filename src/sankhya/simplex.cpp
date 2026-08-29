@@ -379,6 +379,12 @@ SimplexResult solve_simplex(const StandardLp& lp, const SimplexOptions& options)
   std::vector<double> weight(sz(columns), 1.0);
   std::vector<Breakpoint> breakpoints;
   std::vector<double> pivot_row_work;
+  // Whether `reduced` is a live account of the current basis. False forces a
+  // recompute; the incremental update below sets it true again.
+  bool duals_valid = false;
+  // The pivot row over the nonbasic columns, kept so the Devex weight update
+  // and the reduced-cost update can share the one pass that builds it.
+  std::vector<double> pivot_row_alpha;
   std::vector<double> rho;
   bool bland = false;
 
@@ -407,6 +413,7 @@ SimplexResult solve_simplex(const StandardLp& lp, const SimplexOptions& options)
       }
       if (status == SimplexStatus::kNumericalError) break;
       result.refactorizations++;
+      duals_valid = false;
     }
 
     basis.compute_primal(form, &z);
@@ -417,6 +424,7 @@ SimplexResult solve_simplex(const StandardLp& lp, const SimplexOptions& options)
       if (infeasibility <= options.primal_tolerance) {
         phase_one = false;
         result.phase_one_iterations = iteration;
+        duals_valid = false;
       }
     }
 
@@ -436,7 +444,17 @@ SimplexResult solve_simplex(const StandardLp& lp, const SimplexOptions& options)
 
     LogicalForm priced = form;
     priced.cost = phase_cost;
-    basis.compute_duals(priced, &duals, &reduced);
+    // Phase one's cost vector is rebuilt from the basis infeasibilities every
+    // iteration, so nothing incremental can survive it.
+    const bool can_price_incrementally =
+        options.incremental_pricing && !phase_one &&
+        options.pricing == SimplexOptions::Pricing::kDevex;
+    if (!duals_valid || !can_price_incrementally) {
+      basis.compute_duals(priced, &duals, &reduced);
+      duals_valid = can_price_incrementally;
+    } else {
+      ++result.incremental_prices;
+    }
 
     // Dantzig pricing: the most favourable reduced cost. Devex comes later; this
     // is the version its iteration counts get compared against.
@@ -505,6 +523,7 @@ SimplexResult solve_simplex(const StandardLp& lp, const SimplexOptions& options)
         if (basis.refactorize(form, &error)) {
           result.refactorizations++;
           ++result.confirmations;
+          duals_valid = false;
           continue;
         }
         status = SimplexStatus::kNumericalError;
@@ -734,6 +753,7 @@ SimplexResult solve_simplex(const StandardLp& lp, const SimplexOptions& options)
         const double wq = std::fmax(weight[sz(entering)], 1.0);
         const double inv = 1.0 / alpha_r;
         double largest = 0.0;
+        pivot_row_alpha.assign(sz(columns), 0.0);
         for (Int j = 0; j < columns; ++j) {
           if (j == entering) continue;
           if (basis.status()[sz(j)] == VarStatus::kBasic) continue;
@@ -742,12 +762,35 @@ SimplexResult solve_simplex(const StandardLp& lp, const SimplexOptions& options)
             alpha_rj += form.columns.value()[sz(e)] *
                         rho[sz(form.columns.index()[sz(e)])];
           }
+          pivot_row_alpha[sz(j)] = alpha_rj;
           if (alpha_rj == 0.0) continue;
           const double ratio = alpha_rj * inv;
           const double candidate = ratio * ratio * wq;
           if (candidate > weight[sz(j)]) weight[sz(j)] = candidate;
           largest = std::fmax(largest, weight[sz(j)]);
         }
+        // The reduced costs move with the same pivot row, so the pass above
+        // pays for both. theta_d is the dual step; every nonbasic column gives
+        // up theta_d times its entry in the pivot row, the entering column's
+        // reduced cost goes to zero because it is basic now, and the leaving
+        // one picks up the negated step.
+        if (can_price_incrementally && std::fabs(alpha_r) > 1e-12) {
+          const double theta_d = reduced[sz(entering)] / alpha_r;
+          if (std::isfinite(theta_d)) {
+            for (Int j = 0; j < columns; ++j) {
+              if (j == entering) continue;
+              if (basis.status()[sz(j)] == VarStatus::kBasic) continue;
+              const double a = pivot_row_alpha[sz(j)];
+              if (a != 0.0) reduced[sz(j)] -= theta_d * a;
+            }
+            reduced[sz(basis.basic()[sz(leaving_row)])] = -theta_d;
+            reduced[sz(entering)] = 0.0;
+            duals_valid = true;
+          } else {
+            duals_valid = false;
+          }
+        }
+
         const double leaving_weight = std::fmax(wq * inv * inv, 1.0);
         weight[sz(basis.basic()[sz(leaving_row)])] = leaving_weight;
         weight[sz(entering)] = 1.0;
@@ -774,6 +817,7 @@ SimplexResult solve_simplex(const StandardLp& lp, const SimplexOptions& options)
     }
 
     if (!basis.pivot(form, leaving_row, entering, leaving_to, column, &error)) {
+      duals_valid = false;
       if (!basis.refactorize(form, &error)) {
         status = SimplexStatus::kNumericalError;
         result.message = "basis became singular: " + error;

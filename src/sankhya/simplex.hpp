@@ -233,6 +233,27 @@ struct SimplexOptions {
   //     or not the far one exists, so the case cannot arise.
   //
   // fit1p under Dantzig is the one that got worse, 3260 iterations to 6747.
+  // Update the reduced costs from the pivot row instead of recomputing every
+  // one of them from scratch each iteration.
+  //
+  // Recomputing is a pass over the whole matrix. The Devex weight update
+  // already makes a pass of exactly the same shape - it needs the pivot row
+  // alpha_rj = rho' a_j for every nonbasic j - and that is precisely the
+  // quantity the reduced-cost update needs:
+  //
+  //   theta_d      = d_q / alpha_rq
+  //   d_j         <- d_j - theta_d alpha_rj      for nonbasic j
+  //   d_leaving    = -theta_d
+  //   d_q          = 0
+  //
+  // So the two passes become one. Only in phase two: phase one rebuilds its
+  // cost vector from the basis infeasibilities every iteration, and an
+  // incremental update cannot follow a cost vector that moves underneath it.
+  // Only with Devex, since that is what computes the pivot row. And the whole
+  // thing is thrown away and recomputed at every refactorisation, which is the
+  // drift control.
+  bool incremental_pricing = true;
+
   bool piecewise_phase_one = true;
 
   // Start from this basis rather than the all-logical one. Both must be given
@@ -339,6 +360,8 @@ struct SimplexResult {
   Int confirmations = 0;
   // Times the Devex reference framework was restarted.
   Int devex_resets = 0;
+  // Iterations that priced from the pivot row rather than from scratch.
+  Int incremental_prices = 0;
   // Nonbasic columns moved to their other bound to make the start dual
   // feasible, and whether the dual had to hand back to the primal.
   Int dual_start_flips = 0;
