@@ -32,8 +32,8 @@ Roughly 11,000 lines of solver and command-line tool, plus 3,700 lines of tests.
 
 Skip this section if you already know it.
 
-A **linear program** is: minimise `c'x` subject to `l ≤ Ax ≤ u` and
-`lo ≤ x ≤ hi`. Everything is linear. The feasible region is a polyhedron and the
+A **linear program** is: minimise `c'x` subject to `l <= Ax <= u` and
+`lo <= x <= hi`. Everything is linear. The feasible region is a polyhedron and the
 optimum sits at a corner of it.
 
 A **mixed-integer program** is the same, except some variables must be whole
@@ -116,7 +116,7 @@ fixing.
 
 Two of these are worth explaining.
 
-**Doubleton equations.** A row with exactly two terms, `a·xi + b·xj = c`, lets
+**Doubleton equations.** A row with exactly two terms, `a*xi + b*xj = c`, lets
 one variable be written in terms of the other and substituted out, taking a row
 and a column with it. Across the Netlib set this removes 758 rows and columns.
 
