@@ -73,6 +73,29 @@ Eighteen Netlib instances with published optima, doubleton equations on vs off:
 758 doubleton equations. Nonzeros fall *despite* the fill the substitution
 creates — 322,824 to 317,673.
 
+Dual fixing, across all 88 Netlib instances (the eighteen with published optima
+understate it — only 13 columns go there):
+
+| | off | on |
+|---|---|---|
+| rows removed | 19.27% | **19.45%** |
+| columns removed | 11.32% | **11.61%** |
+| nonzeros removed | 11.84% | **11.99%** |
+
+520 columns on 22 of the 88 — `80bau3b` 9,195 → 9,037, `finnis` 525 → 461,
+`czprob` and `bnl2` 64 and 63 apiece. It costs one early-exiting pass over the
+columns.
+
+The reduction itself is modest; what it also does is recover an instance. At
+`--tol=1e-8` the count goes **75/88 to 76/88**, and the instances that stop
+converging once presolved go from 3 to 2. Fixing a column removes it from every
+row it was in, and the rows that get shorter are then reachable by the other
+reductions.
+
+Worth recording how nearly this was written off: the first four instances it was
+checked on all reported zero, which reads exactly like a reduction that does not
+fire. Four is not a sample.
+
 Round trip over all 88 instances, presolved answer against plain, `--tol=1e-6`:
 
 | | off | on |
@@ -83,6 +106,7 @@ Round trip over all 88 instances, presolved answer against plain, `--tol=1e-6`:
 ```bash
 python3 bench/verify_presolve.py --tol=1e-6 --abs-tol=1e-6 --check-feasibility
 python3 bench/verify_presolve.py --tol=1e-6 --abs-tol=1e-6 --extra=--presolve-no-doubletons
+build/sankhya presolve data/netlib/80bau3b.mps --no-dual-fixing
 ```
 
 ### Shadow prices

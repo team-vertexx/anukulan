@@ -552,6 +552,74 @@ bool scan_columns(Workspace& w, const PresolveOptions& opt, bool allow_removal) 
       continue;
     }
 
+    // Dual fixing. A "lock" in one direction is a live row that moving the
+    // column that way could push out of its bounds:
+    //
+    //   down-lock   a_ij > 0 and the row has a finite lower bound, or
+    //               a_ij < 0 and it has a finite upper bound
+    //   up-lock     the mirror image
+    //
+    // With no down-locks, the column can be driven to its lower bound without
+    // any row objecting; if the objective agrees - a non-negative cost in the
+    // minimise direction - then some optimal solution has it there, and it can
+    // be fixed. Symmetrically for up.
+    //
+    // The zero-cost case fixes too. It is not that the column has to sit at the
+    // bound, only that an optimal solution exists with it there, which is all a
+    // presolve reduction ever claims.
+    if (opt.dual_fixing && allow_removal && w.col_count[sz(j)] > 0) {
+      Int down_locks = 0;
+      Int up_locks = 0;
+      for (Int e = w.at.row_begin(j); e < w.at.row_end(j); ++e) {
+        const Int i = w.at.index()[sz(e)];
+        if (!w.row_alive[sz(i)]) continue;
+        const double a = w.at.value()[sz(e)];
+        if (a == 0.0) continue;
+        const bool has_lo = !std::isinf(w.rlo[sz(i)]);
+        const bool has_hi = !std::isinf(w.rup[sz(i)]);
+        if (a > 0.0) {
+          if (has_lo) ++down_locks;
+          if (has_hi) ++up_locks;
+        } else {
+          if (has_hi) ++down_locks;
+          if (has_lo) ++up_locks;
+        }
+        if (down_locks > 0 && up_locks > 0) break;
+      }
+
+      const double c = w.cost[sz(j)];
+      if (down_locks == 0 && c >= 0.0) {
+        if (std::isinf(w.clo[sz(j)])) {
+          // Nothing stops it going down and going down never costs more, so
+          // the objective is unbounded below unless the cost is exactly zero -
+          // and with a zero cost there is simply nothing to fix it against.
+          if (c > 0.0) {
+            w.unbounded = true;
+            w.message = "a column with no downward lock has no lower bound";
+            return changed;
+          }
+        } else {
+          ++w.counts->dual_fixed_columns;
+          fix_column(w, j, w.clo[sz(j)]);
+          changed = true;
+          continue;
+        }
+      } else if (up_locks == 0 && c <= 0.0) {
+        if (std::isinf(w.cup[sz(j)])) {
+          if (c < 0.0) {
+            w.unbounded = true;
+            w.message = "a column with no upward lock has no upper bound";
+            return changed;
+          }
+        } else {
+          ++w.counts->dual_fixed_columns;
+          fix_column(w, j, w.cup[sz(j)]);
+          changed = true;
+          continue;
+        }
+      }
+    }
+
     if (w.col_count[sz(j)] == 0) {
       if (!opt.empty_columns) continue;
       // In no row at all, so only the objective has an opinion.
@@ -1064,13 +1132,14 @@ std::string format_presolve(const PresolveResult& result) {
       "removed by    empty row %d, singleton row %d, redundant row %d,\n"
       "              forcing row %d, duplicate row %d,\n"
       "              fixed column %d, empty column %d, free singleton %d,\n"
-      "              doubleton equation %d\n"
+      "              doubleton equation %d, dual fixing %d\n"
       "bounds cut    %d  (%d were infinite before, largest now %.3e)\n",
       to_string(result.status).c_str(), result.original_rows, rows,
       result.original_cols, cols, result.original_nnz, nnz, c.rounds,
       result.seconds, c.empty_rows, c.singleton_rows, c.redundant_rows,
       c.forcing_rows, c.duplicate_rows, c.fixed_columns, c.empty_columns,
-      c.free_column_singletons, c.doubleton_equations, c.bounds_tightened,
+      c.free_column_singletons, c.doubleton_equations, c.dual_fixed_columns,
+      c.bounds_tightened,
       c.bounds_made_finite,
       c.largest_new_finite_bound);
   std::string out(buf);

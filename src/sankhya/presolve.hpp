@@ -67,6 +67,21 @@ struct PresolveOptions {
   bool free_column_singletons = true;  // in one equality row, bounds not binding
   bool bound_tightening = true;    // interval arithmetic on each row
 
+  // Dual fixing. Count, for each column, the constraints that moving it in each
+  // direction could break - its "locks". A column that can be pushed down
+  // without breaking anything, and whose objective does not object, belongs at
+  // its lower bound in some optimal solution; symmetrically for up.
+  //
+  // This is the empty-column rule generalised. That one fires when a column is
+  // in no row at all, so nothing can stop it; this one fires whenever nothing
+  // *in the direction the objective prefers* can stop it, which is a good deal
+  // more often. PaPILO calls it DualFix and rates it medium cost.
+  //
+  // The reasoning is dual, so it costs nothing on the dual side: what it
+  // concludes is that the column's reduced cost has a known sign at optimality,
+  // and the row duals are untouched.
+  bool dual_fixing = true;
+
   // A row with exactly two terms and equal bounds, a*xi + b*xj = c, lets one of
   // the two columns be written in terms of the other and substituted out,
   // taking a row and a column with it.
@@ -272,6 +287,7 @@ struct PresolveCounts {
   Int empty_columns = 0;
   Int free_column_singletons = 0;
   Int doubleton_equations = 0;
+  Int dual_fixed_columns = 0;
   Int bounds_tightened = 0;
   Int bounds_made_finite = 0;   // was infinite, now is not
   double largest_new_finite_bound = 0.0;
