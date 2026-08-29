@@ -290,6 +290,52 @@ That is a dual-bound problem, which means cuts, not heuristics or nodes.
 
 Warm starts on 18,772 of 18,775 relaxations, 2.9 simplex iterations per node.
 
+### Reliability branching
+
+Strong branch a candidate until enough is known about it, then trust its
+pseudocost — Achterberg, Koch and Martin's rule. Pure pseudocost branching has
+to guess at a variable it has never branched on, and the guess is the same
+optimistic constant for all of them, so the decisions near the root that shape
+the whole tree are made with no information.
+
+Six instances, 45 s, threshold 2, varying only how deep the probes are allowed:
+
+| instance | off | d=3 | d=6 | **d=10** | no limit |
+|---|---|---|---|---|---|
+| flugpl | 477 | 246 | 246 | **246** | 246 |
+| **gt2** | 783 | 1,509 | 374 | **194** | 2,225 |
+| khb05250 | 142 | 79 | 76 | **86** | 78 |
+| p0201 | 2,282 | 804 | 873 | **920** | 776 |
+| gen-ip054 | **1.700%** | 1.714% | 2.192% | 2.192% | 2.047% |
+| mas76 | **2.778%** | 3.565% | 3.565% | 4.099% | 4.047% |
+
+**The depth cap is not a refinement here, it is the whole thing.** Unlimited,
+strong branching makes gt2 nearly three times *worse* — 783 nodes to 2,225.
+Capped at ten it is 194. Across the four instances that solve, 3,684 nodes
+become **1,446**.
+
+Near the root a branching decision shapes the whole tree and is worth paying to
+get right. Deep down it settles a subtree about to be pruned anyway, the probes
+are pure cost, and the greedy one-level-ahead choice is not the one that makes
+the smallest tree.
+
+**What it costs:** `gen-ip054` and `mas76` both end with worse gaps — 1.700% to
+2.192% and 2.778% to 4.099%. Neither finishes either way, and the probes take
+time those two would otherwise spend on nodes. On `mas76` the *solution* is the
+published optimum in both cases: what gets worse is the proof, not the answer.
+
+One dead end worth recording. gt2's unlimited-depth blow-up looked like an
+implementation bug — an unconverged probe being scored as a zero bound change,
+which would turn a good candidate into a rejected one. A fallback to the
+pseudocost for unfinished probes changed nothing, because the probes were
+converging. The information was right and the greedy decision on it was wrong,
+which is a known property of strong branching and not a defect.
+
+```bash
+build/sankhya milp data/miplib/gt2.mps --no-reliability
+build/sankhya milp data/miplib/gt2.mps --strong-depth=-1   # the 2,225-node version
+```
+
 ### Node propagation
 
 Branching pins a variable to one side of its fractional value, which is exactly

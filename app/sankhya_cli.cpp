@@ -849,6 +849,14 @@ int command_milp(const std::vector<std::string>& args) {
       options.gomory_cuts = true;
     } else if (a == "--no-reduced-cost-fixing") {
       options.reduced_cost_fixing = false;
+    } else if (a == "--no-reliability") {
+      options.reliability_branching = false;
+    } else if (value_of(a, "--reliability=", &v)) {
+      options.reliability_threshold = static_cast<sankhya::Int>(v);
+    } else if (value_of(a, "--strong-depth=", &v)) {
+      options.strong_branch_max_depth = static_cast<sankhya::Int>(v);
+    } else if (value_of(a, "--strong-candidates=", &v)) {
+      options.strong_branch_candidates = static_cast<sankhya::Int>(v);
     } else if (a == "--no-node-propagation") {
       options.node_propagation = false;
     } else if (value_of(a, "--propagation-rounds=", &v)) {
@@ -939,6 +947,8 @@ int command_milp(const std::vector<std::string>& args) {
         << "\"children_pruned_by_propagation\":"
         << r.children_pruned_by_propagation << ","
         << "\"propagation_tightenings\":" << r.propagation_tightenings << ","
+        << "\"strong_branch_probes\":" << r.strong_branch_probes << ","
+        << "\"strong_branch_prunes\":" << r.strong_branch_prunes << ","
         << "\"cuts_discarded\":" << (r.cuts_discarded ? "true" : "false") << ","
         << "\"root_bound_rise\":" << r.root_bound_rise << ","
         << "\"warm_started_nodes\":" << r.warm_started_nodes << ","

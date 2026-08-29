@@ -556,26 +556,127 @@ BranchAndBoundResult solve_milp(const Model& model,
     // Pick the variable to branch on.
     Int branch_column = -1;
     if (options.branching == BranchAndBoundOptions::Branching::kPseudocost) {
-      double best = -1.0;
+      // The product score, from whatever the pseudocosts currently say.
+      auto score_of = [](double down, double up) {
+        return std::fmax(down, 1e-6) * std::fmax(up, 1e-6) + 1e-6 * (down + up);
+      };
+
+      struct Candidate {
+        Int column;
+        double value;
+        double down_frac;
+        double up_frac;
+        double score;
+        bool reliable;
+      };
+      std::vector<Candidate> candidates;
       for (const Int j : integer_columns) {
         const double v = relaxation.x[sz(j)];
-        const double f = fractionality(v);
-        if (f <= options.integrality_tolerance) continue;
+        if (fractionality(v) <= options.integrality_tolerance) continue;
         const double down_frac = v - std::floor(v);
         const double up_frac = std::ceil(v) - v;
         // An unmeasured direction gets an optimistic unit cost, so every
         // variable is tried once before the averages decide anything.
         const double dc = pseudo_down_n[sz(j)] ? pseudo_down[sz(j)] : 1.0;
         const double uc = pseudo_up_n[sz(j)] ? pseudo_up[sz(j)] : 1.0;
-        // The usual product score, with a small linear term so that a variable
-        // whose one side is free still gets ranked.
-        const double down = dc * down_frac;
-        const double up = uc * up_frac;
-        const double score = std::fmax(down, 1e-6) * std::fmax(up, 1e-6) +
-                             1e-6 * (down + up);
-        if (score > best) {
-          best = score;
-          branch_column = j;
+        const bool reliable =
+            std::min(pseudo_down_n[sz(j)], pseudo_up_n[sz(j)]) >=
+            options.reliability_threshold;
+        candidates.push_back({j, v, down_frac, up_frac,
+                              score_of(dc * down_frac, uc * up_frac), reliable});
+      }
+
+      // Strong branch the unreliable candidates, best-first, up to the budget.
+      // Each probe is a bounded dual simplex from this node's own basis, so it
+      // is a warm start away from the parent and cheap.
+      const bool strong_here =
+          options.reliability_branching &&
+          (options.strong_branch_max_depth < 0 ||
+           node.depth <= options.strong_branch_max_depth);
+      if (strong_here && !candidates.empty()) {
+        std::vector<Candidate*> unreliable;
+        for (Candidate& c : candidates)
+          if (!c.reliable) unreliable.push_back(&c);
+        std::sort(unreliable.begin(), unreliable.end(),
+                  [](const Candidate* a, const Candidate* b) {
+                    return a->score > b->score;
+                  });
+        const std::size_t budget =
+            std::min<std::size_t>(unreliable.size(),
+                                  sz(std::max<Int>(0, options.strong_branch_candidates)));
+        for (std::size_t k = 0; k < budget; ++k) {
+          Candidate& c = *unreliable[k];
+          double delta[2] = {0.0, 0.0};
+          bool measured[2] = {false, false};
+          bool pruned = false;
+          for (int side = 0; side < 2 && !pruned; ++side) {
+            Node probe;
+            probe.lower = node.lower;
+            probe.upper = node.upper;
+            probe.basic = relaxation.basic;
+            probe.basis_status = relaxation.basis_status;
+            if (side == 0) {
+              probe.upper[sz(c.column)] = std::floor(c.value);
+            } else {
+              probe.lower[sz(c.column)] = std::ceil(c.value);
+            }
+            if (probe.lower[sz(c.column)] > probe.upper[sz(c.column)]) continue;
+            NodeSolution probe_solve;
+            ++result.strong_branch_probes;
+            if (solve_node(probe, &probe_solve,
+                           options.strong_branch_iteration_factor)) {
+              delta[side] = std::fmax(
+                  0.0, working.standard_objective(probe_solve.x) - node_objective);
+              measured[side] = true;
+            } else if (probe_solve.proved_infeasible) {
+              // One side is empty, so this variable settles a whole subtree.
+              // Branching here next is the best thing available.
+              ++result.strong_branch_prunes;
+              pruned = true;
+            }
+          }
+          if (pruned) {
+            c.score = kInf;
+            continue;
+          }
+          // A strong branch is a measurement, so it feeds the pseudocost the
+          // same way a real branch would - the unit cost per unit of
+          // fractionality moved.
+          // A probe that ran out of iterations has not said the bound change is
+          // small, only that we did not wait for it. Scoring it as zero is how
+          // an unconverged probe turns a good candidate into a rejected one -
+          // it took gt2 from 783 nodes to 24,585. Where the probe did not
+          // finish, fall back to what the pseudocost already believed.
+          const double fallback_down =
+              (pseudo_down_n[sz(c.column)] ? pseudo_down[sz(c.column)] : 1.0) *
+              c.down_frac;
+          const double fallback_up =
+              (pseudo_up_n[sz(c.column)] ? pseudo_up[sz(c.column)] : 1.0) * c.up_frac;
+
+          if (measured[0] && c.down_frac > 1e-9 && delta[0] > 0.0) {
+            const Int n = pseudo_down_n[sz(c.column)];
+            pseudo_down[sz(c.column)] =
+                (pseudo_down[sz(c.column)] * static_cast<double>(n) +
+                 delta[0] / c.down_frac) / static_cast<double>(n + 1);
+            pseudo_down_n[sz(c.column)] = n + 1;
+          }
+          if (measured[1] && c.up_frac > 1e-9 && delta[1] > 0.0) {
+            const Int n = pseudo_up_n[sz(c.column)];
+            pseudo_up[sz(c.column)] =
+                (pseudo_up[sz(c.column)] * static_cast<double>(n) +
+                 delta[1] / c.up_frac) / static_cast<double>(n + 1);
+            pseudo_up_n[sz(c.column)] = n + 1;
+          }
+          c.score = score_of(measured[0] ? delta[0] : fallback_down,
+                             measured[1] ? delta[1] : fallback_up);
+        }
+      }
+
+      double best = -1.0;
+      for (const Candidate& c : candidates) {
+        if (c.score > best) {
+          best = c.score;
+          branch_column = c.column;
         }
       }
     } else {

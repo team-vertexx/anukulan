@@ -156,6 +156,63 @@ struct BranchAndBoundOptions {
   // budget. More rounds keeps helping where it helps at all - flugpl halves
   // again from two rounds to four - and the only cost anywhere is p0201's
   // seventy extra nodes, against flugpl's five hundred saved.
+  // Reliability branching, in the sense of Achterberg, Koch and Martin: strong
+  // branch on a candidate until enough is known about it, then trust its
+  // pseudocost from there on.
+  //
+  // Pure pseudocost branching has to guess at a variable it has never branched
+  // on, and the guess is the same optimistic unit cost for all of them, so
+  // early decisions near the root - the ones that shape the whole tree - are
+  // made with no information. Full strong branching removes the guess and is
+  // reported at around 65% fewer nodes for up to 44% more time, which is the
+  // wrong trade. Reliability spends the strong branching only where the
+  // pseudocost is not yet trustworthy, which is mostly near the root.
+  //
+  // A variable counts as reliable once both its directions have been measured
+  // this many times.
+  // Measured, six MIPLIB instances at a 45 second budget - nodes where the
+  // instance solves, remaining gap where it does not. Threshold 2 throughout,
+  // varying only how deep the strong branching is allowed to go:
+  //
+  //                off       d=3       d=6      d=10   no limit
+  //   flugpl       477       246       246       246        246
+  //   gt2          783      1509       374       194       2225
+  //   khb05250     142        79        76        86         78
+  //   p0201       2282       804       873       920        776
+  //   gen-ip054  1.700%    1.714%    2.192%    2.192%     2.047%
+  //   mas76      2.778%    3.565%    3.565%    4.099%     4.047%
+  //
+  // The depth cap is not a refinement here, it is the whole thing. Unlimited,
+  // gt2 goes from 783 nodes to 2,225 - strong branching makes it nearly three
+  // times worse. Capped at ten it goes to 194. Across the four that solve, the
+  // total is 3,684 nodes against 1,446, so 0.39x.
+  //
+  // Why the cap matters that much: near the root a branching decision shapes
+  // the whole tree and is worth paying to get right, and deep down it settles a
+  // subtree that is about to be pruned anyway, where the probes are pure cost
+  // and the greedy one-level-ahead choice is not the one that makes the
+  // smallest tree.
+  //
+  // What it costs: gen-ip054 and mas76 both end with worse gaps, 1.700% to
+  // 2.192% and 2.778% to 4.099%. Neither finishes either way, and the probes
+  // spend time those two would otherwise put into nodes. Worth saying plainly
+  // that on mas76 the *solution* is the published optimum in both cases - what
+  // gets worse there is the proof, not the answer.
+  bool reliability_branching = true;
+  Int reliability_threshold = 2;
+  // At most this many unreliable candidates get strong branched at one node,
+  // best-first by their current score. Each costs two bounded LP solves.
+  Int strong_branch_candidates = 8;
+  // Iteration budget for one strong branch probe, as a multiple of the row
+  // count. Small on purpose: the point is a usable estimate of the bound
+  // change, not the child's exact value.
+  Int strong_branch_iteration_factor = 5;
+  // Only strong branch this far down. Near the root a branching decision shapes
+  // the whole tree and is worth paying to get right; deep down it settles a
+  // subtree that is about to be pruned anyway, and the probes are pure cost.
+  // Negative means no limit.
+  Int strong_branch_max_depth = 10;
+
   bool node_propagation = true;
   int node_propagation_rounds = 4;
 
@@ -258,6 +315,10 @@ struct BranchAndBoundResult {
   // bounds tightened on the ones that survived.
   Int children_pruned_by_propagation = 0;
   Int propagation_tightenings = 0;
+  // Strong branch probes run, and how many of them proved a child infeasible
+  // outright - which is a pruned subtree found for the price of a bounded solve.
+  Int strong_branch_probes = 0;
+  Int strong_branch_prunes = 0;
   bool cuts_discarded = false;
   double root_bound_rise = 0.0;
   Int dives_run = 0;
