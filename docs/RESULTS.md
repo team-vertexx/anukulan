@@ -297,6 +297,27 @@ build/sankhya simplex data/netlib/degen3.mps --presolve --no-incremental-pricing
 build/sankhya simplex data/netlib/degen3.mps --presolve
 ```
 
+### Hyper-sparsity, surveyed
+
+Hall and McKinnon call an instance hyper-sparse when more than 60% of FTRAN and
+BTRAN results have a density under 10%, and report a mean 5.2× speedup on the
+ones that are. The solver counts this, so it can be checked rather than assumed:
+
+| | ftran <10% | btran <10% | combined |
+|---|---|---|---|
+| czprob | 99.6% | 43.2% | **75.6%** |
+| 80bau3b | 80.2% | 65.0% | **72.9%** |
+| stocfor2 | 50.9% | 85.7% | **68.6%** |
+| fit1p | 44.5% | 72.6% | **61.8%** |
+| 25fv47 | 10.5% | 17.1% | 14.1% |
+| degen3 | 6.1% | 10.5% | 8.5% |
+| pilot87 | 3.4% | 4.7% | 4.1% |
+| **21 instances** | **13.1%** | **17.5%** | **15.4%** |
+
+Four of twenty-one clear the threshold. Their 5.2× came from a test set chosen
+for the property; this one is not that set, and the exploitation techniques are
+not the right next work here. See [ROADMAP](ROADMAP.md#4-simplex--the-ceiling-is-lower-than-the-literature-suggests).
+
 Measured and **not** adopted, recorded so they are not retried:
 
 - Harris ratio test without EXPAND — 3 better, 6 worse, `blend` stopped solving

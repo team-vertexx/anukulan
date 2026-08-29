@@ -126,6 +126,15 @@ bool SimplexBasis::rollback_last_update() {
 
 // B^-1 = E_k^-1 ... E_1^-1 B_0^-1, so the factorisation goes first and the
 // updates follow in the order they were made.
+namespace {
+double density_of(const std::vector<double>& v) {
+  if (v.empty()) return 1.0;
+  std::size_t nz = 0;
+  for (const double e : v) if (e != 0.0) ++nz;
+  return static_cast<double>(nz) / static_cast<double>(v.size());
+}
+}  // namespace
+
 void SimplexBasis::ftran(std::vector<double>* x) const {
   lu_.ftran(x);
   for (const Update& u : updates_list_) {
@@ -136,6 +145,7 @@ void SimplexBasis::ftran(std::vector<double>* x) const {
       (*x)[sz(u.rows[k])] -= u.values[k] * scaled;
     (*x)[sz(u.row)] = scaled;
   }
+  last_result_density = density_of(*x);
 }
 
 // B^-T = B_0^-T (E_1^-1)^T ... (E_k^-1)^T, which reads right to left: the
@@ -149,6 +159,7 @@ void SimplexBasis::btran(std::vector<double>* x) const {
     (*x)[sz(u.row)] = sum / u.pivot;
   }
   lu_.btran(x);
+  last_result_density = density_of(*x);
 }
 
 void SimplexBasis::compute_primal(const LogicalForm& form,
@@ -197,6 +208,8 @@ void SimplexBasis::compute_duals(const LogicalForm& form, std::vector<double>* d
   std::vector<double> cb(sz(m), 0.0);
   for (Int i = 0; i < m; ++i) cb[sz(i)] = form.cost[sz(basic_[sz(i)])];
   btran(&cb);
+  ++survey_btran_calls;
+  if (last_result_density < 0.10) ++survey_btran_sparse;
   *duals = cb;
 
   reduced_costs->assign(sz(columns), 0.0);
@@ -216,6 +229,8 @@ void SimplexBasis::pivot_row(const LogicalForm& form, Int row,
   if (row < 0 || row >= form.num_rows) return;
   (*rho)[sz(row)] = 1.0;
   btran(rho);
+  ++survey_btran_calls;
+  if (last_result_density < 0.10) ++survey_btran_sparse;
 }
 
 void SimplexBasis::ftran_column(const LogicalForm& form, Int column,
@@ -225,6 +240,8 @@ void SimplexBasis::ftran_column(const LogicalForm& form, Int column,
     (*out)[sz(form.columns.index()[sz(e)])] = form.columns.value()[sz(e)];
   }
   ftran(out);
+  ++survey_ftran_calls;
+  if (last_result_density < 0.10) ++survey_ftran_sparse;
 }
 
 bool SimplexBasis::pivot(const LogicalForm& form, Int leaving_row, Int entering,
@@ -836,6 +853,10 @@ SimplexResult solve_simplex(const StandardLp& lp, const SimplexOptions& options)
 
   basis.compute_primal(form, &z);
   basis.compute_duals(form, &duals, &reduced);
+  result.ftran_calls = basis.survey_ftran_calls;
+  result.ftran_sparse = basis.survey_ftran_sparse;
+  result.btran_calls = basis.survey_btran_calls;
+  result.btran_sparse = basis.survey_btran_sparse;
 
   result.x.assign(sz(form.num_structural), 0.0);
   for (Int j = 0; j < form.num_structural; ++j) result.x[sz(j)] = z[sz(j)];

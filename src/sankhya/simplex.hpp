@@ -61,6 +61,12 @@ class SimplexBasis {
   // the factors directly, because the factors alone are out of date the moment
   // a pivot lands.
   void ftran(std::vector<double>* x) const;
+  // Density of the last ftran/btran result, for the hyper-sparsity survey.
+  mutable double last_result_density = 1.0;
+  mutable Int survey_ftran_calls = 0;
+  mutable Int survey_ftran_sparse = 0;
+  mutable Int survey_btran_calls = 0;
+  mutable Int survey_btran_sparse = 0;
   void btran(std::vector<double>* x) const;
 
   // rho = B^-T e_row. The pivot row of the tableau is rho' N, which is what a
@@ -362,6 +368,15 @@ struct SimplexResult {
   Int devex_resets = 0;
   // Iterations that priced from the pivot row rather than from scratch.
   Int incremental_prices = 0;
+  // Hyper-sparsity, as Hall and McKinnon define it: the share of FTRAN and
+  // BTRAN results whose density is under 10%. They call an instance hyper-sparse
+  // when that share is above 60%, and report a mean speedup of 5.2 on the ones
+  // that are. Measured before deciding whether the exploitation techniques are
+  // worth building here.
+  Int ftran_calls = 0;
+  Int ftran_sparse = 0;
+  Int btran_calls = 0;
+  Int btran_sparse = 0;
   // Nonbasic columns moved to their other bound to make the start dual
   // feasible, and whether the dual had to hand back to the primal.
   Int dual_start_flips = 0;

@@ -105,58 +105,51 @@ infeasibility detection. Note the fill-budget sweep in RESULTS before starting:
 raising the budget makes the set *slower*, so AMD needs to be justified by
 measurement rather than assumed.
 
-### 4. Simplex 40 → 65
+### 4. Simplex — the ceiling is lower than the literature suggests
 
-**Start with this, before any of the papers below.** The primal simplex does
-*two* full O(nnz(A)) passes over the matrix every iteration, and one of them
-should not exist:
+~~Simplex 40 → 65~~. The incremental pricing work is done (RESULTS §5) and took
+it to about 50. **The rest of the way is not available on this benchmark**, and
+that is measured rather than assumed.
 
-- `SimplexBasis::compute_duals` recomputes **every** reduced cost from scratch,
-  `d_j = c_j − π'A_j` over all nonbasic columns. It is called at the top of the
-  loop, every iteration.
-- The Devex weight update then computes the full pivot row `α_rj = ρ'A_j`, again
-  over every nonbasic column.
+**Hypersparsity does not apply here.** Hall and McKinnon call an instance
+hyper-sparse when more than 60% of FTRAN and BTRAN results have a density under
+10%, and report a mean 5.2× on the ones that are. Over 21 Netlib instances,
+presolved, the combined rate here is **15.4%**, and only four instances clear
+the threshold at all:
 
-A revised simplex updates the reduced costs from the pivot row rather than
-recomputing them:
+| | ftran <10% | btran <10% | combined |
+|---|---|---|---|
+| czprob | 99.6% | 43.2% | **75.6%** |
+| 80bau3b | 80.2% | 65.0% | **72.9%** |
+| stocfor2 | 50.9% | 85.7% | **68.6%** |
+| fit1p | 44.5% | 72.6% | **61.8%** |
+| pilot87 | 3.4% | 4.7% | 4.1% |
+| degen3 | 6.1% | 10.5% | 8.5% |
+| *21 instances* | *13.1%* | *17.5%* | *15.4%* |
 
-```
-θ_d      = d_q / α_rq
-d_j     ← d_j − θ_d · α_rj      for nonbasic j
-d_leaving = −θ_d
-d_q       = 0
-```
+Their 5.2× was measured on a test set selected for the property — KEN-18,
+PDS-20, STOCFOR3, large network-structured problems. Netlib is mostly not that.
+Six to eight weeks of work to help four instances in twenty-one.
 
-and `α_rj` is exactly what the Devex pass already has in hand. Fusing the two
-turns two passes into one, and the pricing pass then only has to run at
-refactorization, for drift.
+**Forrest–Tomlin is aimed at something that is not hot.** A sampling profile of
+`degen3`, the slowest instance in the set at 66 s, puts 67% of samples in one
+spot and `LuFactor::factorize` at 11 samples out of ~4,500. Basis updates and
+refactorisation are not where the time goes; the single pivot-row pass that
+Devex needs is.
 
-Two things to be careful about:
+**The bound-flipping ratio test needs boxed columns**, and most instances here
+have none: `pilot87` 36.8%, `80bau3b` 35.6%, `fit1p` 23.8%, `greenbea` 7.3%, and
+**0%** for afiro, sctap1, degen3, 25fv47, woodw, stocfor2 and maros-r7.
 
-- **Phase one changes the cost vector every iteration.** `phase_cost` is rebuilt
-  from the basis infeasibilities, and the piecewise-linear phase one walks
-  through breakpoints flipping several statuses in a single step. The
-  incremental update is only valid where the costs are fixed, so phase two gets
-  it and phase one keeps recomputing — at least until someone measures whether
-  tracking the cost changes explicitly is worth it.
-- **Drift.** Recompute at each refactorization and compare, the way the dual
-  steepest edge weights are already checked.
+So the realistic ceiling on this benchmark is nearer **55 than 65**. The gap to
+HiGHS is real and these are the techniques that close it — a general solver
+should have them — but implementing them would move the capability without
+moving these numbers, and this document scores against measurements.
 
-Honest note on the payoff: the whole Netlib set solves in 0.75 s today, so the
-absolute saving is small and this will not show up in a demo. It matters because
-it is the difference between a revised simplex and one that recomputes what it
-already knows, and because everything below gets measured against it.
-
-Then, three papers in order of value:
-
-- **Hall and McKinnon (2005), hypersparsity** — the single biggest jump for
-  Netlib-scale problems. When the right-hand side of an FTRAN/BTRAN is sparse,
-  a different solve algorithm wins. Conceptually simple.
-- [Hall and Huangfu, *A High Performance Dual Revised Simplex Solver*](https://webhomes.maths.ed.ac.uk/hall/HaHu11/ERGO-11-007.pdf)
-  — what HiGHS is built on
-- [Koberstein's thesis](https://d-nb.info/978580478/34) — already used here for
-  dual steepest edge; it also contains Forrest–Tomlin and the bound-flipping
-  ratio test
+What would actually move the profile is **partial pricing**: the dominant cost
+is now scanning every nonbasic column for the pivot row, and scanning a rotating
+subset instead trades iteration count against per-iteration cost. Untried, and
+the trade has to be measured rather than assumed.
 
 ### 5. MILP 22 → 52
 
