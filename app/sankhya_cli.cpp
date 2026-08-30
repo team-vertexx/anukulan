@@ -935,6 +935,22 @@ int command_solve(const std::vector<std::string>& args) {
 }
 
 int command_milp(const std::vector<std::string>& args) {
+  // Off by default, and that is a measurement rather than an oversight.
+  // Presolve is integrality-aware here - it rounds bounds on integer columns,
+  // refuses free-column-singleton and doubleton substitutions that would touch
+  // one, and tightens coefficients only where an integer column can carry the
+  // argument - and it does not change an answer on anything tried. What it does
+  // change is the tree, in both directions and by a lot:
+  //
+  //                nodes off   nodes on
+  //     flugpl           246        247
+  //     gt2              500      8,320
+  //     p0201          1,291        205
+  //     neos5          4,671      4,653
+  //
+  // Six times better on one instance and sixteen times worse on another is not
+  // a default, it is a per-instance decision nothing here is yet equipped to
+  // make. `--presolve` turns it on.
   bool use_presolve = false;
   if (args.empty()) {
     std::fprintf(stderr, "milp: expected a file name\n");

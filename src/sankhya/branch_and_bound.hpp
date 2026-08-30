@@ -333,6 +333,10 @@ struct BranchAndBoundOptions {
   // pump is worth a lot when it works and nothing when it does not, so it gets
   // a slice rather than the run.
   double pump_time_share = 0.25;
+  // Retry the pump every this many nodes while there is still no incumbent. A
+  // pump started from a different relaxation rounds to a different point, so a
+  // second attempt is not the first one repeated. Zero means root only.
+  Int pump_retry_nodes = 200;
   // Objective feasibility pump, following Achterberg and Berthold (CPAIOR
   // 2007). The plain pump chases feasibility alone, so the first point it finds
   // is wherever the rounding happened to lead - and it cycles, because nothing

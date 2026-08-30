@@ -714,6 +714,7 @@ BranchAndBoundResult solve_milp(const Model& model,
 
   MilpStatus status = MilpStatus::kInfeasible;
   double open_bound = -kInf;
+  double pump_time_spent = 0.0;
 
   while (!stack.empty()) {
     if (result.nodes >= options.node_limit) {
@@ -802,12 +803,23 @@ BranchAndBoundResult solve_milp(const Model& model,
     // against. It is the expensive heuristic and the only one that finds
     // anything on most of the wider set, so it goes first and gets a slice of
     // the budget rather than a node's worth.
-    if (options.feasibility_pump && incumbent_x.empty() && node.depth == 0) {
-      const double deadline =
-          std::fmin(options.time_limit_seconds,
-                    elapsed() + options.pump_time_share * options.time_limit_seconds);
-      if (run_feasibility_pump(relaxation.x, deadline)) {
-        result.heuristic_successes++;
+    //
+    // It runs again deeper in the tree while there is still nothing, because a
+    // pump started from a different relaxation rounds differently and lands
+    // somewhere else. The share of the budget is cumulative across all of them,
+    // so retrying costs no more in total than one long attempt.
+    if (options.feasibility_pump && incumbent_x.empty() &&
+        (node.depth == 0 ||
+         (options.pump_retry_nodes > 0 && result.nodes % options.pump_retry_nodes == 0))) {
+      const double budget = options.pump_time_share * options.time_limit_seconds;
+      const double left = budget - pump_time_spent;
+      if (left > 0.0) {
+        const double began = elapsed();
+        const double deadline = std::fmin(options.time_limit_seconds, began + left);
+        if (run_feasibility_pump(relaxation.x, deadline)) {
+          result.heuristic_successes++;
+        }
+        pump_time_spent += elapsed() - began;
       }
     }
 
