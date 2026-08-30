@@ -361,12 +361,31 @@ int command_simplex(const std::vector<std::string>& args) {
   bool use_presolve = false;
   bool use_crossover = false;
   double crossover_tolerance = 1e-4;
+  // A seed that has not converged by here is not going to produce a better
+  // basis for being run longer, and every iteration of it is iterations the
+  // simplex did not need. bore3d spent 194,440 of them to save 284 pivots.
+  //
+  // Swept over fifteen Netlib instances, simplex pivots against seed cost:
+  //
+  //     cap        pivots            seed iterations
+  //     2,000      15,438 -> 6,850   25,600
+  //     5,000      15,438 -> 5,659   51,680
+  //     20,000     15,438 -> 5,333   99,400
+  //     200,000    15,438 -> 5,141   273,840
+  //
+  // Almost all of the saving is bought by 5,000; the last 4% of it costs five
+  // times the seed. The default is where the curve flattens, not where the
+  // ratio is best.
+  sankhya::Int crossover_max_iterations = 5000;
   sankhya::SimplexOptions options;
   for (std::size_t i = 1; i < args.size(); ++i) {
     const std::string& a = args[i];
     double v = 0.0;
     if (value_of(a, "--crossover-tol=", &v)) {
       crossover_tolerance = v;
+      use_crossover = true;
+    } else if (value_of(a, "--crossover-max-iter=", &v)) {
+      crossover_max_iterations = static_cast<sankhya::Int>(v);
       use_crossover = true;
     } else if (a == "--crossover") {
       use_crossover = true;
@@ -450,6 +469,7 @@ int command_simplex(const std::vector<std::string>& args) {
     sankhya::PdhgOptions po;
     po.tolerance = crossover_tolerance;
     po.gap_tolerance = crossover_tolerance;
+    if (crossover_max_iterations > 0) po.max_iterations = crossover_max_iterations;
     seed = sankhya::solve_pdhg(sf.lp, po);
     cross = sankhya::crossover_basis(sf.lp, seed.x, seed.y);
     if (cross.ok) {
