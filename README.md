@@ -142,6 +142,14 @@ c-MIR restricted to original rows, dual steepest edge inside branch and bound.
 Each cost real time to disprove. `git log` is the other half of this — the
 commit messages carry the reasoning, not just the change.
 
+## Team
+
+| | |
+|---|---|
+| Abhishek Kumar | [@Abhishek-Kumar-2312](https://github.com/Abhishek-Kumar-2312) |
+
+Built for Smart India Hackathon 2026, problem statement SIH26119.
+
 ## Reproducing any number in this repository
 
 Every measurement has the command that produces it, in
