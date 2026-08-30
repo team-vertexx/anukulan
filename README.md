@@ -11,7 +11,8 @@ HiGHS appears in this repository exactly once: as the thing we benchmark
 *against*.
 
 ```
-11,192 lines of solver and CLI     11 test suites, all passing
+13,651 lines of solver and CLI     12 test suites, all passing
+88 Netlib instances verified against published optima — 0 wrong answers
 ```
 
 ---
@@ -21,12 +22,13 @@ HiGHS appears in this repository exactly once: as the thing we benchmark
 | | what | where |
 |---|---|---|
 | **Reader** | MPS free and fixed format, LP and QP (Maros–Meszaros QPS) | `src/sankhya/mps_reader.cpp` |
-| **Presolve** | 10 reductions + postsolve, including the dual | `src/sankhya/presolve.cpp` |
+| **Presolve** | 11 reductions + postsolve, including the dual | `src/sankhya/presolve.cpp` |
 | **First-order LP** | PDHG / PDLP with restarts, Halpern, feasibility polishing | `src/sankhya/pdhg.cpp` |
 | **GPU** | CUDA backend for the first-order method | `src/sankhya/cuda_backend.cu` |
 | **Simplex** | revised primal *and* dual, sparse LU, Devex, steepest edge | `src/sankhya/simplex.cpp` |
 | **MILP** | branch and cut — cover, c-MIR, Gomory; pseudocost; diving | `src/sankhya/branch_and_bound.cpp` |
 | **QP** | OSQP-style ADMM with a sparse LDL' of the KKT system | `src/sankhya/qp.cpp` |
+| **Crossover** | turns a first-order point into a simplex basis | `src/sankhya/crossover.cpp` |
 
 ## Where it stands
 
@@ -35,19 +37,32 @@ command next to it in [docs/RESULTS.md](docs/RESULTS.md). None of it is
 estimated.
 
 - **Reader** — matches HiGHS on all 88 Netlib instances, 1.4–1.5× faster
-- **Simplex** — 78 of 88 Netlib instances reach the published optimum and none
-  returns a wrong answer; the other ten stop visibly. Seeded from a first-order
-  point it takes 0.52x the pivots
+- **Simplex** — **77 of 88** Netlib instances reach the published optimum and
+  **none returns a wrong answer**; the rest stop visibly with a time limit,
+  iteration limit or numerical error
+- **Crossover** — seeding the simplex from a first-order point cuts pivots
+  substantially and turns six instances that returned no answer at all
+  (`degen3`, `stocfor2`, `woodw`, `scsd8`, `wood1p`, `modszk1`) into correct ones
 - **First-order** — 76/88 Netlib published optima at `--tol=1e-8`
-- **Presolve** — removes 14.0% of rows, 15.4% of columns; 1.56× geomean speedup
-- **MILP** — 5 of 7 MIPLIB instances exact; `gen-ip054` 0.330%, `mas76` 0.562%
-- **QP** — 21 of the 24 smallest Maros–Meszaros instances
+- **Presolve** — removes ~19% of rows and ~12% of columns, without changing an
+  answer, and recovers duals as well as primals
+- **MILP** — 4 of the 7 tuning instances proved optimal; on the other three the
+  *solution* is already the published optimum and what is missing is the proof
+- **QP** — 35 of the 40 smallest Maros–Meszaros instances
 - **GPU (Tesla T4)** — 2.70×–7.09× on solve time over the same algorithm on CPU
 
 Read [docs/RESULTS.md](docs/RESULTS.md) for the full tables and the honest
-assessment of where this sits against a production solver, which is roughly
-**half of HiGHS**. That number is not modesty — it is in the results doc with a
-component-by-component breakdown.
+assessment of where this sits against a production solver — about **60% of
+HiGHS**, with MILP the weak leg at roughly 30. That is not modesty; it is in the
+results document with a component-by-component breakdown and the reasoning for
+each number.
+
+**The correctness figure above replaced a "16 of 16" that stood until
+2026-08-30.** That number was true of a sixteen-instance subset and it was
+hiding six wrong answers on the rest — three reporting `optimal` at a point
+missing the constraints by up to 1.8e+09. One cause: the ratio test never
+compared pivot magnitudes when breaking ties. The full account is in
+[docs/RESULTS.md §5](docs/RESULTS.md).
 
 ## Quick start
 
@@ -57,7 +72,27 @@ ctest --test-dir build
 ```
 
 ```bash
-build/sankhya solve data/netlib/25fv47.mps --tol=1e-8 --presolve
+# LP, first-order method (this is the path the CUDA backend accelerates)
+build/sankhya solve   data/netlib/25fv47.mps --tol=1e-8 --presolve
+
+# LP, simplex — exact, with a certificate
+build/sankhya simplex data/netlib/25fv47.mps --presolve
+
+# LP, first-order seeding the simplex: fast to close, then exact
+build/sankhya simplex data/netlib/degen3.mps --crossover
+
+# MILP
+build/sankhya milp    data/miplib/flugpl.mps --time-limit=30
+
+# The refinery planning model the problem statement is about
+build/sankhya solve   data/refinery/refinery.mps --presolve
+```
+
+Verify the whole thing against published optima:
+
+```bash
+python3 scripts/fetch_netlib.py
+python3 -u bench/verify_simplex.py 60
 ```
 
 Full onboarding — layout, conventions, how to run each benchmark — is in
@@ -74,6 +109,14 @@ Full onboarding — layout, conventions, how to run each benchmark — is in
 | [docs/KAGGLE.md](docs/KAGGLE.md) | running the GPU benchmarks on a rented T4 |
 | [RESEARCH.md](RESEARCH.md) | the survey done before any code was written |
 | [PLAN.md](PLAN.md) | the build plan written from that research |
+| [SESSION_PROMPTS.md](SESSION_PROMPTS.md) | the five open work streams, each a self-contained brief |
+
+Two PDFs, both generated from the documents above:
+
+| | pages | what |
+|---|---|---|
+| [Sankhya_Complete_Guide.pdf](Sankhya_Complete_Guide.pdf) | 41 | the mathematics of every method from first principles, every rejected option with its measurement, and every wrong answer this solver has produced |
+| [Sankhya_Handover.pdf](Sankhya_Handover.pdf) | 23 | design decisions, how the thing is tested and what each layer catches, where it stands, and what is next |
 
 `RESEARCH.md` and `PLAN.md` are dated 22 Aug 2026 and describe the project
 *before* it was built. They are kept because the reasoning in them is still the
@@ -97,3 +140,21 @@ test without EXPAND, Gomory cuts on by default, Halpern's own restart criterion,
 c-MIR restricted to original rows, dual steepest edge inside branch and bound.
 Each cost real time to disprove. `git log` is the other half of this — the
 commit messages carry the reasoning, not just the change.
+
+## Reproducing any number in this repository
+
+Every measurement has the command that produces it, in
+[docs/RESULTS.md](docs/RESULTS.md). The benchmark harnesses live in `bench/`:
+
+| script | what it checks |
+|---|---|
+| `bench/verify_simplex.py` | all 88 Netlib instances against published optima |
+| `bench/miplib_survey.py` | 103 MIPLIB instances against published optima |
+| `bench/verify_presolve.py` | presolve does not change any answer |
+| `bench/verify_reader.py` | the reader agrees with HiGHS on all 88 models |
+| `bench/crossover_sweep.py` | pivots saved by seeding the simplex |
+| `bench/milp_vs_highs.py` | this solver and HiGHS, same instances, same limit |
+| `bench/ablation.py` | every optional feature on and off |
+
+Instance sets are fetched, not vendored: `scripts/fetch_netlib.py`,
+`scripts/fetch_miplib.py`, `scripts/fetch_lptestset.py`.
