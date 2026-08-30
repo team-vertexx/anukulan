@@ -985,7 +985,7 @@ amount of recent work and have not been re-run on hardware.
 ## 19. Getting set up
 
 ```bash
-git clone <repository-url> && cd sankhya
+git clone https://github.com/team-vertexx/sankhya && cd sankhya
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j8
 for t in build/tests/test_*; do "$t"; done          # 12 suites, all should pass

@@ -67,6 +67,7 @@ compared pivot magnitudes when breaking ties. The full account is in
 ## Quick start
 
 ```bash
+git clone https://github.com/team-vertexx/sankhya && cd sankhya
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j8
 ctest --test-dir build
 ```
