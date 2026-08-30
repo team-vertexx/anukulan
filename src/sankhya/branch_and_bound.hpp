@@ -333,6 +333,38 @@ struct BranchAndBoundOptions {
   // pump is worth a lot when it works and nothing when it does not, so it gets
   // a slice rather than the run.
   double pump_time_share = 0.25;
+  // Objective feasibility pump, following Achterberg and Berthold (CPAIOR
+  // 2007). The plain pump chases feasibility alone, so the first point it finds
+  // is wherever the rounding happened to lead - and it cycles, because nothing
+  // distinguishes the many roundings that are equally close. Mixing a decaying
+  // share of the real objective into the distance both biases the search toward
+  // solutions worth having and breaks the symmetry that causes the cycling.
+  //
+  //   objective = (1 - a) * distance / ||distance|| + a * c / ||c||
+  //
+  // starting at this weight and multiplied by pump_objective_decay each round,
+  // so the first rounds follow the objective and the later ones follow
+  // feasibility. Zero is the plain pump.
+  double pump_objective_weight = 0.0;
+  double pump_objective_decay = 0.9;
+
+  // Seed the root relaxation's basis from a short first-order solve, the way
+  // crossover.hpp describes. A child inherits its parent's basis and needs a
+  // handful of pivots; the root inherits nothing and pays for the whole walk,
+  // and on the wider set that walk is what consumes the budget - 10teams and
+  // binkar10_1 both spend fifteen seconds without finishing a root relaxation,
+  // so no node is ever explored and no heuristic ever runs.
+  //
+  // This is also where the GPU earns its place in the MILP half. The seed is
+  // matrix-vector products and clamps, which is the part that goes on a device;
+  // the pivots it saves are the part that does not.
+  bool root_crossover = true;
+  double root_crossover_tolerance = 1e-4;
+  Int root_crossover_max_iterations = 5000;
+  // The same per-row budget the LP path uses; see the sweep in the CLI. A flat
+  // cap is too loose for a small root and too tight for a large one, and the
+  // roots that need this most are the large ones.
+  double root_crossover_iterations_per_row = 10.0;
 
   // Start each child from its parent's solution. The first-order method has no
   // basis to inherit, but the parent's point is still a much better starting
@@ -372,6 +404,10 @@ struct BranchAndBoundResult {
   Int pump_rounds = 0;
   Int pump_successes = 0;
   Int pump_restarts = 0;
+  // Columns the root crossover pushed into the starting basis, and whether the
+  // simplex accepted the basis it produced.
+  Int root_crossover_pushed = 0;
+  bool root_crossover_used = false;
   // Bounds tightened by reduced-cost fixing, and how many closed a range to nothing.
   Int reduced_cost_tightenings = 0;
   Int reduced_cost_fixings = 0;

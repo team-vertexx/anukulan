@@ -374,8 +374,28 @@ int command_simplex(const std::vector<std::string>& args) {
   //     200,000    15,438 -> 5,141   273,840
   //
   // Almost all of the saving is bought by 5,000; the last 4% of it costs five
-  // times the seed. The default is where the curve flattens, not where the
-  // ratio is best.
+  // times the seed.
+  //
+  // A flat cap is the wrong shape, though. Those fifteen are small, and on a
+  // large instance the same 5,000 iterations is a much looser point: d2q06c
+  // goes 25,012 -> 3,952 pivots with an uncapped seed and only 25,012 ->
+  // 10,365 at a flat 5,000. So the cap is per row, with the flat number as a
+  // floor for the small ones.
+  //
+  // Swept over fourteen instances, simplex pivots against seed cost:
+  //
+  //     per row    pivots               seed
+  //     flat       47,487 -> 17,996     61,120
+  //     10         47,487 -> 12,781     80,590
+  //     20         47,487 -> 14,917     110,160
+  //     40         47,487 -> 11,403     154,000
+  //
+  // Ten is where the benefit per seed iteration is best, and it is the default.
+  // Say plainly that this is not finely determined: twenty is worse than ten
+  // and forty is better again, which is not a curve, it is the basis you happen
+  // to land on. What the sweep does establish is the shape - a per-row budget
+  // beats a flat one, and past ten the seed grows faster than the saving.
+  double crossover_iterations_per_row = 10.0;
   sankhya::Int crossover_max_iterations = 5000;
   sankhya::SimplexOptions options;
   for (std::size_t i = 1; i < args.size(); ++i) {
@@ -386,6 +406,9 @@ int command_simplex(const std::vector<std::string>& args) {
       use_crossover = true;
     } else if (value_of(a, "--crossover-max-iter=", &v)) {
       crossover_max_iterations = static_cast<sankhya::Int>(v);
+      use_crossover = true;
+    } else if (value_of(a, "--crossover-iter-per-row=", &v)) {
+      crossover_iterations_per_row = v;
       use_crossover = true;
     } else if (a == "--crossover") {
       use_crossover = true;
@@ -469,7 +492,13 @@ int command_simplex(const std::vector<std::string>& args) {
     sankhya::PdhgOptions po;
     po.tolerance = crossover_tolerance;
     po.gap_tolerance = crossover_tolerance;
-    if (crossover_max_iterations > 0) po.max_iterations = crossover_max_iterations;
+    sankhya::Int budget = crossover_max_iterations;
+    if (crossover_iterations_per_row > 0.0) {
+      budget = std::max<sankhya::Int>(
+          budget, static_cast<sankhya::Int>(crossover_iterations_per_row *
+                                            sf.lp.num_rows()));
+    }
+    if (budget > 0) po.max_iterations = budget;
     seed = sankhya::solve_pdhg(sf.lp, po);
     cross = sankhya::crossover_basis(sf.lp, seed.x, seed.y);
     if (cross.ok) {
@@ -971,6 +1000,12 @@ int command_milp(const std::vector<std::string>& args) {
     } else if (a == "--dse") {
       options.simplex.dual_pricing =
           sankhya::SimplexOptions::DualPricing::kSteepestEdge;
+    } else if (value_of(a, "--pump-objective=", &v)) {
+      options.pump_objective_weight = v;
+    } else if (a == "--no-pump") {
+      options.feasibility_pump = false;
+    } else if (a == "--no-root-crossover") {
+      options.root_crossover = false;
     } else if (a == "--nodes=simplex") {
       options.node_solver = sankhya::BranchAndBoundOptions::NodeSolver::kSimplex;
     } else if (a == "--nodes=first-order") {
@@ -1038,6 +1073,8 @@ int command_milp(const std::vector<std::string>& args) {
         << "\"pump_rounds\":" << r.pump_rounds << ","
         << "\"pump_successes\":" << r.pump_successes << ","
         << "\"pump_restarts\":" << r.pump_restarts << ","
+        << "\"root_crossover_pushed\":" << r.root_crossover_pushed << ","
+        << "\"root_crossover_used\":" << r.root_crossover_used << ","
         << "\"cuts_added\":" << r.cuts_added << ","
         << "\"gomory_cuts_added\":" << r.gomory_cuts_added << ","
         << "\"children_pruned_by_propagation\":"

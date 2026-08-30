@@ -12,8 +12,14 @@ BIN = os.environ.get("SANKHYA", "build/sankhya")
 tol = sys.argv[1] if len(sys.argv) > 1 else "1e-4"
 only = sys.argv[2:] 
 
+LIMIT = os.environ.get("LIMIT", "60")
+
 def run(path, extra):
-    p = subprocess.run([BIN, "simplex", path, "--format=json"] + extra,
+    # A limit per instance, so one of the very large ones cannot dominate the
+    # run. Anything that hits it is skipped rather than counted, since a
+    # truncated pivot count is not a pivot count.
+    p = subprocess.run([BIN, "simplex", path, "--format=json",
+                        f"--time-limit={LIMIT}"] + extra,
                        capture_output=True, text=True)
     try:
         return json.loads(p.stdout.strip().splitlines()[-1])

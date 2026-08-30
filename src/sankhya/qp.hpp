@@ -74,10 +74,23 @@ struct QpOptions {
   // iteration limit at every setting tried.
   //
   // So the diagnosis is probably right and the remedy is not in the update
-  // rule's constants. What is untried: OSQP normalises the two residuals by the
-  // scale of the terms that make them up rather than by the tolerances, which
-  // is what this does, and that is the more likely place for the difference to
-  // live.
+  // rule's constants.
+  //
+  // A third candidate was written here and is now withdrawn, because it turns
+  // out not to be a difference at all. OSQP normalises each residual by the
+  // scale of the terms that make it up; this normalises by the tolerance, which
+  // is abs + rel * scale. Write out the ratio the rule actually uses:
+  //
+  //     r_p / (abs + rel * S_p)     r_p / (rel * S_p)     r_p / S_p
+  //     -----------------------  ->  -----------------  =  ---------
+  //     r_d / (abs + rel * S_d)     r_d / (rel * S_d)     r_d / S_d
+  //
+  // The rel factor cancels, so the two rules agree exactly whenever the
+  // absolute term is negligible against rel * scale - and on PRIMALC1 the
+  // primal residual is 74, which is nowhere near an absolute tolerance of 1e-6.
+  // The two rules are computing the same number on the instance that fails.
+  //
+  // Written out rather than tried, and left here so it is not tried again.
   bool adaptive_rho = true;
   double rho_update_threshold = 5.0;  // only update on a change this large
 

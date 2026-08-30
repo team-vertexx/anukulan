@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <random>
 
+#include "sankhya/crossover.hpp"
 #include "sankhya/cuts.hpp"
 #include "sankhya/simplex.hpp"
 #include "sankhya/standard_form.hpp"
@@ -297,12 +298,47 @@ BranchAndBoundResult solve_milp(const Model& model,
       // time limit, it is a solver ignoring one.
       so.time_limit_seconds =
           std::max(0.0, options.time_limit_seconds - elapsed());
+      // A crossover basis has to outlive the solve it is passed to, so it is
+      // declared here rather than inside the branch that fills it.
+      CrossoverResult root_cross;
       if (static_cast<Int>(node.basic.size()) == lp.num_rows() &&
           !node.basis_status.empty()) {
         so.start_basic = &node.basic;
         so.start_status = &node.basis_status;
+      } else if (options.root_crossover) {
+        PdhgOptions po;
+        po.tolerance = options.root_crossover_tolerance;
+        po.gap_tolerance = options.root_crossover_tolerance;
+        po.max_iterations = options.root_crossover_max_iterations;
+        if (options.root_crossover_iterations_per_row > 0.0) {
+          po.max_iterations = std::max<Int>(
+              po.max_iterations,
+              static_cast<Int>(options.root_crossover_iterations_per_row *
+                               lp.num_rows()));
+        }
+        const PdhgResult seed = solve_pdhg(lp, po);
+        if (!seed.x.empty()) {
+          root_cross = crossover_basis(lp, seed.x, seed.y);
+          if (root_cross.ok) {
+            so.start_basic = &root_cross.basic;
+            so.start_status = &root_cross.status;
+            result.root_crossover_pushed = root_cross.pushed;
+          }
+        }
       }
-      const SimplexResult r = solve_lp(lp, so);
+      SimplexResult r = solve_lp(lp, so);
+      // Same rule as everywhere else this appears: a starting basis may save
+      // pivots and may do nothing, but it may not cost an answer.
+      if (root_cross.ok && so.start_basic == &root_cross.basic &&
+          r.status != SimplexStatus::kOptimal) {
+        SimplexOptions cold = so;
+        cold.start_basic = nullptr;
+        cold.start_status = nullptr;
+        const SimplexResult again = solve_lp(lp, cold);
+        if (again.status == SimplexStatus::kOptimal) r = again;
+      } else if (root_cross.ok && r.started_warm) {
+        result.root_crossover_used = true;
+      }
       result.simplex_iterations += r.iterations;
       out->warm = r.started_warm;
       if (r.started_warm) result.warm_started_nodes++;
@@ -539,6 +575,7 @@ BranchAndBoundResult solve_milp(const Model& model,
     // result anyone can reproduce.
     std::mt19937 rng(20260830u);
     Int restarts = 0;
+    double objective_weight = options.pump_objective_weight;
 
     for (Int round = 0; round < options.pump_max_rounds; ++round) {
       if (elapsed() > deadline) break;
@@ -613,6 +650,29 @@ BranchAndBoundResult solve_milp(const Model& model,
         }
       }
       if (pulled == 0) break;
+
+      // Mix in a decaying share of the real objective. Both terms are
+      // normalised first, because one is a count of columns and the other is
+      // in the model's own units - adding them unnormalised would let whichever
+      // has the larger units decide everything.
+      if (objective_weight > 0.0) {
+        double distance_norm = 0.0;
+        double cost_norm = 0.0;
+        for (Int j = 0; j < n; ++j) {
+          distance_norm += pump.c[sz(j)] * pump.c[sz(j)];
+          cost_norm += working.c[sz(j)] * working.c[sz(j)];
+        }
+        distance_norm = std::sqrt(distance_norm);
+        cost_norm = std::sqrt(cost_norm);
+        if (distance_norm > 0.0 && cost_norm > 0.0) {
+          const double a = objective_weight;
+          for (Int j = 0; j < n; ++j) {
+            pump.c[sz(j)] = (1.0 - a) * pump.c[sz(j)] / distance_norm +
+                            a * working.c[sz(j)] / cost_norm;
+          }
+        }
+        objective_weight *= options.pump_objective_decay;
+      }
 
       SimplexOptions so = options.simplex;
       so.algorithm = SimplexOptions::Algorithm::kPrimal;
