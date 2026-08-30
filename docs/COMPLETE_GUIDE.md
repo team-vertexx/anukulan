@@ -695,8 +695,20 @@ Two practical points that are not decoration:
 
 - **Pivot magnitude matters more than step length.** The chosen $\alpha_{qr}$
   becomes a divisor in the basis update; picking a tiny one because it wins the
-  ratio by $10^{-12}$ poisons the factorisation. The implementation takes the
-  best pivot among candidates within a tolerance of the minimum ratio.
+  ratio by $10^{-12}$ poisons the factorisation.
+
+  This sentence used to end "and the implementation takes the best pivot among
+  candidates within a tolerance of the minimum ratio." It did not. The ratio
+  test broke ties by row, and under Bland's rule by index, and never by the size
+  of the pivot — and that one missing line was responsible for **six wrong
+  answers** across the Netlib set, three of them reporting optimal at a point
+  missing the rows by up to $1.8 \times 10^9$. Section 17 has the list.
+
+  What is there now is narrower than the sentence claimed: the tie is broken by
+  pivot magnitude only when the pivot about to be taken is below a hundredth of
+  the largest entry in its own column. A rescue, not a policy — an
+  unconditional preference for the larger pivot loses `blend`, and the threshold
+  was swept rather than chosen.
 - **Degeneracy.** When $x_{B_i}$ already sits on its bound the ratio is $0$, the
   step is $0$, and the objective does not move. Repeated, this cycles. The
   EXPAND scheme allows a tiny, slowly growing bound relaxation so a strictly
@@ -1202,6 +1214,89 @@ cuPDLPx simplifies this to a **fixed-point residual** test — restart when
 $\|z - T(z)\|$ has fallen by a fixed factor since the epoch began. Cheaper, since
 $z - T(z)$ is already computed for the reflection, and it does not need the gap.
 Both are implemented; the fixed-point rule is the default.
+
+### 11.10 Crossover — from a point to a vertex
+
+The two solvers in this document work on the same problem representation and,
+for most of the project, never spoke to each other. They fail in opposite ways.
+
+| | reaches | costs |
+|---|---|---|
+| first-order | a point, quickly; a vertex never | matrix-vector products — the GPU's shape |
+| simplex | a vertex exactly, with a proof | the walk, one pivot at a time |
+
+**Crossover is the join.** Solve loosely with the first-order method, read off
+which columns that point wants basic, and hand the simplex a basis to start from
+instead of the all-logical one. If the guess is good the simplex has a short walk
+left, and what comes out is a vertex with the usual certificate.
+
+**Reading the basis off a point.** A column strictly inside its bounds cannot be
+sitting *at* one, so it must be basic — that is the whole rule. Score each
+column by how far the point has it from its nearest bound, relative to its own
+range, and take them best-first. A row the point has tight wants its slack
+nonbasic; a row with real slack wants to keep it.
+
+**The trap, and it is the interesting part.** The obvious implementation picks
+the top $m$ columns and factorises them. That does not work: nothing guarantees
+$m$ columns chosen this way are linearly independent, and an earlier attempt in
+this codebase produced singular starting bases on `scfxm1`, `bandm` and `degen2`.
+
+So it is done the other way round. Start from the all-logical basis, which is
+$-I$ and nonsingular by inspection, and **pivot candidates in one at a time**
+through the same update the simplex uses:
+
+$$\alpha = B^{-1}a_j, \qquad \text{choose row } r \text{ with } |\alpha_r| \text{ largest among rows still held by a logical}$$
+
+A pivot on a nonzero element maps a nonsingular basis to a nonsingular one, so
+non-singularity is an **invariant** rather than a hope.
+
+**Two things `cycle` taught, which no test would have.** Pushing 749 columns
+without ever refactorising decayed the product form until the answer was wrong.
+Refactorising periodically fixed that — and the basis handed over still only
+worked *through its leftover updates*, so the simplex factorised it from scratch,
+refused it, and started cold while the run reported success. Both are fixed by
+keeping the last basis that factorised from scratch and handing that one over.
+
+And the rule that makes this safe to ship at all: **if the seeded solve does not
+reach an optimum, the cold solve is run and that is the answer.** An
+optimisation that can turn "optimal" into "numerical error" is not one.
+
+**What it buys.** Over the Netlib set, **0.52× the simplex pivots** —
+`degen3` 89,640 → 25,027, `d2q06c` 25,012 → 3,952, `czprob` 5,261 → 1,130.
+Handed its own optimum, it returns in zero iterations.
+
+But the number that matters more is the status column. Five instances that
+returned **no answer at all** now return the right one:
+
+| instance | cold simplex | with crossover |
+|---|---|---|
+| degen3 | time limit | **optimal** |
+| stocfor2 | time limit | **optimal** |
+| scsd8 | iteration limit | **optimal** |
+| wood1p | numerical error | **optimal** |
+| modszk1 | unbounded — *wrong* | **optimal** |
+
+**The seed needs a budget**, and this is where the honest accounting is. Left
+alone, `bore3d` spent 194,440 first-order iterations to save 284 pivots. Budgeted
+per row rather than flat — because a flat cap is too loose for a small model and
+too tight for a large one:
+
+| iterations per row | pivots | seed cost |
+|---|---|---|
+| flat 5,000 | 47,487 → 17,996 | 61,120 |
+| **10** | 47,487 → **12,781** | 80,590 |
+| 20 | 47,487 → 14,917 | 110,160 |
+| 40 | 47,487 → 11,403 | 154,000 |
+
+Twenty being worse than ten and forty better again says this is not finely
+determined. What the sweep establishes is the *shape*: a per-row budget beats a
+flat one, and past ten the seed grows faster than the saving.
+
+**And this is where the GPU enters the rest of the solver.** The seed is
+matrix-vector products and clamps; the pivots it saves are not. The same
+crossover now seeds the root relaxation of every MILP, which is the one solve in
+the tree with nothing to inherit — and on `10teams` and `binkar10_1` that root
+was consuming the entire time budget without finishing.
 
 ## 12. Branch and cut, concretely
 
@@ -1715,7 +1810,7 @@ the measurements kept where the option would have been.
 
 # Part V — What went wrong, and what it taught
 
-## 17. Six times the solver was confidently wrong
+## 17. Seven times the solver was confidently wrong
 
 The plan's risk register had eleven risks and ten were about *finishing on time*.
 That risk never materialised. This one did, repeatedly.
@@ -1757,6 +1852,39 @@ whatever `cudaMalloc` returned. The CPU allocator zeroes; CUDA does not.
    family was valid alone — only the combination broke, because only the combined
    run reached the point that produced the bad cut.
 
+**Six Netlib answers, from one missing line in the ratio test.** The
+verification above was run on sixteen instances. Run on all eighty-eight, it
+found six the simplex got wrong:
+
+| instance | reported | true | how wrong |
+|---|---|---|---|
+| grow15 | $-205{,}842{,}493$ | $-106{,}870{,}941$ | rows out by $1.9\times10^{6}$ |
+| grow22 | $-68{,}986{,}355{,}650$ | $-160{,}834{,}336$ | rows out by $1.8\times10^{9}$ |
+| maros | $-102{,}064.67$ | $-58{,}063.74$ | rows out by $5.1\times10^{6}$ |
+| modszk1 | "unbounded" | $320.61972906$ | a bounded model |
+| scsd1 | "unbounded" | $8.6666666743$ | a bounded model |
+| cycle | $-30.888$ | $-5.2263930249$ | just wrong |
+
+One cause, described in Section 10.1: the ratio test never compared pivot
+magnitudes. A candidate winning the ratio by $10^{-12}$ and losing the pivot by
+six orders of magnitude was taken, the basis update divided by it, and the
+factorisation decayed until $x_B$ stopped meaning anything.
+
+The part worth sitting with is why nothing objected. **Every check the solver
+runs goes through the same basis.** The optimality test, the feasibility test,
+the residual — all of them ask the decayed representation, and it answers
+consistently. A solver cannot audit itself through the object that is broken.
+So the guard that went in alongside the fix recomputes $Ax$ **from the matrix**
+before the word "optimal" leaves the function, which is the one check that does
+not go through the basis.
+
+And a coda that is its own lesson. The same verification flagged eight *more*
+disagreements which turned out to be **errors in our own reference table** —
+HiGHS returns what this solver returns on all eight, and `e226`'s stored value
+was off by exactly 7.113, which is that instance's objective constant. Eleven
+disagreements at once is usually the reference and not the code; the way to tell
+is a third opinion, not more staring.
+
 ## 18. The tools that exist because something got through
 
 - A **dual-feasibility check** the simplex runs on itself before claiming
@@ -1790,8 +1918,14 @@ whatever `cudaMalloc` returned. The CPU allocator zeroes; CUDA does not.
 ## 20. Verified against published answers
 
 - Reader matches HiGHS on all 88 Netlib instances, 1.4–1.5× faster.
-- Primal and dual simplex both correct on all 16 Netlib instances with published
-  optima.
+- **Simplex: 72 of 88 Netlib instances reach the published optimum**, and no
+  instance returns a wrong answer. Sixteen do not finish inside the limit or
+  stop with a numerical error, which is a failure the caller can see. This
+  replaces an earlier "16 of 16" that was true of a sixteen-instance subset and
+  hid six wrong answers on the rest — Section 17.
+- Crossover from a first-order point takes the simplex to **0.52× the pivots**
+  over the whole set, and turns five instances that returned no answer at all
+  (`degen3`, `stocfor2`, `scsd8`, `wood1p`, `modszk1`) into correct ones.
 - Presolve removes ~19% of rows and ~12% of columns without changing any answer,
   and recovers duals as well as primals.
 - GPU measured 2.70×–7.09× over the same algorithm on CPU (Tesla T4).
