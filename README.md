@@ -109,6 +109,7 @@ Full onboarding — layout, conventions, how to run each benchmark — is in
 | [docs/KAGGLE.md](docs/KAGGLE.md) | running the GPU benchmarks on a rented T4 |
 | [RESEARCH.md](RESEARCH.md) | the survey done before any code was written |
 | [PLAN.md](PLAN.md) | the build plan written from that research |
+| [docs/HANDOVER.md](docs/HANDOVER.md) | design decisions, the testing strategy, and what is next |
 | [SESSION_PROMPTS.md](SESSION_PROMPTS.md) | the five open work streams, each a self-contained brief |
 
 Two PDFs, both generated from the documents above:
