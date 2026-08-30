@@ -844,9 +844,9 @@ we wrote ourselves.
 ## 16. Five work streams
 
 The parts furthest behind, split so they can be worked in parallel on separate
-branches. Each carries its own brief: the problem with the evidence for it, what
-has already been tried and failed so nobody repeats it, and directions to
-research rather than a solution to implement.
+branches. For each, what follows is the problem with the evidence for it, what
+has already been tried and failed so nobody repeats it, and the directions worth
+researching — not a solution to implement.
 
 ### Stream 1 — MILP search  (branch `milp-search`)
 
@@ -859,7 +859,7 @@ an incumbent (RINS, local branching, sub-MIPs), cut pool management with ageing 
 right now a cut enters the matrix and stays forever, making every node below it
 more expensive — clique tables, symmetry detection.
 
-Known dead ends recorded in the brief: Gomory in every round (the root bound on
+Known dead ends, so they are not retried: Gomory in every round (the root bound on
 `gt2` runs past the optimum and comes back down, and a bound that falls after a
 cut is not a bound), strong branching without a depth cap (`gt2` 783 → 2,225
 nodes).

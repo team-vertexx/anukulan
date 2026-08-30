@@ -1111,8 +1111,69 @@ int command_milp(const std::vector<std::string>& args) {
     solved_model = pre.reduced;
   }
 
+  // A solution known to be feasible and optimal, against which every prune gets
+  // checked. See BranchAndBoundOptions::debug_solution for why: when a tree
+  // returns a wrong answer there is no way to reason backwards from the answer
+  // to the prune that lost it, and this turns that question into a printed
+  // line. The facility was there and had no way in from the command line, so
+  // using it meant writing C++.
+  //
+  // Read by column name, so a file this program wrote with --solution can be
+  // handed straight back to a run with different options - which is the check
+  // that matters when a change strengthens a prune.
+  std::vector<double> debug_solution;
+  if (!debug_solution_path.empty()) {
+    std::ifstream in(debug_solution_path);
+    if (!in) {
+      std::fprintf(stderr, "cannot read \"%s\"\n", debug_solution_path.c_str());
+      return 1;
+    }
+    debug_solution.assign(sankhya::sz(solved_model.num_cols()), 0.0);
+    std::size_t matched = 0;
+    std::string name;
+    while (in >> name) {
+      if (!name.empty() && name[0] == '#') {
+        std::string rest;
+        std::getline(in, rest);
+        continue;
+      }
+      double value = 0.0;
+      if (!(in >> value)) break;
+      for (std::size_t j = 0; j < solved_model.col_names.size(); ++j) {
+        if (solved_model.col_names[j] == name) {
+          debug_solution[j] = value;
+          ++matched;
+          break;
+        }
+      }
+    }
+    std::fprintf(stderr, "debug solution: matched %zu of %d columns\n", matched,
+                 solved_model.num_cols());
+    options.debug_solution = &debug_solution;
+  }
+
   sankhya::BranchAndBoundResult r = sankhya::solve_milp(solved_model, options);
   if (use_presolve) r.x = pre.postsolve.apply(r.x);
+
+  // Column name and value, one per line, which is the format --debug-solution
+  // reads back. Written only when there is an incumbent: a file of zeros from a
+  // run that found nothing would be handed back as a known answer and every
+  // prune would be checked against a point that is not one.
+  if (!solution_path.empty() && !r.x.empty()) {
+    std::ofstream out(solution_path);
+    if (!out) {
+      std::fprintf(stderr, "cannot write solution to \"%s\"\n",
+                   solution_path.c_str());
+      return 1;
+    }
+    out.precision(17);
+    out << "# objective " << r.objective << "\n";
+    out << "# status " << sankhya::to_string(r.status) << "\n";
+    for (std::size_t j = 0;
+         j < r.x.size() && j < read_result.model.col_names.size(); ++j) {
+      out << read_result.model.col_names[j] << " " << r.x[j] << "\n";
+    }
+  }
 
   if (as_json) {
     std::ostringstream out;
