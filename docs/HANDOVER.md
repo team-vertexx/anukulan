@@ -844,9 +844,9 @@ we wrote ourselves.
 ## 16. Five work streams
 
 The parts furthest behind, split so they can be worked in parallel on separate
-branches. `SESSION_PROMPTS.md` in the repository carries a self-contained brief
-for each — the problem with its evidence, what has already been tried and failed,
-and directions to research rather than a solution to implement.
+branches. Each carries its own brief: the problem with the evidence for it, what
+has already been tried and failed so nobody repeats it, and directions to
+research rather than a solution to implement.
 
 ### Stream 1 — MILP search  (branch `milp-search`)
 
@@ -1009,7 +1009,6 @@ Documents in the repository, in reading order:
 | `docs/RESULTS.md` | every measurement with its command |
 | `docs/ONBOARDING.md` | practical setup, and the traps in Section 11 |
 | `docs/ROADMAP.md` | what is open and why |
-| `SESSION_PROMPTS.md` | the five briefs |
 | `PLAN.md` | the original build plan, plus a Part II revisiting it |
 
 **The conventions that matter.** Every default in this codebase is a measurement

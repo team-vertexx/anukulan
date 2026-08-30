@@ -61,13 +61,17 @@ for r in sorted(rows, key=lambda r: (r[1] != "optimal", r[3] if r[3] is not None
 # against, so it explores blind and the bound never moves - which is a different
 # and worse failure than a poor gap, and the totals used to hide it inside
 # "not optimal".
-feasible = [r for r in rows if r[2] is not None]
+# Read from the incumbent count, not from the objective. A build that leaves the
+# objective at its default zero when it found nothing reports a number either
+# way, and on acc-tight4 - whose optimum is 0 - that number scores as an exact
+# answer. The count of incumbents is the thing that cannot be faked.
+feasible = [r for r in records if r.get("incumbents", 0) > 0]
 print(f"\n{len(rows)} instances: {len(feasible)} ended with a feasible solution, "
       f"{len(solved)} proved optimal, "
       f"{len(close)} more within 1% of the published optimum")
-print(f"no feasible solution at all: {len(rows) - len(feasible)}"
-      + ("" if len(feasible) == len(rows)
-         else "  (" + ", ".join(r[0] for r in rows if r[2] is None) + ")"))
+blank = [r["name"] for r in records if r.get("incumbents", 0) == 0]
+print(f"no feasible solution at all: {len(blank)}"
+      + ("" if not blank else "  (" + ", ".join(sorted(blank)) + ")"))
 if record_to:
     with open(record_to, "w") as fh:
         json.dump(records, fh, indent=1)
