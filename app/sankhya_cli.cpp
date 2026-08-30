@@ -986,6 +986,8 @@ int command_milp(const std::vector<std::string>& args) {
   options.relaxation.max_iterations = 500000;
   options.relaxation.time_limit_seconds = 30.0;
   bool as_json = false;
+  std::string solution_path;
+  std::string debug_solution_path;
 
   for (std::size_t i = 1; i < args.size(); ++i) {
     const std::string& a = args[i];
@@ -1043,6 +1045,10 @@ int command_milp(const std::vector<std::string>& args) {
           sankhya::SimplexOptions::DualPricing::kSteepestEdge;
     } else if (value_of(a, "--pump-objective=", &v)) {
       options.pump_objective_weight = v;
+    } else if (a.rfind("--solution=", 0) == 0) {
+      solution_path = a.substr(std::string("--solution=").size());
+    } else if (a.rfind("--debug-solution=", 0) == 0) {
+      debug_solution_path = a.substr(std::string("--debug-solution=").size());
     } else if (a == "--no-cut-filtering") {
       options.root_cut_filtering = false;
     } else if (a == "--no-lp-diving") {
