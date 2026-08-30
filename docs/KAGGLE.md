@@ -63,7 +63,7 @@ personal access token:
 
     from kaggle_secrets import UserSecretsClient
     token = UserSecretsClient().get_secret("GITHUB_TOKEN")
-    !git clone https://{token}@github.com/team-vertex/<repo>.git /kaggle/working/sankhya
+    !git clone https://{token}@github.com/team-vertexx/<repo>.git /kaggle/working/sankhya
 
 Worth setting up when you start changing kernels and re-running often, because
 updating means a `git pull` instead of a fresh upload.
