@@ -80,6 +80,16 @@ struct BranchAndBoundOptions {
   // current point, so they are available now. See cuts.hpp.
   bool root_cuts = true;
   Int cut_rounds = 8;
+  // Share of the whole time budget the root cut loop may spend. Eight rounds
+  // are eight full LPs on a relaxation that is growing by up to sixty rows a
+  // round, and on a hard instance that is the entire run: berlin at a fifteen
+  // second limit solved eleven relaxations for 75,098 simplex iterations and
+  // then explored *zero* nodes, so it reported no incumbent and no bound
+  // improvement, having spent the budget tightening a root it never used.
+  //
+  // Cuts are worth a slice, not the run. Whatever rounds fit inside the slice
+  // are kept; the rest are dropped and the tree gets the remaining time.
+  double root_cut_time_share = 0.3;
   // Rounds in which Gomory cuts are separated. They are read off the tableau,
   // and after the first round that tableau describes a problem that is mostly
   // previous cuts - so each round derives cuts from cuts, and the rounding
@@ -289,6 +299,41 @@ struct BranchAndBoundOptions {
   bool diving_heuristic = true;
   Int diving_max_depth = 40;
 
+  // Feasibility pump, following Fischetti, Glover and Lodi (Math. Prog. 104,
+  // 2005). Rounding and diving both work forwards from the relaxation: round it
+  // and hope, or pin variables one at a time and hope the propagation survives.
+  // On the wider MIPLIB set neither finds anything on most instances - a
+  // fifteen second run of the first thirteen ended with no incumbent at all on
+  // seven of them, so there was nothing to prune against and the tree was
+  // exploring blind.
+  //
+  // The pump works the other way round. It keeps two points: an integral one
+  // that need not satisfy the rows, and a relaxation point that satisfies the
+  // rows but need not be integral. Each round rounds the second to refresh the
+  // first, then re-solves the relaxation with the objective replaced by the
+  // distance to it. The two are pulled together until they meet, and where they
+  // meet is a feasible integer point.
+  //
+  // What makes it affordable: only the objective changes between rounds, so the
+  // bounds and rows are untouched and the previous basis is still primal
+  // feasible. The primal simplex warm starts from it and finishes in a few
+  // pivots, exactly as a branch and bound child does for the dual.
+  bool feasibility_pump = true;
+  Int pump_max_rounds = 60;
+  // Two identical roundings in a row means the distance LP has stopped moving.
+  // The escape is to flip some of the least confident columns and carry on;
+  // past this many escapes the pump is not going to find anything.
+  Int pump_max_restarts = 10;
+  // Iterations one distance LP may take, as a multiple of the row count. It is
+  // a warm started re-optimisation after an objective change, so it should be
+  // quick; a long one means the pump is not the cheap thing it is supposed to
+  // be.
+  Int pump_iteration_factor = 10;
+  // Share of the pump's own time budget, as a fraction of the whole solve. The
+  // pump is worth a lot when it works and nothing when it does not, so it gets
+  // a slice rather than the run.
+  double pump_time_share = 0.25;
+
   // Start each child from its parent's solution. The first-order method has no
   // basis to inherit, but the parent's point is still a much better starting
   // guess than the origin.
@@ -322,6 +367,11 @@ struct BranchAndBoundResult {
   Int nodes_proved_infeasible = 0;
   Int nodes_relaxation_failed = 0;
   Int heuristic_successes = 0;
+  // Feasibility pump: rounds run, times it produced an incumbent, and how many
+  // times it had to escape a cycle.
+  Int pump_rounds = 0;
+  Int pump_successes = 0;
+  Int pump_restarts = 0;
   // Bounds tightened by reduced-cost fixing, and how many closed a range to nothing.
   Int reduced_cost_tightenings = 0;
   Int reduced_cost_fixings = 0;

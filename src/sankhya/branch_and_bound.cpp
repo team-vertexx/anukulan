@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <random>
 
 #include "sankhya/cuts.hpp"
 #include "sankhya/simplex.hpp"
@@ -288,6 +289,14 @@ BranchAndBoundResult solve_milp(const Model& model,
       if (factor > 0) {
         so.max_iterations = std::max<Int>(200, factor * lp.num_rows());
       }
+      // No single relaxation may outlive the budget for the whole solve. This
+      // is not a refinement: without it the time limit only bounded the node
+      // loop, and everything before that loop - the root relaxation and eight
+      // rounds of cut separation, each its own LP - ran unbounded. 10teams
+      // asked for 15 seconds and took 103.8, which is not a solver reporting a
+      // time limit, it is a solver ignoring one.
+      so.time_limit_seconds =
+          std::max(0.0, options.time_limit_seconds - elapsed());
       if (static_cast<Int>(node.basic.size()) == lp.num_rows() &&
           !node.basis_status.empty()) {
         so.start_basic = &node.basic;
@@ -330,6 +339,9 @@ BranchAndBoundResult solve_milp(const Model& model,
     bool have_root_std = false;
 
     for (Int round = 0; round < options.cut_rounds; ++round) {
+      // Cut rounds are the expensive part of the root, and each is a full LP.
+      // Stopping between rounds keeps whatever the earlier rounds bought.
+      if (elapsed() > options.root_cut_time_share * options.time_limit_seconds) break;
       // Through the same solver the nodes use, because that is what makes the
       // tableau available - and Gomory cuts are read off the tableau.
       Node probe;
@@ -503,6 +515,143 @@ BranchAndBoundResult solve_milp(const Model& model,
     return true;
   };
 
+  // Feasibility pump. See branch_and_bound.hpp for why this exists at all: on
+  // most of the wider MIPLIB set neither rounding nor diving finds anything, and
+  // a tree with no incumbent has nothing to prune against.
+  //
+  // Two points are pulled together. `target` is integral and need not satisfy
+  // the rows; `x` satisfies the rows and need not be integral. Each round
+  // refreshes the first by rounding the second, then re-solves the relaxation
+  // with the objective replaced by the distance to it.
+  auto run_feasibility_pump = [&](const std::vector<double>& start_x,
+                                  double deadline) {
+    if (integer_columns.empty() || start_x.empty()) return false;
+    const Int n = working.num_cols();
+
+    StandardLp pump = working;  // same rows, same bounds; only c changes
+    std::vector<double> x = start_x;
+    std::vector<double> target(sz(n), 0.0);
+    std::vector<double> previous;
+    std::vector<Int> basic;
+    std::vector<VarStatus> basis_status;
+    bool have_basis = false;
+    // Fixed seed: a heuristic that finds a solution only on some runs is not a
+    // result anyone can reproduce.
+    std::mt19937 rng(20260830u);
+    Int restarts = 0;
+
+    for (Int round = 0; round < options.pump_max_rounds; ++round) {
+      if (elapsed() > deadline) break;
+      result.pump_rounds++;
+
+      // Round the integers; leave the continuous part where the relaxation put
+      // it, since it is already consistent with the rows.
+      target = x;
+      for (const Int j : integer_columns) {
+        const double rounded = std::round(x[sz(j)]);
+        target[sz(j)] = std::fmin(std::fmax(rounded, working.lower[sz(j)]),
+                                  working.upper[sz(j)]);
+      }
+      if (try_incumbent(target)) {
+        result.pump_successes++;
+        return true;
+      }
+
+      // The same rounding twice means the distance LP has stopped moving.
+      // Flipping the columns the rounding was least sure about is what breaks
+      // the cycle; taking the least sure ones rather than random ones is what
+      // makes the escape purposeful.
+      if (!previous.empty()) {
+        bool identical = true;
+        for (const Int j : integer_columns) {
+          if (std::fabs(target[sz(j)] - previous[sz(j)]) > 0.5) {
+            identical = false;
+            break;
+          }
+        }
+        if (identical) {
+          if (++restarts > options.pump_max_restarts) break;
+          result.pump_restarts++;
+          std::vector<std::pair<double, Int>> doubt;
+          doubt.reserve(integer_columns.size());
+          for (const Int j : integer_columns) {
+            doubt.push_back({std::fabs(x[sz(j)] - target[sz(j)]), j});
+          }
+          std::sort(doubt.begin(), doubt.end(),
+                    [](const std::pair<double, Int>& a,
+                       const std::pair<double, Int>& b) { return a.first > b.first; });
+          const std::size_t half = std::max<std::size_t>(1, doubt.size() / 20);
+          std::uniform_int_distribution<std::size_t> how_many(half, 3 * half);
+          const std::size_t flips = std::min(how_many(rng), doubt.size());
+          for (std::size_t k = 0; k < flips; ++k) {
+            const std::size_t j = sz(doubt[k].second);
+            const double away = (x[j] > target[j]) ? 1.0 : -1.0;
+            target[j] = std::fmin(std::fmax(target[j] + away, working.lower[j]),
+                                  working.upper[j]);
+          }
+        }
+      }
+      previous = target;
+
+      // Distance to `target`, linearised. An integer column whose target sits
+      // on one of its own bounds contributes its distance from that bound, which
+      // is linear. One landing strictly inside its range would need an auxiliary
+      // variable per column to write |x_j - t_j| as a linear term, which is the
+      // general-integer form of the pump and is not built here - those columns
+      // get no term, so the pump pulls on the binaries and lets the rest follow.
+      pump.c.assign(sz(n), 0.0);
+      Int pulled = 0;
+      for (const Int j : integer_columns) {
+        const double lower = working.lower[sz(j)];
+        const double upper = working.upper[sz(j)];
+        if (target[sz(j)] <= lower + 0.5 && lower > -kInf) {
+          pump.c[sz(j)] = 1.0;
+          ++pulled;
+        } else if (target[sz(j)] >= upper - 0.5 && upper < kInf) {
+          pump.c[sz(j)] = -1.0;
+          ++pulled;
+        }
+      }
+      if (pulled == 0) break;
+
+      SimplexOptions so = options.simplex;
+      so.algorithm = SimplexOptions::Algorithm::kPrimal;
+      so.time_limit_seconds = std::max(0.0, deadline - elapsed());
+      if (options.pump_iteration_factor > 0) {
+        so.max_iterations =
+            std::max<Int>(200, options.pump_iteration_factor * pump.num_rows());
+      }
+      // Only the objective moved, so the previous basis is still primal
+      // feasible and the primal simplex re-optimises from it in a few pivots.
+      if (have_basis && static_cast<Int>(basic.size()) == pump.num_rows()) {
+        so.start_basic = &basic;
+        so.start_status = &basis_status;
+      }
+      const SimplexResult r = solve_lp(pump, so);
+      result.simplex_iterations += r.iterations;
+      if (r.status != SimplexStatus::kOptimal || r.x.empty()) break;
+      basic = r.final_basic;
+      basis_status = r.final_status;
+      have_basis = !basic.empty();
+
+      // Converged: the relaxation point is already integral, so the two points
+      // have met.
+      bool integral = true;
+      for (const Int j : integer_columns) {
+        if (fractionality(r.x[sz(j)]) > options.integrality_tolerance) {
+          integral = false;
+          break;
+        }
+      }
+      x = r.x;
+      if (integral && try_incumbent(x)) {
+        result.pump_successes++;
+        return true;
+      }
+    }
+    return false;
+  };
+
   MilpStatus status = MilpStatus::kInfeasible;
   double open_bound = -kInf;
 
@@ -587,6 +736,19 @@ BranchAndBoundResult solve_milp(const Model& model,
         rounded[j] = std::fmin(std::fmax(rounded[j], node.lower[j]), node.upper[j]);
       }
       if (try_incumbent(rounded)) result.heuristic_successes++;
+    }
+
+    // Then the pump, at the root and only while there is still nothing to prune
+    // against. It is the expensive heuristic and the only one that finds
+    // anything on most of the wider set, so it goes first and gets a slice of
+    // the budget rather than a node's worth.
+    if (options.feasibility_pump && incumbent_x.empty() && node.depth == 0) {
+      const double deadline =
+          std::fmin(options.time_limit_seconds,
+                    elapsed() + options.pump_time_share * options.time_limit_seconds);
+      if (run_feasibility_pump(relaxation.x, deadline)) {
+        result.heuristic_successes++;
+      }
     }
 
     // Then fix-and-propagate, which costs one extra relaxation solve, so it runs

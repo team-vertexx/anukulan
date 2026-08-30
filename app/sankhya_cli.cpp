@@ -14,6 +14,7 @@
 #include "sankhya/pdhg.hpp"
 #include "sankhya/presolve.hpp"
 #include "sankhya/qp.hpp"
+#include "sankhya/crossover.hpp"
 #include "sankhya/simplex.hpp"
 #include "sankhya/standard_form.hpp"
 
@@ -71,6 +72,8 @@ void print_usage() {
       "  --polish-factor=F    polish budget as a fraction of iterations so far\n"
       "  --no-primal-weight   keep the primal weight at one\n"
       "  --presolve           reduce the model first, then map the answer back\n"
+      "  --crossover          seed the simplex basis from a first-order solve\n"
+      "  --crossover-tol=T    how far that seed solve is taken (default 1e-4)\n"
       "  --profile            report where the device time went, kernel by kernel\n"
       "  --verbose            print progress\n"
       "  --backend=cpu|cuda   force a backend instead of picking automatically\n"
@@ -356,11 +359,18 @@ int command_simplex(const std::vector<std::string>& args) {
   bool as_json = false;
   bool quiet = false;
   bool use_presolve = false;
+  bool use_crossover = false;
+  double crossover_tolerance = 1e-4;
   sankhya::SimplexOptions options;
   for (std::size_t i = 1; i < args.size(); ++i) {
     const std::string& a = args[i];
     double v = 0.0;
-    if (value_of(a, "--max-iter=", &v)) {
+    if (value_of(a, "--crossover-tol=", &v)) {
+      crossover_tolerance = v;
+      use_crossover = true;
+    } else if (a == "--crossover") {
+      use_crossover = true;
+    } else if (value_of(a, "--max-iter=", &v)) {
       options.max_iterations = static_cast<sankhya::Int>(v);
     } else if (value_of(a, "--time-limit=", &v)) {
       options.time_limit_seconds = v;
@@ -432,7 +442,40 @@ int command_simplex(const std::vector<std::string>& args) {
     return 1;
   }
 
+  // Crossover: let the first-order method get roughly to the answer, then start
+  // the simplex from the basis that point implies rather than from all logicals.
+  sankhya::CrossoverResult cross;
+  sankhya::PdhgResult seed;
+  if (use_crossover) {
+    sankhya::PdhgOptions po;
+    po.tolerance = crossover_tolerance;
+    po.gap_tolerance = crossover_tolerance;
+    seed = sankhya::solve_pdhg(sf.lp, po);
+    cross = sankhya::crossover_basis(sf.lp, seed.x, seed.y);
+    if (cross.ok) {
+      options.start_basic = &cross.basic;
+      options.start_status = &cross.status;
+    }
+  }
+
   sankhya::SimplexResult r = sankhya::solve_lp(sf.lp, options);
+
+  // A starting basis is an optimisation, and an optimisation that turns
+  // "optimal" into "numerical error" is not one. cycle is the instance that
+  // proves the point: its crossover basis factorises, warm starts, and then
+  // fails - so if the seeded solve does not reach an optimum, the cold solve is
+  // run and that is the answer. Crossover can then only ever save pivots.
+  bool crossover_fell_back = false;
+  if (use_crossover && cross.ok && r.status != sankhya::SimplexStatus::kOptimal) {
+    sankhya::SimplexOptions cold = options;
+    cold.start_basic = nullptr;
+    cold.start_status = nullptr;
+    const sankhya::SimplexResult again = sankhya::solve_lp(sf.lp, cold);
+    if (again.status == sankhya::SimplexStatus::kOptimal) {
+      r = again;
+      crossover_fell_back = true;
+    }
+  }
   if (use_presolve && !r.x.empty()) r.x = pre.postsolve.apply(r.x);
   const sankhya::ModelViolation checked =
       sankhya::measure_violation(read_result.model, r.x);
@@ -462,6 +505,17 @@ int command_simplex(const std::vector<std::string>& args) {
         << "\"presolved\":" << use_presolve << ","
         << "\"row_violation\":" << checked.row_violation << ","
         << "\"bound_violation\":" << checked.bound_violation << ","
+        << "\"crossover\":" << use_crossover << ","
+        << "\"crossover_ok\":" << cross.ok << ","
+        << "\"crossover_fell_back\":" << crossover_fell_back << ","
+        << "\"crossover_rolled_back\":" << cross.rolled_back << ","
+        << "\"crossover_message\":\"" << cross.message << "\","
+        << "\"crossover_candidates\":" << cross.candidates << ","
+        << "\"crossover_pushed\":" << cross.pushed << ","
+        << "\"crossover_logicals_left\":" << cross.logicals_remaining << ","
+        << "\"crossover_seed_iterations\":" << seed.iterations << ","
+        << "\"crossover_seed_seconds\":" << seed.solve_seconds << ","
+        << "\"started_warm\":" << r.started_warm << ","
         << "\"std_rows\":" << sf.lp.num_rows() << ","
         << "\"std_cols\":" << sf.lp.num_cols() << "}\n";
     std::fputs(out.str().c_str(), stdout);
@@ -961,6 +1015,9 @@ int command_milp(const std::vector<std::string>& args) {
         << "\"relaxations\":" << r.relaxations_solved << ","
         << "\"incumbents\":" << r.incumbents_found << ","
         << "\"heuristic_successes\":" << r.heuristic_successes << ","
+        << "\"pump_rounds\":" << r.pump_rounds << ","
+        << "\"pump_successes\":" << r.pump_successes << ","
+        << "\"pump_restarts\":" << r.pump_restarts << ","
         << "\"cuts_added\":" << r.cuts_added << ","
         << "\"gomory_cuts_added\":" << r.gomory_cuts_added << ","
         << "\"children_pruned_by_propagation\":"

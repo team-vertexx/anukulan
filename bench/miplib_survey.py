@@ -27,10 +27,13 @@ for f in sorted(glob.glob("data/miplib/*.mps")):
     try:
         d = json.loads(p.stdout.strip().splitlines()[-1])
     except Exception:
-        rows.append((name, "read/parse failed", None, None, wall, 0)); continue
+        rows.append((name, "read/parse failed", None, None, wall, 0))
+        print(f"  {len(rows):>3}/103 {name[:26]:<27} read/parse failed", flush=True); continue
     o = d.get("objective")
     err = abs(o - opt[name]) / max(1.0, abs(opt[name])) * 100 if o is not None else None
     rows.append((name, d.get("status", "?"), o, err, wall, d.get("nodes", 0)))
+    print(f"  {len(rows):>3}/103 {name[:26]:<27} {d.get('status','?')[:12]:<13} "
+          f"{'' if err is None else f'{err:8.3f}%'} {wall:6.1f}s", flush=True)
 
 solved = [r for r in rows if r[1] == "optimal"]
 close = [r for r in rows if r[1] != "optimal" and r[3] is not None and r[3] < 1.0]
