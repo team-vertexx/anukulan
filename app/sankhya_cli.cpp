@@ -1105,7 +1105,7 @@ int command_milp(const std::vector<std::string>& args) {
         << "\"status\":\"" << sankhya::to_string(r.status) << "\","
         << "\"objective\":" << json_number(r.objective) << ","
         << "\"dual_bound\":" << json_number(r.dual_bound) << ","
-        << "\"gap\":" << r.relative_gap << ","
+        << "\"gap\":" << json_number(r.relative_gap) << ","
         << "\"nodes\":" << r.nodes << ","
         << "\"max_depth\":" << r.max_depth << ","
         << "\"relaxations\":" << r.relaxations_solved << ","

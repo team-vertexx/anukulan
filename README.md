@@ -35,7 +35,9 @@ command next to it in [docs/RESULTS.md](docs/RESULTS.md). None of it is
 estimated.
 
 - **Reader** — matches HiGHS on all 88 Netlib instances, 1.4–1.5× faster
-- **Simplex** — primal 16/16 and dual 16/16 against published Netlib optima
+- **Simplex** — 78 of 88 Netlib instances reach the published optimum and none
+  returns a wrong answer; the other ten stop visibly. Seeded from a first-order
+  point it takes 0.52x the pivots
 - **First-order** — 76/88 Netlib published optima at `--tol=1e-8`
 - **Presolve** — removes 14.0% of rows, 15.4% of columns; 1.56× geomean speedup
 - **MILP** — 5 of 7 MIPLIB instances exact; `gen-ip054` 0.330%, `mas76` 0.562%

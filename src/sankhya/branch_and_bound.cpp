@@ -24,7 +24,11 @@ struct Node {
   Int branch_column = -1;
   bool branch_up = false;
   double branch_fraction = 0.0;
-  // The parent's relaxation solution, used as a starting guess.
+  // The parent's relaxation solution, used as a starting guess. Only the
+  // first-order node solver consumes it, so only that solver pays to carry it -
+  // it is n doubles on every open node, which is the largest single thing a
+  // node holds and is pure waste under the simplex, where what a child inherits
+  // is the basis below.
   std::vector<double> warm_x;
   // And the parent's basis, which is what actually makes a child cheap.
   std::vector<Int> basic;
@@ -296,8 +300,18 @@ BranchAndBoundResult solve_milp(const Model& model,
       // rounds of cut separation, each its own LP - ran unbounded. 10teams
       // asked for 15 seconds and took 103.8, which is not a solver reporting a
       // time limit, it is a solver ignoring one.
-      so.time_limit_seconds =
-          std::max(0.0, options.time_limit_seconds - elapsed());
+      //
+      // The budget has to be read immediately before each solve, and it used to
+      // be read once here. Two things spend time between that read and the
+      // solve it was meant for: the first-order seed below, which may take a
+      // fifth of what is left, and the cold retry after it, which was handed a
+      // copy of the same stale number and so got the whole limit a second time.
+      // Three things each entitled to the full budget is not a budget. Measured
+      // on the wider MIPLIB set at a 15 second limit, that is what the wall
+      // clock was actually doing: 10teams 28.8s, acc-tight4 31.3s.
+      auto budget_left = [&]() {
+        return std::max(0.0, options.time_limit_seconds - elapsed());
+      };
       // A crossover basis has to outlive the solve it is passed to, so it is
       // declared here rather than inside the branch that fills it.
       CrossoverResult root_cross;
@@ -332,6 +346,7 @@ BranchAndBoundResult solve_milp(const Model& model,
           }
         }
       }
+      so.time_limit_seconds = budget_left();
       SimplexResult r = solve_lp(lp, so);
       // Same rule as everywhere else this appears: a starting basis may save
       // pivots and may do nothing, but it may not cost an answer.
@@ -340,6 +355,7 @@ BranchAndBoundResult solve_milp(const Model& model,
         SimplexOptions cold = so;
         cold.start_basic = nullptr;
         cold.start_status = nullptr;
+        cold.time_limit_seconds = budget_left();
         const SimplexResult again = solve_lp(lp, cold);
         if (again.status == SimplexStatus::kOptimal) r = again;
       } else if (root_cross.ok && r.started_warm) {
@@ -359,7 +375,14 @@ BranchAndBoundResult solve_milp(const Model& model,
       return out->optimal;
     }
 
-    const PdhgResult p = solve_pdhg(lp, options.relaxation);
+    // The parent's point. This was being stored on every node and read by
+    // nothing, so the option below claimed an inheritance that never happened;
+    // the first-order path started every child from the origin.
+    PdhgOptions po = options.relaxation;
+    if (options.warm_start && node.warm_x.size() == sz(lp.num_cols())) {
+      po.warm_x = &node.warm_x;
+    }
+    const PdhgResult p = solve_pdhg(lp, po);
     out->optimal = p.status == PdhgStatus::kOptimal;
     out->proved_infeasible = p.status == PdhgStatus::kPrimalInfeasible;
     out->x = p.x;
@@ -751,9 +774,109 @@ BranchAndBoundResult solve_milp(const Model& model,
     return false;
   };
 
+  // LP-guided diving. See branch_and_bound.hpp for why this exists beside the
+  // fix-and-propagate dive: that one reads every decision off a single
+  // relaxation and never re-solves, so the further it goes the staler its guide
+  // is. This one re-solves after each decision, which is affordable because a
+  // decision is one bound on one variable - the same change a branching child
+  // makes, and the same warm start.
+  auto run_lp_dive = [&](const Node& from, const NodeSolution& relaxation,
+                         double deadline) {
+    if (integer_columns.empty() || relaxation.x.empty()) return false;
+    if (static_cast<Int>(relaxation.basic.size()) != working.num_rows()) return false;
+    ++result.lp_dives_run;
+
+    std::vector<double> lo = from.lower;
+    std::vector<double> hi = from.upper;
+    std::vector<double> x = relaxation.x;
+    std::vector<Int> basic = relaxation.basic;
+    std::vector<VarStatus> basis_status = relaxation.basis_status;
+
+    for (Int step = 0; step < options.lp_dive_max_steps; ++step) {
+      if (elapsed() > deadline) return false;
+
+      // Nearest an integer goes first: it is the smallest disturbance on the
+      // table, so it is the decision least likely to make the relaxation
+      // infeasible, and it is the one the relaxation is closest to making
+      // already.
+      Int pick = -1;
+      double least = kInf;
+      for (const Int j : integer_columns) {
+        const double f = fractionality(x[sz(j)]);
+        if (f <= options.integrality_tolerance) continue;
+        if (f < least) {
+          least = f;
+          pick = j;
+        }
+      }
+      if (pick < 0) {
+        // Nothing fractional is left, so this relaxation is already a feasible
+        // point of the integer problem. try_incumbent re-checks it against the
+        // rows rather than trusting the dive.
+        std::vector<double> candidate = x;
+        for (const Int j : integer_columns)
+          candidate[sz(j)] = std::round(candidate[sz(j)]);
+        if (try_incumbent(candidate)) {
+          ++result.lp_dive_successes;
+          return true;
+        }
+        return false;
+      }
+
+      const double value = x[sz(pick)];
+      const double nearest = std::round(value);
+      bool advanced = false;
+      for (int attempt = 0; attempt < 2 && !advanced; ++attempt) {
+        // The rounded side first, then the other one. Bound, do not fix: the
+        // rounded side is a branching child, and it leaves the rest of the
+        // column's range available to the relaxation.
+        const bool go_up = (attempt == 0) ? (nearest > value) : (nearest <= value);
+        std::vector<double> trial_lo = lo;
+        std::vector<double> trial_hi = hi;
+        if (go_up) {
+          trial_lo[sz(pick)] = std::fmax(trial_lo[sz(pick)], std::ceil(value));
+        } else {
+          trial_hi[sz(pick)] = std::fmin(trial_hi[sz(pick)], std::floor(value));
+        }
+        if (trial_lo[sz(pick)] > trial_hi[sz(pick)]) continue;
+        if (options.node_propagation &&
+            !propagate_bounds(working, is_integral, &trial_lo, &trial_hi,
+                              options.node_propagation_rounds)) {
+          continue;
+        }
+
+        Node probe;
+        probe.lower = trial_lo;
+        probe.upper = trial_hi;
+        probe.basic = basic;
+        probe.basis_status = basis_status;
+        NodeSolution solved;
+        ++result.lp_dive_steps;
+        if (!solve_node(probe, &solved, options.lp_dive_iteration_factor)) continue;
+        // A dive whose relaxation is already worse than the incumbent cannot
+        // reach anything worth having, and carrying on would spend the slice on
+        // a point that would be rejected at the end.
+        if (working.standard_objective(solved.x) >= incumbent) return false;
+
+        lo.swap(trial_lo);
+        hi.swap(trial_hi);
+        x = solved.x;
+        basic = solved.basic;
+        basis_status = solved.basis_status;
+        advanced = true;
+      }
+      // Neither side is available, and this dive has no deeper backtracking to
+      // offer. Another one from a different relaxation is cheaper than
+      // unwinding this one.
+      if (!advanced) return false;
+    }
+    return false;
+  };
+
   MilpStatus status = MilpStatus::kInfeasible;
   double open_bound = -kInf;
   double pump_time_spent = 0.0;
+  double lp_dive_time_spent = 0.0;
 
   while (!stack.empty()) {
     if (result.nodes >= options.node_limit) {
@@ -859,6 +982,23 @@ BranchAndBoundResult solve_milp(const Model& model,
           result.heuristic_successes++;
         }
         pump_time_spent += elapsed() - began;
+      }
+    }
+
+    // Then the LP-guided dive, on the same gate as the other two: it is for
+    // finding a first point, and once there is one to prune against the tree is
+    // the better use of the time.
+    if (options.lp_diving && incumbent_x.empty() &&
+        (node.depth == 0 ||
+         (options.lp_dive_retry_nodes > 0 &&
+          result.nodes % options.lp_dive_retry_nodes == 0))) {
+      const double budget = options.lp_dive_time_share * options.time_limit_seconds;
+      const double left = budget - lp_dive_time_spent;
+      if (left > 0.0) {
+        const double began = elapsed();
+        const double deadline = std::fmin(options.time_limit_seconds, began + left);
+        if (run_lp_dive(node, relaxation, deadline)) result.heuristic_successes++;
+        lp_dive_time_spent += elapsed() - began;
       }
     }
 
@@ -1156,7 +1296,10 @@ BranchAndBoundResult solve_milp(const Model& model,
       child.branch_up = take_up;
       child.branch_fraction =
           take_up ? (ceil_value - value) : (value - floor_value);
-      if (options.warm_start) child.warm_x = relaxation.x;
+      if (options.warm_start &&
+          options.node_solver == BranchAndBoundOptions::NodeSolver::kFirstOrder) {
+        child.warm_x = relaxation.x;
+      }
       child.basic = relaxation.basic;
       child.basis_status = relaxation.basis_status;
 
@@ -1214,7 +1357,34 @@ BranchAndBoundResult solve_milp(const Model& model,
       result.relative_gap = std::fabs(result.objective - result.dual_bound) /
                             std::fmax(1e-10, std::fabs(result.objective));
     }
-  } else if (status == MilpStatus::kInfeasible) {
+  } else {
+    // No incumbent, whatever the reason. There is no solution to report, and
+    // the field has to say so - it used to be left at its default zero on every
+    // path except the infeasible one, so a run that found nothing came back
+    // looking like a run that found an objective of zero.
+    //
+    // That is not cosmetic. On the wider MIPLIB set at a 15 second limit, seven
+    // of the first thirteen instances end with no incumbent, and the survey
+    // scored every one of them against the published optimum: acc-tight4, whose
+    // optimum is 0, came back reading 0.000% error - an exact answer, from a
+    // solve that never found a feasible point. 10teams read 100% error, which
+    // is at least visibly wrong. Both are this missing line.
+    //
+    // A non-finite objective reaches the CLI as JSON null, which is what a
+    // harness can actually test.
+    result.objective = maximizing ? -kInf : kInf;
+    // The bound is real even when the solution is not: every open node carries
+    // a bound its parent proved, and the smallest of them bounds the whole
+    // remaining tree. Worth reporting, since on an instance that finds nothing
+    // it is the only thing the run established.
+    double best_open = kInf;
+    for (const Node& n : stack) best_open = std::fmin(best_open, n.parent_bound);
+    result.dual_bound = std::isfinite(best_open) ? to_model_objective(best_open)
+                                                 : (maximizing ? kInf : -kInf);
+    // A gap needs two numbers and there is only one. Reporting zero here would
+    // read as a closed gap on a solve that proved nothing.
+    result.relative_gap = kInf;
+
     // "Infeasible" is a claim, and it is only true when every node was pruned
     // with a proof. If any relaxation ran out of budget without converging,
     // what we actually know is that we failed to solve the problem, and saying
@@ -1222,13 +1392,12 @@ BranchAndBoundResult solve_milp(const Model& model,
     // refinery MILP hit exactly this: its root relaxation does not converge, and
     // an earlier version of this code called the instance infeasible while
     // HiGHS solved it to optimality.
-    if (result.nodes_relaxation_failed > 0) {
+    if (status == MilpStatus::kInfeasible && result.nodes_relaxation_failed > 0) {
       status = MilpStatus::kRelaxationFailed;
       result.message =
           std::to_string(result.nodes_relaxation_failed) +
           " relaxation(s) did not converge, so infeasibility was never proved";
     }
-    result.objective = maximizing ? -kInf : kInf;
   }
 
   (void)open_bound;

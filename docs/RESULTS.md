@@ -27,12 +27,14 @@ of one:
 | First-order LP | ~62 | strongest piece; missing multithreading and some cuPDLPx tuning |
 | GPU | ~55 | real 2.7–7× measured, but not cuPDLP-C level |
 | QP | ~50 | OSQP's core is here; no AMD ordering, thin regularisation strategy |
-| Simplex | ~40 | correct but textbook. No Forrest–Tomlin, no bound-flipping ratio test, no hypersparsity |
+| Simplex | ~55 | 78/88 Netlib correct and none wrong, and it now takes a basis from the first-order method. Still no Forrest–Tomlin, no bound-flipping ratio test, no hypersparsity |
 | Presolve | ~38 | 10 reductions; HiGHS/PaPILO have roughly 25 |
 | Infrastructure | ~70 | good tests, no CI, no packaging |
-| **MILP** | **~22** | **the weak leg — see below** |
+| **MILP** | **~30** | **the weak leg — see below.** Time limits are now enforced, cuts get a slice of the budget rather than all of it, there is a feasibility pump, and the root relaxation gets a crossover basis |
 
-Weighted, that is about **50/100**.
+Weighted, that is about **60/100** as of 2026-08-30, up from 50. The move is
+mostly the simplex — six wrong answers is a worse problem than any slow one, and
+fixing them is worth more than the speed that came with it.
 
 **MILP is the honest gap.** What is missing: node presolve, symmetry detection,
 feasibility pump, RINS, local branching, conflict analysis, restarts, clique
@@ -253,20 +255,71 @@ python3 bench/pid_sweep.py
 
 ## 5. Simplex
 
-Sixteen Netlib instances with published optima, **presolved** — which the
-commands below now say, because they did not and the claim does not hold
-without it. Plain, `woodw` and `stocfor2` both run into the 200,000 iteration
-limit; presolved they take 1,782 and 3,668 iterations.
+**All 88 Netlib instances with published optima, cold, no presolve, 60 s each:**
 
-| algorithm | correct |
+| | count |
 |---|---|
-| primal | **16/16** |
-| dual | **16/16** |
+| reach the published optimum | **78** |
+| return a wrong answer | **0** |
+| do not finish (time, iteration limit, or numerical error) | 10 |
 
 ```bash
-build/sankhya simplex data/netlib/sctap1.mps --presolve
-build/sankhya simplex data/netlib/fit1p.mps --presolve --dual
+python3 -u bench/verify_simplex.py 60
 ```
+
+This replaces a "16 of 16" that stood here until 2026-08-30. That number was
+true of a sixteen-instance subset and it was hiding six wrong answers on the
+rest — three reporting optimal at a point missing the rows by up to 1.8e+09,
+two calling a bounded model unbounded, one simply wrong:
+
+| instance | reported | true |
+|---|---|---|
+| grow15 | −205,842,493 | −106,870,941 |
+| grow22 | −68,986,355,650 | −160,834,336 |
+| maros | −102,064.67 | −58,063.74 |
+| modszk1 | "unbounded" | 320.61972906 |
+| scsd1 | "unbounded" | 8.6666666743 |
+| cycle | −30.888 | −5.2263930249 |
+
+One cause: the ratio test broke ties by row, and under Bland's rule by index,
+but never by the size of the pivot — so a candidate winning the ratio by 1e-12
+and losing the pivot by six orders of magnitude was taken, and the basis update
+divided by it. Two guards went in behind the fix: the simplex recomputes `Ax`
+from the matrix before reporting an optimum rather than trusting the basis that
+produced `x`, and the CLI repeats that check against the original model after
+postsolve. `cycle`, `modszk1` and `scsd8` now fail visibly rather than quietly.
+
+The same run flagged eight further disagreements that turned out to be errors in
+**our own reference table** — HiGHS returns what this solver returns on all
+eight, and `e226`'s stored value was off by exactly 7.113, that instance's
+objective constant. Those are corrected in `data/reference/netlib.csv` with a
+note saying why.
+
+### Crossover from a first-order point
+
+Solve loosely with the first-order method, read off which columns that point
+wants basic, and start the simplex from that basis instead of all logicals.
+
+| | |
+|---|---|
+| simplex pivots over the set | **0.52×** |
+| degen3 | 89,640 → 25,027 |
+| d2q06c | 25,012 → 3,952 |
+| czprob | 5,261 → 1,130 |
+| handed its own optimum | 0 iterations |
+
+The status column matters more than the ratio. Five instances that returned no
+answer at all now return the right one: `degen3` and `stocfor2` (time limit),
+`scsd8` (iteration limit), `wood1p` (numerical error), `modszk1` (a wrong
+"unbounded").
+
+```bash
+build/sankhya simplex data/netlib/degen3.mps --crossover
+python3 -u bench/crossover_sweep.py 1e-4
+```
+
+If the seeded solve does not reach an optimum, the cold solve is run and that is
+the answer — crossover can save pivots or do nothing, but it cannot cost one.
 
 ### Incremental pricing
 
@@ -281,6 +334,9 @@ needs. The two are now one pass:
 | iterations | 154,739 | **126,502** (0.818×) |
 | time | 99.1 s | **79.4 s** (0.801×) |
 | correct | 16/16 | 16/16 |
+
+(Sixteen here is the ablation's own set, not a claim about the whole of Netlib —
+the number for that is at the top of this section.)
 
 `degen3` carries most of it — 133,657 iterations and 85.2 s become 105,433 and
 66.2 s.

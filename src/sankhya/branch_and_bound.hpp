@@ -299,6 +299,46 @@ struct BranchAndBoundOptions {
   bool diving_heuristic = true;
   Int diving_max_depth = 40;
 
+  // LP-guided diving, in the sense of SCIP's fracdiving.
+  //
+  // The fix-and-propagate dive above reads every one of its decisions off a
+  // single relaxation: it sorts the integer columns by how fractional they were
+  // at this node, then pins each in turn to the nearest integer, propagating
+  // between pins to catch a doomed rounding early. It never re-solves. So after
+  // twenty pins it is still steering by a solution of a problem that had none
+  // of them, and the further it goes the less that solution has to say.
+  //
+  // Re-solving after each decision fixes exactly that, and here it is close to
+  // free. A dive step tightens one bound on one variable, which is precisely
+  // what a branching child does, so the parent's basis is still dual feasible
+  // and the dual simplex re-optimises in a handful of pivots - the same warm
+  // start that makes the tree affordable at all. What the dive gets for it is a
+  // relaxation that has already absorbed every decision so far.
+  //
+  // Bound rather than fix: a column at 2.3 gets an upper bound of 2, not the
+  // value 2. The rounded side is a branching child and keeps the rest of the
+  // range live, where fixing throws away everything the LP might still have
+  // wanted. Where the rounded side comes back infeasible, the other side is
+  // tried once, and a step with neither side available ends the dive.
+  bool lp_diving = true;
+  // The column whose value is nearest an integer goes first. It is the smallest
+  // disturbance available, so it is the decision least likely to make the
+  // relaxation infeasible, and rounding it is the decision the relaxation is
+  // most nearly making already.
+  Int lp_dive_max_steps = 200;
+  // Iterations one dive re-solve may take, as a multiple of the row count. It
+  // is a warm started re-optimisation after a single bound change, so it should
+  // be quick; a long one means this is not the cheap thing it is supposed to be.
+  Int lp_dive_iteration_factor = 20;
+  // Share of the whole budget all dives together may spend. Same rule as the
+  // pump: worth a lot when it works, nothing when it does not, so it gets a
+  // slice rather than the run.
+  double lp_dive_time_share = 0.2;
+  // Retry every this many nodes while there is still no incumbent. A dive from
+  // a different relaxation makes different decisions, so a second attempt is
+  // not the first one repeated.
+  Int lp_dive_retry_nodes = 100;
+
   // Feasibility pump, following Fischetti, Glover and Lodi (Math. Prog. 104,
   // 2005). Rounding and diving both work forwards from the relaxation: round it
   // and hope, or pin variables one at a time and hope the propagation survives.
@@ -430,6 +470,13 @@ struct BranchAndBoundResult {
   bool cuts_discarded = false;
   double root_bound_rise = 0.0;
   Int dives_run = 0;
+  // LP-guided dives: how many were started, how many produced an incumbent, and
+  // how many bound decisions they made in total. Steps over dives is the number
+  // to look at - a dive that ends after two steps is being killed by
+  // infeasibility, not by the budget.
+  Int lp_dives_run = 0;
+  Int lp_dive_successes = 0;
+  Int lp_dive_steps = 0;
   Int cuts_added = 0;
   // Of those, how many came off the tableau rather than the model's rows.
   Int gomory_cuts_added = 0;
