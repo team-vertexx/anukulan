@@ -564,6 +564,9 @@ SimplexResult solve_simplex(const StandardLp& lp, const SimplexOptions& options)
     double step = bound_range;
     Int leaving_row = -1;
     VarStatus leaving_to = VarStatus::kAtLower;
+    // The magnitude of the pivot the current choice would divide by. Among rows
+    // that tie on the ratio, this is what decides.
+    double leaving_pivot = 0.0;
 
     if (phase_one && options.piecewise_phase_one) {
       // Phase one's objective is the sum of bound violations, which is
@@ -726,10 +729,12 @@ SimplexResult solve_simplex(const StandardLp& lp, const SimplexOptions& options)
           }
         }
         if (limit < 0.0) limit = 0.0;
+        const double pivot_magnitude = std::fabs(alpha);
         if (limit < step - kRatioTie) {
           step = limit;
           leaving_row = i;
           leaving_to = to;
+          leaving_pivot = pivot_magnitude;
         } else if (bland && leaving_row >= 0 && limit <= step + kRatioTie &&
                    basis.basic()[sz(i)] < basis.basic()[sz(leaving_row)]) {
           // Ties in the ratio go to the lowest variable index, not the lowest
@@ -737,12 +742,53 @@ SimplexResult solve_simplex(const StandardLp& lp, const SimplexOptions& options)
           step = std::fmin(step, limit);
           leaving_row = i;
           leaving_to = to;
+          leaving_pivot = pivot_magnitude;
+        } else if (!bland && leaving_row >= 0 && limit <= step + kRatioTie &&
+                   pivot_magnitude > leaving_pivot) {
+          // Ties on the ratio go to the larger pivot. The step is the same
+          // either way, and the pivot is what the basis update divides by, so
+          // taking a candidate that wins the ratio by 1e-12 and loses the pivot
+          // by six orders of magnitude buys nothing and pays for it in every
+          // solve afterwards.
+          //
+          // modszk1 is what the absence of this costs. The primal walks into a
+          // basis it cannot refactorise, rolls back 36 pivots, and then either
+          // gives up numerically or - worse, before the guard below - reports a
+          // model with a published optimum of 320.61972906 as unbounded.
+          step = std::fmin(step, limit);
+          leaving_row = i;
+          leaving_to = to;
+          leaving_pivot = pivot_magnitude;
         }
       }
     }
 
     if (leaving_row < 0) {
       if (!std::isfinite(step)) {
+        // Same rule as the pricing conclusion above, and for the same reason.
+        // "No basic variable blocks this column" is a claim about B^-1 a_q, and
+        // a product form accurate enough to pivot on is not always accurate
+        // enough to close a case with. modszk1 is the instance: the primal
+        // reaches an objective of 699,998.45 and reports the model unbounded,
+        // where the dual simplex and a crossover start both reach the published
+        // optimum of 320.61972906. Dantzig pricing does not even get that far -
+        // it rolls back 37 pivots and gives up numerically at the same point -
+        // which is what a decayed basis looks like from the other side.
+        //
+        // The guard was written for the optimality and infeasibility
+        // conclusions and not applied to this one, which is the same kind of
+        // claim drawn from the same representation.
+        if (basis.updates_since_refactorization() > 0) {
+          if (basis.refactorize(form, &error)) {
+            result.refactorizations++;
+            ++result.confirmations;
+            duals_valid = false;
+            continue;
+          }
+          status = SimplexStatus::kNumericalError;
+          result.message = "could not refactorise to confirm the result: " + error;
+          break;
+        }
         status = phase_one ? SimplexStatus::kInfeasible : SimplexStatus::kUnbounded;
         break;
       }
@@ -866,6 +912,66 @@ SimplexResult solve_simplex(const StandardLp& lp, const SimplexOptions& options)
   for (Int j = 0; j < form.num_structural; ++j) standard += form.cost[sz(j)] * z[sz(j)];
   result.objective = form.objective_scale * standard + form.objective_offset;
   result.iterations = iteration;
+
+  // Last check before the word "optimal" leaves this function: does the point
+  // actually satisfy the rows?
+  //
+  // x_B comes out of the basis, so A x = b holds by construction - as long as
+  // the factorisation is right. When it is not, the computed x_B is wrong and
+  // every test the solver runs on it is wrong the same way, because they all go
+  // through the same decayed representation. Recomputing the residual from the
+  // matrix is the one check that does not.
+  //
+  // cycle is why this is here. Under presolve it reported optimal at -17.23
+  // against a published -5.2263930249, with rows out by 2.4e+03 - and nothing
+  // in the solver objected, because the basis it was asking had stopped
+  // describing the problem. grow22 did the same at 1.8e+09 before the ratio
+  // test learned to prefer a larger pivot. An honest numerical error is worth
+  // more than a confident wrong number.
+  if (status == SimplexStatus::kOptimal) {
+    double violation = 0.0;
+    std::vector<double> activity(sz(form.num_rows), 0.0);
+    form.rows.multiply(z.data(), activity.data());
+    double scale = 1.0;
+    for (Int i = 0; i < form.num_rows; ++i) {
+      scale = std::fmax(scale, std::fabs(form.rhs[sz(i)]));
+      violation = std::fmax(violation, std::fabs(activity[sz(i)] - form.rhs[sz(i)]));
+    }
+    // And the bounds. The equality system above is what the basis solves, so a
+    // decayed factorisation shows up there; a phase one that stopped short
+    // shows up here instead, as a basic variable sitting outside its own box.
+    // Both are "this is not a feasible point", and only checking one of them
+    // lets the other through.
+    double bound_violation = 0.0;
+    for (Int j = 0; j < form.columns.rows(); ++j) {
+      const double lo = form.lower[sz(j)];
+      const double hi = form.upper[sz(j)];
+      const double v = z[sz(j)];
+      const double column_scale =
+          std::fmax(1.0, std::fmax(std::isfinite(lo) ? std::fabs(lo) : 0.0,
+                                   std::isfinite(hi) ? std::fabs(hi) : 0.0));
+      if (std::isfinite(lo) && v < lo) {
+        bound_violation = std::fmax(bound_violation, (lo - v) / column_scale);
+      }
+      if (std::isfinite(hi) && v > hi) {
+        bound_violation = std::fmax(bound_violation, (v - hi) / column_scale);
+      }
+    }
+    if (violation > options.feasibility_check_tolerance * scale) {
+      status = SimplexStatus::kNumericalError;
+      result.message = "the basis reports an optimum whose rows are out by " +
+                       std::to_string(violation) +
+                       "; the factorisation has stopped describing the problem";
+    } else if (bound_violation > options.feasibility_check_tolerance) {
+      status = SimplexStatus::kNumericalError;
+      result.message = "the basis reports an optimum with a variable outside its "
+                       "bounds by a relative " + std::to_string(bound_violation) +
+                       "; the point is not feasible, so it is not an optimum";
+    }
+    result.final_row_violation = violation;
+    result.final_bound_violation = bound_violation;
+  }
+
   result.status = status;
   result.final_basic = basis.basic();
   result.final_status = basis.status();

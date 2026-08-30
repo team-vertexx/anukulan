@@ -262,6 +262,11 @@ struct SimplexOptions {
 
   bool piecewise_phase_one = true;
 
+  // Relative tolerance for the final feasibility check, which recomputes A x
+  // from the matrix rather than trusting the basis that produced x. See the
+  // check itself for what it is guarding against.
+  double feasibility_check_tolerance = 1e-6;
+
   // Start from this basis rather than the all-logical one. Both must be given
   // or neither. This is what makes a branch and bound node cheap: tightening
   // one bound on one variable leaves the parent's basis dual feasible, because
@@ -392,6 +397,10 @@ struct SimplexResult {
   // The basis this ended on, for the next problem that differs only in bounds.
   std::vector<Int> final_basic;
   std::vector<VarStatus> final_status;
+  // ||A x - b||_inf recomputed from the matrix at the end, not from the basis.
+  double final_row_violation = 0.0;
+  // The largest relative amount any variable sits outside its own bounds.
+  double final_bound_violation = 0.0;
   double solve_seconds = 0.0;
   std::string message;
 };

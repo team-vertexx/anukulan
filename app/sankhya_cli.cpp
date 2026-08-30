@@ -535,6 +535,23 @@ int command_simplex(const std::vector<std::string>& args) {
   const sankhya::ModelViolation checked =
       sankhya::measure_violation(read_result.model, r.x);
 
+  // The end-to-end version of the check inside the simplex, and it has to be
+  // here as well as there: with presolve the simplex sees a different problem,
+  // so a point that satisfies the reduced rows can still miss the original
+  // ones, and postsolve is where that appears.
+  //
+  // cycle presolved reported optimal at -17.23 against a published
+  // -5.2263930249, missing rows by 2.4e+03. Nothing before this point objected.
+  // Whatever the cause turns out to be, reporting that as an optimum is the one
+  // thing that must not happen.
+  if (r.status == sankhya::SimplexStatus::kOptimal &&
+      checked.relative_row_violation > 1e-6) {
+    r.status = sankhya::SimplexStatus::kNumericalError;
+    r.message = "the answer misses the model's own rows by " +
+                std::to_string(checked.row_violation) +
+                ", so it is not an optimum of the model that was read";
+  }
+
   if (as_json) {
     std::ostringstream out;
     out.setf(std::ios::boolalpha);

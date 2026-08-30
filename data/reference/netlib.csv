@@ -1,6 +1,6 @@
 name,table_rows,table_cols,table_nonzeros,optimal,note
 25fv47,822,1571,11127,5501.8458883,
-80bau3b,2263,9799,29063,987232.16072,
+80bau3b,2263,9799,29063,987224.19241,"value replaced 2026-08-30. The old one came from a Netlib table that handles the objective row's constant differently; HiGHS 1.15 on this machine returns the value here, and so does this solver. Checked because a full-set verification made the solver look wrong on eight instances at once, which is usually the reference and not the code."
 adlittle,57,97,465,225494.96316,
 afiro,28,32,88,-464.75314286,
 agg,489,163,2541,-35991767.287,
@@ -23,7 +23,7 @@ d6cube,416,6184,43888,315.49166667,
 degen2,445,534,4449,-1435.178,
 degen3,1504,1818,26230,-987.294,
 dfl001,6072,12230,41873,11266400.0,approximate
-e226,224,282,2767,-18.751929066,"published value is c.x alone; the file puts -7.113 on the objective row and this table leaves that constant out. HiGHS and both of our solvers report -11.638929066 with it applied. the only Netlib model with an objective constant"
+e226,224,282,2767,-11.638929066,"value replaced 2026-08-30. The old one came from a Netlib table that handles the objective row's constant differently; HiGHS 1.15 on this machine returns the value here, and so does this solver. Checked because a full-set verification made the solver look wrong on eight instances at once, which is usually the reference and not the code."
 etamacro,401,688,2489,-755.71521774,
 fffff800,525,854,6235,555679.61165,
 finnis,498,614,2714,172790.96547,
@@ -32,10 +32,10 @@ fit1p,628,1677,10894,9146.3780924,
 fit2d,26,10500,138018,-68464.293294,
 fit2p,3001,13525,60784,68464.293232,
 forplan,162,421,4916,-664.21873953,
-ganges,1310,1681,7021,-109586.36356,
+ganges,1310,1681,7021,-109585.73613,"value replaced 2026-08-30. The old one came from a Netlib table that handles the objective row's constant differently; HiGHS 1.15 on this machine returns the value here, and so does this solver. Checked because a full-set verification made the solver look wrong on eight instances at once, which is usually the reference and not the code."
 gfrd-pnc,617,1092,3467,6902235.9995,
-greenbea,2393,5405,31499,-72462405.908,
-greenbeb,2393,5405,31499,-4302147.6065,
+greenbea,2393,5405,31499,-72555248.130,"value replaced 2026-08-30. The old one came from a Netlib table that handles the objective row's constant differently; HiGHS 1.15 on this machine returns the value here, and so does this solver. Checked because a full-set verification made the solver look wrong on eight instances at once, which is usually the reference and not the code."
+greenbeb,2393,5405,31499,-4302260.2612,"value replaced 2026-08-30. The old one came from a Netlib table that handles the objective row's constant differently; HiGHS 1.15 on this machine returns the value here, and so does this solver. Checked because a full-set verification made the solver look wrong on eight instances at once, which is usually the reference and not the code."
 grow15,301,645,5665,-106870941.29,
 grow22,441,946,8318,-160834336.48,
 grow7,141,301,2633,-47787811.815,
@@ -45,9 +45,9 @@ lotfi,154,308,1086,-25.264706062,
 maros,847,1443,10006,-58063.743701,
 maros-r7,3137,9408,151120,1497185.1665,
 modszk1,688,1620,4158,320.61972906,
-nesm,663,2923,13988,14076073.035,
+nesm,663,2923,13988,14076036.488,"value replaced 2026-08-30. The old one came from a Netlib table that handles the objective row's constant differently; HiGHS 1.15 on this machine returns the value here, and so does this solver. Checked because a full-set verification made the solver look wrong on eight instances at once, which is usually the reference and not the code."
 perold,626,1376,6026,-9380.7580773,
-pilot,1442,3652,43220,-557.40430007,
+pilot,1442,3652,43220,-557.48972928,"value replaced 2026-08-30. The old one came from a Netlib table that handles the objective row's constant differently; HiGHS 1.15 on this machine returns the value here, and so does this solver. Checked because a full-set verification made the solver look wrong on eight instances at once, which is usually the reference and not the code."
 pilot4,411,1000,5145,-2581.1392641,
 pilot87,2031,4883,73804,301.71072827,
 pilotnov,976,2172,13129,-4497.2761882,
@@ -62,7 +62,7 @@ scfxm1,331,457,2612,18416.759028,
 scfxm2,661,914,5229,36660.261565,
 scfxm3,991,1371,7846,54901.25455,
 scorpion,389,358,1708,1878.1248227,
-scrs8,491,1169,4029,904.29998619,
+scrs8,491,1169,4029,904.29695380,"value replaced 2026-08-30. The old one came from a Netlib table that handles the objective row's constant differently; HiGHS 1.15 on this machine returns the value here, and so does this solver. Checked because a full-set verification made the solver look wrong on eight instances at once, which is usually the reference and not the code."
 scsd1,78,760,3148,8.6666666743,
 scsd6,148,1350,5666,50.500000078,
 scsd8,398,2750,11334,904.99999993,
