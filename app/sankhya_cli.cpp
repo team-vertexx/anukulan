@@ -396,7 +396,7 @@ int command_simplex(const std::vector<std::string>& args) {
   // to land on. What the sweep does establish is the shape - a per-row budget
   // beats a flat one, and past ten the seed grows faster than the saving.
   double crossover_iterations_per_row = 10.0;
-  double crossover_dual_weight = 0.0;
+  double crossover_dual_weight = 1.0;
   sankhya::Int crossover_max_iterations = 5000;
   sankhya::SimplexOptions options;
   for (std::size_t i = 1; i < args.size(); ++i) {
@@ -1043,6 +1043,14 @@ int command_milp(const std::vector<std::string>& args) {
           sankhya::SimplexOptions::DualPricing::kSteepestEdge;
     } else if (value_of(a, "--pump-objective=", &v)) {
       options.pump_objective_weight = v;
+    } else if (a == "--no-lp-diving") {
+      options.lp_diving = false;
+    } else if (value_of(a, "--lp-dive-steps=", &v)) {
+      options.lp_dive_max_steps = static_cast<sankhya::Int>(v);
+    } else if (value_of(a, "--lp-dive-share=", &v)) {
+      options.lp_dive_time_share = v;
+    } else if (a == "--no-objective-integrality") {
+      options.objective_integrality = false;
     } else if (a == "--no-pump") {
       options.feasibility_pump = false;
     } else if (a == "--no-root-crossover") {
@@ -1111,6 +1119,10 @@ int command_milp(const std::vector<std::string>& args) {
         << "\"relaxations\":" << r.relaxations_solved << ","
         << "\"incumbents\":" << r.incumbents_found << ","
         << "\"heuristic_successes\":" << r.heuristic_successes << ","
+        << "\"lp_dives_run\":" << r.lp_dives_run << ","
+        << "\"lp_dive_successes\":" << r.lp_dive_successes << ","
+        << "\"lp_dive_steps\":" << r.lp_dive_steps << ","
+        << "\"integral_objective\":" << (r.integral_objective ? "true" : "false") << ","
         << "\"pump_rounds\":" << r.pump_rounds << ","
         << "\"pump_successes\":" << r.pump_successes << ","
         << "\"pump_restarts\":" << r.pump_restarts << ","

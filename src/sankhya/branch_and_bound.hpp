@@ -151,6 +151,13 @@ struct BranchAndBoundOptions {
 
   bool reduced_cost_fixing = true;
 
+  // Use the fact that every feasible objective value is a whole number, when it
+  // is one, to strengthen the cutoff by a full unit. See the detection in
+  // branch_and_bound.cpp for the argument. Switchable so its effect can be
+  // measured rather than assumed - it is exact either way, so the only question
+  // is whether the extra prunes are worth the search order they change.
+  bool objective_integrality = true;
+
   // Propagate bounds into each child as it is created. Branching has just
   // pinned a variable to one side of its fractional value, which is precisely
   // the moment interval arithmetic on the rows has something new to work with -
@@ -474,6 +481,9 @@ struct BranchAndBoundResult {
   // how many bound decisions they made in total. Steps over dives is the number
   // to look at - a dive that ends after two steps is being killed by
   // infeasibility, not by the budget.
+  // Whether the objective was found to take only whole-number values, which is
+  // what lets the cutoff move a unit below the incumbent.
+  bool integral_objective = false;
   Int lp_dives_run = 0;
   Int lp_dive_successes = 0;
   Int lp_dive_steps = 0;

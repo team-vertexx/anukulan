@@ -255,6 +255,36 @@ BranchAndBoundResult solve_milp(const Model& model,
     }
   }
 
+  // Whether every feasible objective value is a whole number.
+  //
+  // It is, when the objective touches no continuous column and every
+  // coefficient it does touch is an integer - then c'x is a sum of integers for
+  // any integer-feasible x. Both halves have to hold: one continuous column
+  // with a cost makes the objective continuous however integral the rest is.
+  //
+  // What this buys is a stronger cutoff. Without it a node is pruned when its
+  // bound reaches the incumbent, which throws away nothing but also catches
+  // nothing until the bound has climbed the whole way. With it, a node whose
+  // bound is anywhere above incumbent - 1 is dead: the best whole number in
+  // that subtree is already the incumbent's own value. The prune arrives up to
+  // a full unit earlier and it is exact, not a tolerance - there is no version
+  // of this that discards a better answer, which is the property that matters
+  // here more than the strength.
+  //
+  // Negation does not disturb it, so a maximisation is covered: standard-form c
+  // is -c for those, and the negative of a whole number is a whole number. The
+  // offset does not disturb it either, because everything below compares two
+  // objective values and the offset cancels.
+  bool integral_objective = options.objective_integrality && !integer_columns.empty();
+  for (Int j = 0; j < model.num_cols() && integral_objective; ++j) {
+    const double cj = sf.lp.c[sz(j)];
+    if (cj == 0.0) continue;
+    if (!is_integral[sz(j)] || std::fabs(cj - std::round(cj)) > 1e-9)
+      integral_objective = false;
+  }
+
+  result.integral_objective = integral_objective;
+
   // A minimisation in standard form; the model's own sense is restored at the
   // end through objective_scale. Bounds compare in the standard direction.
   const bool maximizing = model.sense == ObjSense::kMaximize;
@@ -264,6 +294,15 @@ BranchAndBoundResult solve_milp(const Model& model,
 
   double incumbent = kInf;  // best standard-form objective found
   std::vector<double> incumbent_x;
+
+  // The value a node's bound has to reach before the node is worthless. Without
+  // an integral objective that is the incumbent itself; with one it is a whole
+  // unit lower, because no subtree can produce a value strictly between
+  // incumbent - 1 and incumbent.
+  auto cutoff = [&]() {
+    if (incumbent >= kInf) return kInf;
+    return integral_objective ? incumbent - 1.0 + 1e-6 : incumbent;
+  };
 
   // Pseudocosts: for each integer column, the running average objective
   // degradation per unit of fractionality, measured separately for rounding the
@@ -856,7 +895,7 @@ BranchAndBoundResult solve_milp(const Model& model,
         // A dive whose relaxation is already worse than the incumbent cannot
         // reach anything worth having, and carrying on would spend the slice on
         // a point that would be rejected at the end.
-        if (working.standard_objective(solved.x) >= incumbent) return false;
+        if (working.standard_objective(solved.x) >= cutoff()) return false;
 
         lo.swap(trial_lo);
         hi.swap(trial_hi);
@@ -894,7 +933,7 @@ BranchAndBoundResult solve_milp(const Model& model,
     result.max_depth = std::max(result.max_depth, node.depth);
 
     // Nothing below this node can beat the incumbent.
-    if (node.parent_bound >= incumbent) {
+    if (node.parent_bound >= cutoff()) {
       report(node.lower, node.upper, "pruned on the parent bound", node.parent_bound);
       continue;
     }
@@ -940,7 +979,7 @@ BranchAndBoundResult solve_milp(const Model& model,
       }
     }
 
-    if (node_objective >= incumbent) {
+    if (node_objective >= cutoff()) {
       report(node.lower, node.upper, "pruned on its own relaxation bound",
              node_objective);
       continue;  // bound prune
@@ -1236,7 +1275,9 @@ BranchAndBoundResult solve_milp(const Model& model,
     std::vector<double> child_upper = node.upper;
     if (options.reduced_cost_fixing && incumbent < kInf &&
         static_cast<Int>(relaxation.y.size()) == working.num_rows()) {
-      const double gap = incumbent - node_objective;
+      // The same cutoff the prunes use, so an integral objective tightens every
+      // bound this derives by a whole unit as well.
+      const double gap = cutoff() - node_objective;
       if (gap >= 0.0 && std::isfinite(gap)) {
         std::vector<double> d = working.c;
         for (Int i = 0; i < working.num_rows(); ++i) {

@@ -70,7 +70,21 @@ struct CrossoverOptions {
   // one that is interior only because the point has not converged there yet
   // still carries a reduced cost, and is a worse guess. Weight zero uses
   // interiority alone.
-  double dual_weight = 0.0;
+  //
+  // Swept over seventeen Netlib instances, simplex pivots against a cold start,
+  // and the worst single regression in the set:
+  //
+  //     weight    pivots               worst
+  //     0         27,961 -> 19,033      scsd6 5.53x
+  //     0.5       27,961 -> 16,927      scsd6 5.66x
+  //     1         27,961 -> 14,686      scsd6 3.53x
+  //     2         27,961 -> 15,822      scsd6 3.53x
+  //     4         27,961 -> 16,059      scsd6 3.53x
+  //
+  // One is best on both numbers, which is the useful kind of result - it takes
+  // 23% more pivots off the total and softens the one instance the primal
+  // ranking handles worst.
+  double dual_weight = 1.0;
 
   bool verbose = false;
 };
