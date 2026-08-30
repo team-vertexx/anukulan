@@ -374,6 +374,31 @@ BranchAndBoundResult solve_milp(const Model& model,
     double root_std_after = 0.0;
     bool have_root_std = false;
 
+    // The basis carried between cut rounds. Without it every round is a cold
+    // solve, and with root crossover in front of it every round is also a fresh
+    // first-order seed - eight rounds, two solves each, sixteen seeds for one
+    // root. Adding cuts does not invalidate a basis: the new rows arrive with
+    // their own logicals, and a logical basic in its own row is exactly what
+    // makes the extended basis nonsingular.
+    std::vector<Int> carry_basic;
+    std::vector<VarStatus> carry_status;
+    auto carry_from = [&](const NodeSolution& solved) {
+      if (static_cast<Int>(solved.basic.size()) == working.num_rows() &&
+          !solved.basis_status.empty()) {
+        carry_basic = solved.basic;
+        carry_status = solved.basis_status;
+      }
+    };
+    auto extend_carry = [&](Int rows_before_append) {
+      if (carry_basic.empty()) return;
+      const Int structural = working.num_cols();
+      carry_status.resize(sz(structural + working.num_rows()), VarStatus::kAtLower);
+      for (Int i = rows_before_append; i < working.num_rows(); ++i) {
+        carry_basic.push_back(structural + i);
+        carry_status[sz(structural + i)] = VarStatus::kBasic;
+      }
+    };
+
     for (Int round = 0; round < options.cut_rounds; ++round) {
       // Cut rounds are the expensive part of the root, and each is a full LP.
       // Stopping between rounds keeps whatever the earlier rounds bought.
@@ -383,8 +408,11 @@ BranchAndBoundResult solve_milp(const Model& model,
       Node probe;
       probe.lower = working.lower;
       probe.upper = working.upper;
+      probe.basic = carry_basic;
+      probe.basis_status = carry_status;
       NodeSolution root_solve;
       if (!solve_node(probe, &root_solve)) break;
+      carry_from(root_solve);
       if (round == 0) {
         result.root_bound_before_cuts =
             sf.lp.objective_scale * sf.lp.standard_objective(root_solve.x) +
@@ -430,12 +458,17 @@ BranchAndBoundResult solve_milp(const Model& model,
       // raise the bound - nothing cheap does - so it is a safety net rather
       // than a proof, and the round limit above is the actual mitigation.
       const StandardLp before = working;
+      const Int rows_before_append = before.num_rows();
       working = append_cuts(working, cuts);
+      extend_carry(rows_before_append);
       Node recheck;
       recheck.lower = working.lower;
       recheck.upper = working.upper;
+      recheck.basic = carry_basic;
+      recheck.basis_status = carry_status;
       NodeSolution after;
       if (solve_node(recheck, &after)) {
+        carry_from(after);
         const double raised = working.standard_objective(after.x);
         if (raised < working.standard_objective(root_solve.x) - 1e-6) {
           working = before;
