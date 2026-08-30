@@ -1043,6 +1043,8 @@ int command_milp(const std::vector<std::string>& args) {
           sankhya::SimplexOptions::DualPricing::kSteepestEdge;
     } else if (value_of(a, "--pump-objective=", &v)) {
       options.pump_objective_weight = v;
+    } else if (a == "--no-cut-filtering") {
+      options.root_cut_filtering = false;
     } else if (a == "--no-lp-diving") {
       options.lp_diving = false;
     } else if (value_of(a, "--lp-dive-steps=", &v)) {
@@ -1136,6 +1138,7 @@ int command_milp(const std::vector<std::string>& args) {
         << "\"strong_branch_probes\":" << r.strong_branch_probes << ","
         << "\"strong_branch_prunes\":" << r.strong_branch_prunes << ","
         << "\"cuts_discarded\":" << (r.cuts_discarded ? "true" : "false") << ","
+        << "\"cuts_dropped_slack\":" << r.cuts_dropped_slack << ","
         << "\"root_bound_rise\":" << r.root_bound_rise << ","
         << "\"warm_started_nodes\":" << r.warm_started_nodes << ","
         << "\"simplex_iterations\":" << r.simplex_iterations << ","

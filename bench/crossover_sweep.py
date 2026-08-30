@@ -13,6 +13,7 @@ tol = sys.argv[1] if len(sys.argv) > 1 else "1e-4"
 only = sys.argv[2:] 
 
 LIMIT = os.environ.get("LIMIT", "60")
+EXTRA_ALL = os.environ.get("EXTRA", "").split() if os.environ.get("EXTRA") else []
 
 def run(path, extra):
     # A limit per instance, so one of the very large ones cannot dominate the
@@ -38,7 +39,7 @@ bad = []
 for f in files:
     name = os.path.basename(f)[:-4]
     a = run(f, [])
-    b = run(f, ["--crossover", f"--crossover-tol={tol}"])
+    b = run(f, ["--crossover", f"--crossover-tol={tol}"] + EXTRA_ALL)
     if not a or not b:
         print(f"{name:<12} run failed"); continue
     if a["status"] != "optimal" or b["status"] != "optimal":

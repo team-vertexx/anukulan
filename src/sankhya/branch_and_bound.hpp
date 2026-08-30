@@ -276,6 +276,22 @@ struct BranchAndBoundOptions {
   bool adaptive_cuts = true;
   double cut_bound_improvement = 0.02;
 
+  // After the root cut loop, keep only the cuts the root optimum actually sits
+  // on, and rebuild the relaxation without the rest.
+  //
+  // A constraint slack at an optimal point is not what is holding it there, so
+  // removing it leaves that point feasible and optimal with the zero multiplier
+  // it already had. The root bound is therefore unchanged by construction, not
+  // by measurement, and every node below solves a smaller LP for it.
+  //
+  // The cost is real but deferred: branching moves the relaxation, and a cut
+  // slack at the root can bind once a variable is pinned. A cut pool would keep
+  // those and re-add them where they bite, which is what cuts.hpp says is
+  // missing and still is. This is the part of cut management that fits a tree
+  // whose nodes all share one matrix - keep what did the work at the root, drop
+  // what only costs.
+  bool root_cut_filtering = true;
+
   // Now on, because the rule above is what decides per instance.
   bool gomory_cuts = true;
 
@@ -475,11 +491,14 @@ struct BranchAndBoundResult {
   Int strong_branch_probes = 0;
   Int strong_branch_prunes = 0;
   bool cuts_discarded = false;
+  // Cuts thrown away after the root because the root optimum did not sit on
+  // them. Not the same as cuts_discarded, which throws away the whole effort.
+  Int cuts_dropped_slack = 0;
   double root_bound_rise = 0.0;
   Int dives_run = 0;
   // LP-guided dives: how many were started, how many produced an incumbent, and
-  // how many bound decisions they made in total. Steps over dives is the number
-  // to look at - a dive that ends after two steps is being killed by
+  // how many relaxations they solved between them. Solves over dives is the
+  // number to look at - a dive that ends after two is being killed by
   // infeasibility, not by the budget.
   // Whether the objective was found to take only whole-number values, which is
   // what lets the cutoff move a unit below the incumbent.

@@ -301,7 +301,22 @@ BranchAndBoundResult solve_milp(const Model& model,
   // incumbent - 1 and incumbent.
   auto cutoff = [&]() {
     if (incumbent >= kInf) return kInf;
-    return integral_objective ? incumbent - 1.0 + 1e-6 : incumbent;
+    if (!integral_objective) return incumbent;
+    // The unit is only there to be claimed if a unit is larger than the noise
+    // in the numbers it is being subtracted from. A node bound is an LP
+    // objective, carrying something like 1e-9 of relative rounding, so on an
+    // instance whose objective runs to 1e6 that is 1e-3 in absolute terms - and
+    // a node whose true bound is exactly incumbent - 1 can compute a shade
+    // above it and be pruned, taking a strictly better answer with it.
+    //
+    // So the slack scales, and past the point where it swallows the unit the
+    // rule turns itself off rather than guessing. This is the same lesson as
+    // the two absolute 1e-9 tolerances elsewhere in this file, both of which
+    // cost an answer: a tolerance on a quantity whose scale the model chooses
+    // has to scale with it.
+    const double slack = std::fmax(1e-6, 1e-9 * std::fabs(incumbent));
+    if (slack >= 0.5) return incumbent;
+    return incumbent - 1.0 + slack;
   };
 
   // Pseudocosts: for each integer column, the running average objective
@@ -450,6 +465,9 @@ BranchAndBoundResult solve_milp(const Model& model,
     // makes the extended basis nonsingular.
     std::vector<Int> carry_basic;
     std::vector<VarStatus> carry_status;
+    // The cuts themselves, in the order they were appended, so a subset of them
+    // can be rebuilt onto `uncut` below.
+    std::vector<Cut> kept_cuts;
     auto carry_from = [&](const NodeSolution& solved) {
       if (static_cast<Int>(solved.basic.size()) == working.num_rows() &&
           !solved.basis_status.empty()) {
@@ -544,31 +562,85 @@ BranchAndBoundResult solve_milp(const Model& model,
           break;
         }
       }
-      for (const Cut& c : cuts)
+      for (const Cut& c : cuts) {
         cut_family.push_back(std::string(c.family) + " round " +
                              std::to_string(round + 1));
+        kept_cuts.push_back(c);
+      }
       result.cuts_added += static_cast<Int>(cuts.size());
     }
 
     // Did any of that move the bound? The final root solve is the one that
     // answers it, since the loop above measures before adding the last round's
     // cuts.
-    if (options.adaptive_cuts && have_root_std && result.cuts_added > 0) {
+    if (have_root_std && result.cuts_added > 0) {
       Node final_probe;
       final_probe.lower = working.lower;
       final_probe.upper = working.upper;
+      // The basis the rounds have been carrying. Without it this solve has none,
+      // which sends it down the root-crossover path for a fresh first-order seed
+      // and then a cold simplex - a second full root solve, at the end of a loop
+      // that has just done several, on a relaxation one round of cuts away from
+      // the one it already solved.
+      final_probe.basic = carry_basic;
+      final_probe.basis_status = carry_status;
       NodeSolution final_solve;
-      if (solve_node(final_probe, &final_solve)) {
+      const bool solved = solve_node(final_probe, &final_solve);
+      if (solved) {
         root_std_after = working.standard_objective(final_solve.x);
         result.root_bound_after_cuts =
             sf.lp.objective_scale * root_std_after + sf.lp.objective_offset;
       }
       result.root_bound_rise = (root_std_after - root_std_before) /
                                std::fmax(1.0, std::fabs(root_std_before));
-      if (result.root_bound_rise < options.cut_bound_improvement) {
+      if (options.adaptive_cuts &&
+          result.root_bound_rise < options.cut_bound_improvement) {
         // The cuts cost every node below here and bought nothing measurable.
         working = uncut;
         result.cuts_discarded = true;
+        kept_cuts.clear();
+        cut_family.clear();
+      } else if (options.root_cut_filtering && solved &&
+                 !kept_cuts.empty() &&
+                 static_cast<Int>(kept_cuts.size()) ==
+                     working.num_rows() - rows_before_cuts) {
+        // Drop the cuts the root optimum does not sit on.
+        //
+        // A constraint that is slack at an optimal point is not holding it
+        // there: remove it and the same point is still feasible and still
+        // optimal, with the multiplier it never had. So the root bound is
+        // unchanged by construction rather than by measurement - what changes
+        // is that every node below solves a smaller LP.
+        //
+        // What it gives up is the deeper tree. Branching moves the relaxation,
+        // and a cut that was slack at the root can bind once a variable is
+        // pinned; a pool would keep those and re-add them where they bite.
+        // There is no pool here, so this is the version of cut management that
+        // fits: keep what did the work at the root, drop what only costs.
+        std::vector<Cut> tight;
+        std::vector<std::string> tight_family;
+        for (std::size_t c = 0; c < kept_cuts.size(); ++c) {
+          const Int row = rows_before_cuts + static_cast<Int>(c);
+          double activity = 0.0;
+          for (Int e = working.k.row_begin(row); e < working.k.row_end(row); ++e) {
+            activity +=
+                working.k.value()[sz(e)] * final_solve.x[sz(working.k.index()[sz(e)])];
+          }
+          // Cuts join as >= rows, so slack is activity - q.
+          const double q = working.q[sz(row)];
+          const double scale = std::fmax(1.0, std::fabs(q));
+          if (activity - q <= 1e-7 * scale) {
+            tight.push_back(kept_cuts[c]);
+            if (c < cut_family.size()) tight_family.push_back(cut_family[c]);
+          }
+        }
+        result.cuts_dropped_slack =
+            static_cast<Int>(kept_cuts.size() - tight.size());
+        if (result.cuts_dropped_slack > 0) {
+          working = append_cuts(uncut, tight);
+          kept_cuts.swap(tight);
+          cut_family.swap(tight_family);
+        }
       }
     }
   }
