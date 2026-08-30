@@ -17,6 +17,7 @@
 #include "sankhya/crossover.hpp"
 #include "sankhya/simplex.hpp"
 #include "sankhya/standard_form.hpp"
+#include "sankhya/threading.hpp"
 
 namespace {
 
@@ -77,6 +78,9 @@ void print_usage() {
       "  --profile            report where the device time went, kernel by kernel\n"
       "  --verbose            print progress\n"
       "  --backend=cpu|cuda   force a backend instead of picking automatically\n"
+      "  --threads=<n>        spread the first-order method over n threads.\n"
+      "                       1 (default) is serial; 0 picks a count for this\n"
+      "                       machine. The answer is identical at every n.\n"
       "  --solution=<path>    write the primal solution so it can be checked\n"
       "                       independently\n");
 }
@@ -640,6 +644,13 @@ int command_solve(const std::vector<std::string>& args) {
       solution_path = a.substr(std::string("--solution=").size());
     } else if (a == "--backend=cpu") {
       options.backend = &sankhya::cpu_backend();
+    } else if (value_of(a, "--threads=", &v)) {
+      // 0 asks for a sensible number, 1 is the serial path, anything more
+      // spreads the first-order method's arithmetic over a pool. The answer
+      // does not change either way - see backend.hpp.
+      const int t = v <= 0 ? sankhya::default_thread_count()
+                           : static_cast<int>(v);
+      options.backend = &sankhya::threaded_cpu_backend(t);
     } else if (a == "--backend=cuda") {
 #ifdef SANKHYA_WITH_CUDA
       options.backend = &sankhya::cuda_backend();
