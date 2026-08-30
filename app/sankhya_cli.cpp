@@ -396,6 +396,7 @@ int command_simplex(const std::vector<std::string>& args) {
   // to land on. What the sweep does establish is the shape - a per-row budget
   // beats a flat one, and past ten the seed grows faster than the saving.
   double crossover_iterations_per_row = 10.0;
+  double crossover_dual_weight = 0.0;
   sankhya::Int crossover_max_iterations = 5000;
   sankhya::SimplexOptions options;
   for (std::size_t i = 1; i < args.size(); ++i) {
@@ -409,6 +410,9 @@ int command_simplex(const std::vector<std::string>& args) {
       use_crossover = true;
     } else if (value_of(a, "--crossover-iter-per-row=", &v)) {
       crossover_iterations_per_row = v;
+      use_crossover = true;
+    } else if (value_of(a, "--crossover-dual-weight=", &v)) {
+      crossover_dual_weight = v;
       use_crossover = true;
     } else if (a == "--crossover") {
       use_crossover = true;
@@ -500,7 +504,9 @@ int command_simplex(const std::vector<std::string>& args) {
     }
     if (budget > 0) po.max_iterations = budget;
     seed = sankhya::solve_pdhg(sf.lp, po);
-    cross = sankhya::crossover_basis(sf.lp, seed.x, seed.y);
+    sankhya::CrossoverOptions co;
+    co.dual_weight = crossover_dual_weight;
+    cross = sankhya::crossover_basis(sf.lp, seed.x, seed.y, co);
     if (cross.ok) {
       options.start_basic = &cross.basic;
       options.start_status = &cross.status;

@@ -316,6 +316,12 @@ BranchAndBoundResult solve_milp(const Model& model,
               static_cast<Int>(options.root_crossover_iterations_per_row *
                                lp.num_rows()));
         }
+        // An iteration cap is not a time bound on a large enough model, and
+        // this is a seed for a solve that has its own budget. Same rule as the
+        // relaxations: nothing here outlives the run it is part of.
+        po.time_limit_seconds =
+            std::fmax(0.0, options.root_crossover_time_share *
+                               (options.time_limit_seconds - elapsed()));
         const PdhgResult seed = solve_pdhg(lp, po);
         if (!seed.x.empty()) {
           root_cross = crossover_basis(lp, seed.x, seed.y);

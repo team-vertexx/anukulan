@@ -62,11 +62,29 @@ CrossoverResult crossover_basis(const StandardLp& lp, const std::vector<double>&
     row_slack[sz(i)] = std::fabs(kx[sz(i)] - lp.q[sz(i)]);
   }
 
+  // Reduced costs, when there is a dual to compute them from. Used both to
+  // rank candidates and, below, to put the nonbasic ones on the right bound.
+  std::vector<double> reduced_cost;
+  double reduced_cost_scale = 0.0;
+  if (static_cast<Int>(y.size()) == m) {
+    reduced_cost.assign(sz(n), 0.0);
+    lp.kt.multiply(y.data(), reduced_cost.data());
+    for (Int j = 0; j < n; ++j) {
+      reduced_cost[sz(j)] = lp.c[sz(j)] - reduced_cost[sz(j)];
+      reduced_cost_scale = std::fmax(reduced_cost_scale, std::fabs(reduced_cost[sz(j)]));
+    }
+  }
+
   // Structural columns the point has strictly inside their bounds, best first.
   std::vector<std::pair<double, Int>> candidates;
   for (Int j = 0; j < n; ++j) {
-    const double score = interior_score(x[sz(j)], lp.lower[sz(j)], lp.upper[sz(j)]);
-    if (score > options.interior_tolerance) candidates.push_back({score, j});
+    double score = interior_score(x[sz(j)], lp.lower[sz(j)], lp.upper[sz(j)]);
+    if (!(score > options.interior_tolerance)) continue;
+    if (options.dual_weight > 0.0 && !reduced_cost.empty() && reduced_cost_scale > 0.0) {
+      const double priced = std::fabs(reduced_cost[sz(j)]) / reduced_cost_scale;
+      score /= 1.0 + options.dual_weight * priced;
+    }
+    candidates.push_back({score, j});
   }
   std::sort(candidates.begin(), candidates.end(),
             [](const std::pair<double, Int>& a, const std::pair<double, Int>& b) {
@@ -173,13 +191,6 @@ CrossoverResult crossover_basis(const StandardLp& lp, const std::vector<double>&
   // one at or above its upper goes to the upper. In between - which happens for
   // a candidate whose pivot was refused - the reduced cost decides if we have a
   // dual to compute it from, and proximity decides if we do not.
-  std::vector<double> reduced_cost;
-  if (static_cast<Int>(y.size()) == m) {
-    reduced_cost.assign(sz(n), 0.0);
-    lp.kt.multiply(y.data(), reduced_cost.data());
-    for (Int j = 0; j < n; ++j) reduced_cost[sz(j)] = lp.c[sz(j)] - reduced_cost[sz(j)];
-  }
-
   std::vector<VarStatus>& status = basis.status();
   for (Int j = 0; j < n; ++j) {
     if (status[sz(j)] == VarStatus::kBasic) continue;

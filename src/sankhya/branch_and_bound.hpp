@@ -369,6 +369,9 @@ struct BranchAndBoundOptions {
   // cap is too loose for a small root and too tight for a large one, and the
   // roots that need this most are the large ones.
   double root_crossover_iterations_per_row = 10.0;
+  // Share of the remaining budget the seed may use. An iteration cap bounds
+  // work, not time, and on a large enough model those are different things.
+  double root_crossover_time_share = 0.2;
 
   // Start each child from its parent's solution. The first-order method has no
   // basis to inherit, but the parent's point is still a much better starting

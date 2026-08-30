@@ -64,6 +64,14 @@ struct CrossoverOptions {
   // the optimum in 11,305 iterations.
   Int refactor_interval = 50;
 
+  // Rank candidates by the dual as well as the primal. A basic column has a
+  // reduced cost of zero at an optimum, so a column the point has strictly
+  // inside its bounds *and* priced at nothing is one the answer wants basic;
+  // one that is interior only because the point has not converged there yet
+  // still carries a reduced cost, and is a worse guess. Weight zero uses
+  // interiority alone.
+  double dual_weight = 0.0;
+
   bool verbose = false;
 };
 
