@@ -564,9 +564,13 @@ SimplexResult solve_simplex(const StandardLp& lp, const SimplexOptions& options)
     double step = bound_range;
     Int leaving_row = -1;
     VarStatus leaving_to = VarStatus::kAtLower;
-    // The magnitude of the pivot the current choice would divide by. Among rows
-    // that tie on the ratio, this is what decides.
+    // The magnitude of the pivot the current choice would divide by, and the
+    // largest in the whole column, which is what "small" is measured against.
     double leaving_pivot = 0.0;
+    double largest_in_column = 0.0;
+    for (Int i = 0; i < form.num_rows; ++i) {
+      largest_in_column = std::fmax(largest_in_column, std::fabs(column[sz(i)]));
+    }
 
     if (phase_one && options.piecewise_phase_one) {
       // Phase one's objective is the sum of bound violations, which is
@@ -744,17 +748,30 @@ SimplexResult solve_simplex(const StandardLp& lp, const SimplexOptions& options)
           leaving_to = to;
           leaving_pivot = pivot_magnitude;
         } else if (!bland && leaving_row >= 0 && limit <= step + kRatioTie &&
-                   pivot_magnitude > leaving_pivot) {
-          // Ties on the ratio go to the larger pivot. The step is the same
-          // either way, and the pivot is what the basis update divides by, so
-          // taking a candidate that wins the ratio by 1e-12 and loses the pivot
-          // by six orders of magnitude buys nothing and pays for it in every
-          // solve afterwards.
+                   pivot_magnitude > leaving_pivot &&
+                   leaving_pivot <
+                       options.unsafe_pivot_fraction * largest_in_column) {
+          // Ties on the ratio go to the larger pivot, but only when the one we
+          // would otherwise take is dangerously small for this column. The step
+          // is the same either way and the pivot is what the basis update
+          // divides by, so taking a candidate that wins the ratio by 1e-12 and
+          // loses the pivot by six orders of magnitude buys nothing and pays
+          // for it in every solve afterwards.
           //
           // modszk1 is what the absence of this costs. The primal walks into a
           // basis it cannot refactorise, rolls back 36 pivots, and then either
           // gives up numerically or - worse, before the guard below - reports a
           // model with a published optimum of 320.61972906 as unbounded.
+          // grow15, grow22 and maros are worse still: they report optimal at a
+          // point that misses the rows by up to 1.8e+09.
+          //
+          // The threshold is why this is a rescue rather than a policy. Always
+          // preferring the larger pivot loses blend, which is small, degenerate
+          // and sensitive to exactly this - and which the Harris ratio test
+          // also broke when that was tried here. Only stepping in when the
+          // current choice is below a fraction of the column's own largest
+          // entry keeps every instance the old rule solved and rescues the five
+          // it did not.
           step = std::fmin(step, limit);
           leaving_row = i;
           leaving_to = to;

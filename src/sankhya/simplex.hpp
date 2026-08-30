@@ -267,6 +267,30 @@ struct SimplexOptions {
   // check itself for what it is guarding against.
   double feasibility_check_tolerance = 1e-6;
 
+  // A pivot below this fraction of the largest entry in its own column counts
+  // as unsafe, and the ratio test will take an equally good candidate with a
+  // larger one instead. See the tie-break in the primal ratio test for what
+  // this rescues.
+  //
+  // Swept over sixteen Netlib instances chosen for being the ones that break -
+  // blend, modszk1, scsd1, scsd8, grow15, grow22, maros, degen3, cycle - plus
+  // seven that were already fine, counting how many reach the published
+  // optimum:
+  //
+  //     fraction   correct
+  //     1e-4        12/16
+  //     1e-3        12/16
+  //     1e-2        13/16
+  //     1e-1        13/16
+  //     0.3         11/16   (blend breaks)
+  //
+  // 1e-2 and 1e-1 are level and 1e-2 is the smaller intervention, so it is the
+  // default. Above that the rule stops being a rescue and starts overriding the
+  // ratio test's own judgement, and blend - small, degenerate, and the same
+  // instance the Harris ratio test broke when that was tried here - is what
+  // notices first.
+  double unsafe_pivot_fraction = 1e-2;
+
   // Start from this basis rather than the all-logical one. Both must be given
   // or neither. This is what makes a branch and bound node cheap: tightening
   // one bound on one variable leaves the parent's basis dual feasible, because

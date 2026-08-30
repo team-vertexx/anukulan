@@ -426,6 +426,8 @@ int command_simplex(const std::vector<std::string>& args) {
       options.max_rollback = static_cast<sankhya::Int>(v);
     } else if (value_of(a, "--stall=", &v)) {
       options.stall_iterations = static_cast<sankhya::Int>(v);
+    } else if (value_of(a, "--unsafe-pivot=", &v)) {
+      options.unsafe_pivot_fraction = v;
     } else if (value_of(a, "--primal-tol=", &v)) {
       options.primal_tolerance = v;
     } else if (value_of(a, "--dual-tol=", &v)) {
