@@ -1,4 +1,7 @@
 build/
+build*/
+_build/
+cmake-build*/
 data/netlib/
 data/_work/
 data/lptestset/
