@@ -1049,6 +1049,12 @@ int command_milp(const std::vector<std::string>& args) {
       solution_path = a.substr(std::string("--solution=").size());
     } else if (a.rfind("--debug-solution=", 0) == 0) {
       debug_solution_path = a.substr(std::string("--debug-solution=").size());
+    } else if (value_of(a, "--cut-share=", &v)) {
+      options.root_cut_time_share = v;
+    } else if (value_of(a, "--cut-rounds=", &v)) {
+      options.cut_rounds = static_cast<sankhya::Int>(v);
+    } else if (value_of(a, "--pump-share=", &v)) {
+      options.pump_time_share = v;
     } else if (a == "--no-cut-filtering") {
       options.root_cut_filtering = false;
     } else if (a == "--no-lp-diving") {
@@ -1059,6 +1065,8 @@ int command_milp(const std::vector<std::string>& args) {
       options.lp_dive_time_share = v;
     } else if (a == "--no-objective-integrality") {
       options.objective_integrality = false;
+    } else if (a == "--no-pump-interior") {
+      options.pump_interior_terms = false;
     } else if (a == "--no-pump") {
       options.feasibility_pump = false;
     } else if (a == "--no-root-crossover") {
@@ -1206,6 +1214,9 @@ int command_milp(const std::vector<std::string>& args) {
         << "\"strong_branch_prunes\":" << r.strong_branch_prunes << ","
         << "\"cuts_discarded\":" << (r.cuts_discarded ? "true" : "false") << ","
         << "\"cuts_dropped_slack\":" << r.cuts_dropped_slack << ","
+        << "\"cut_rounds_abandoned\":" << r.cut_rounds_abandoned << ","
+        << "\"cuts_reverted\":"
+        << (r.cuts_reverted_after_root_failure ? "true" : "false") << ","
         << "\"root_bound_rise\":" << r.root_bound_rise << ","
         << "\"warm_started_nodes\":" << r.warm_started_nodes << ","
         << "\"simplex_iterations\":" << r.simplex_iterations << ","

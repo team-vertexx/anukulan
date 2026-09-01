@@ -89,6 +89,27 @@ struct BranchAndBoundOptions {
   //
   // Cuts are worth a slice, not the run. Whatever rounds fit inside the slice
   // are kept; the rest are dropped and the tree gets the remaining time.
+  //
+  // The slice turned out not to be the thing that binds. Measured over the 29
+  // instances of the wider MIPLIB set that ended a fifteen second run with no
+  // feasible solution at all: with cuts on, one of them found anything; with
+  // cuts off outright, four did. Cutting this share to 0.10 changed nothing -
+  // still one. A smaller slice still buys the first round, and the first round
+  // is what commits to the rest of the cost.
+  //
+  // What the cost actually is, and it is not the separation: a round separates,
+  // appends, and re-solves to check the bound did not fall, and the loop ends
+  // with a third solve to decide whether any of it paid. newdano's root solves
+  // in about a second; twenty cuts make the same relaxation take five, and
+  // three of those are the whole budget. It ended with zero nodes explored, no
+  // heuristic ever run, and nothing found - and finds a solution in eight nodes
+  // with cuts off.
+  //
+  // So the loop now asks whether a round fits before starting one, and gives
+  // the check that follows it a few times what the uncut root cost, rolling the
+  // round back when it does not finish. See the cut loop in the .cpp. With
+  // those two, the default matches cuts-off on that set - four of twenty-seven -
+  // while keeping the cuts on the instances where they pay.
   double root_cut_time_share = 0.3;
   // Rounds in which Gomory cuts are separated. They are read off the tableau,
   // and after the first round that tableau describes a problem that is mostly
@@ -414,6 +435,10 @@ struct BranchAndBoundOptions {
   // feasibility. Zero is the plain pump.
   double pump_objective_weight = 0.0;
   double pump_objective_decay = 0.9;
+  // Give a column whose target lands strictly inside its range a distance term
+  // too, as a subgradient rather than as the auxiliary variable the general
+  // integer pump uses. See the separation loop for the argument.
+  bool pump_interior_terms = true;
 
   // Seed the root relaxation's basis from a short first-order solve, the way
   // crossover.hpp describes. A child inherits its parent's basis and needs a
@@ -494,6 +519,13 @@ struct BranchAndBoundResult {
   // Cuts thrown away after the root because the root optimum did not sit on
   // them. Not the same as cuts_discarded, which throws away the whole effort.
   Int cuts_dropped_slack = 0;
+  // Rounds thrown away because re-solving the relaxation they produced cost
+  // more than a small multiple of what it cost before them. A cut that makes
+  // the root that much harder makes every node below it that much harder too.
+  Int cut_rounds_abandoned = 0;
+  // Set when the root relaxation would not solve with the cuts on it and the
+  // whole cut effort was taken back off so the tree could start at all.
+  bool cuts_reverted_after_root_failure = false;
   double root_bound_rise = 0.0;
   Int dives_run = 0;
   // LP-guided dives: how many were started, how many produced an incumbent, and

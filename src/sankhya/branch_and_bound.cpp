@@ -331,9 +331,15 @@ BranchAndBoundResult solve_milp(const Model& model,
   // Root cut loop: solve, separate, add, repeat. Cuts are kept for the whole
   // tree, so a round that tightens the root tightens every node below it.
   StandardLp working = sf.lp;
+  // What the cut loop leaves behind for the tree's root node to start from.
+  std::vector<Int> root_basis;
+  std::vector<VarStatus> root_basis_status;
 
+  // `deadline` caps this one solve at a wall-clock time, on top of the whole
+  // solve's budget. The cut loop needs it: a round has to be able to say "if
+  // checking this costs more than the round saved, it did not pay".
   auto solve_node = [&](const Node& node, NodeSolution* out,
-                        Int iteration_factor = -1) {
+                        Int iteration_factor = -1, double deadline = kInf) {
     StandardLp lp = working;
     lp.lower = node.lower;
     lp.upper = node.upper;
@@ -364,7 +370,9 @@ BranchAndBoundResult solve_milp(const Model& model,
       // on the wider MIPLIB set at a 15 second limit, that is what the wall
       // clock was actually doing: 10teams 28.8s, acc-tight4 31.3s.
       auto budget_left = [&]() {
-        return std::max(0.0, options.time_limit_seconds - elapsed());
+        const double whole = options.time_limit_seconds - elapsed();
+        const double mine = deadline - elapsed();
+        return std::max(0.0, std::fmin(whole, mine));
       };
       // A crossover basis has to outlive the solve it is passed to, so it is
       // declared here rather than inside the branch that fills it.
@@ -468,6 +476,8 @@ BranchAndBoundResult solve_milp(const Model& model,
     // The cuts themselves, in the order they were appended, so a subset of them
     // can be rebuilt onto `uncut` below.
     std::vector<Cut> kept_cuts;
+    const double cut_budget =
+        options.root_cut_time_share * options.time_limit_seconds;
     auto carry_from = [&](const NodeSolution& solved) {
       if (static_cast<Int>(solved.basic.size()) == working.num_rows() &&
           !solved.basis_status.empty()) {
@@ -488,7 +498,7 @@ BranchAndBoundResult solve_milp(const Model& model,
     for (Int round = 0; round < options.cut_rounds; ++round) {
       // Cut rounds are the expensive part of the root, and each is a full LP.
       // Stopping between rounds keeps whatever the earlier rounds bought.
-      if (elapsed() > options.root_cut_time_share * options.time_limit_seconds) break;
+      if (elapsed() > cut_budget) break;
       // Through the same solver the nodes use, because that is what makes the
       // tableau available - and Gomory cuts are read off the tableau.
       Node probe;
@@ -497,7 +507,9 @@ BranchAndBoundResult solve_milp(const Model& model,
       probe.basic = carry_basic;
       probe.basis_status = carry_status;
       NodeSolution root_solve;
+      const double solve_began = elapsed();
       if (!solve_node(probe, &root_solve)) break;
+      const double solve_cost = elapsed() - solve_began;
       carry_from(root_solve);
       if (round == 0) {
         result.root_bound_before_cuts =
@@ -512,6 +524,25 @@ BranchAndBoundResult solve_milp(const Model& model,
         root_std_before = root_std_after;
         have_root_std = true;
       }
+
+      // Whether to cut at all is a question about what a round costs, and the
+      // answer has to be measured on this instance rather than assumed. A round
+      // is not one LP: it separates, appends, and re-solves to check the bound
+      // did not fall, and the loop ends with a third solve to decide whether any
+      // of it paid. So committing to a round commits to roughly three more root
+      // relaxations.
+      //
+      // On an instance whose root takes four seconds of a fifteen second budget
+      // that is the entire run, and the tree never starts. Measured over the 27
+      // instances that ended with no solution at all: with cuts on, one of them
+      // finds anything; with cuts off outright, four do. Cutting the time share
+      // to a tenth changes nothing, which is what says the cost is the solves
+      // and not the slice - a smaller slice still buys the first round, and the
+      // first round is what commits to the rest.
+      //
+      // So the test is whether the round fits, not whether the slice is empty.
+      // The root solve above is not part of the cost: the tree needs it anyway.
+      if (elapsed() + 2.0 * solve_cost > cut_budget) break;
 
       CutOptions cut_options;
       cut_options.max_cuts = options.cuts_per_round;
@@ -545,6 +576,19 @@ BranchAndBoundResult solve_milp(const Model& model,
       // than a proof, and the round limit above is the actual mitigation.
       const StandardLp before = working;
       const Int rows_before_append = before.num_rows();
+      // The basis as it stood for `before`. extend_carry grows it to match the
+      // appended rows, so a rollback has to put it back or the carry is one
+      // basis for a relaxation of a different size - which solve_node then
+      // rejects, sending the next root solve down the crossover path for a
+      // fresh first-order seed and a cold simplex. That is the expensive thing
+      // this loop is trying to stop doing.
+      const std::vector<Int> carry_basic_before = carry_basic;
+      const std::vector<VarStatus> carry_status_before = carry_status;
+      auto roll_back = [&]() {
+        working = before;
+        carry_basic = carry_basic_before;
+        carry_status = carry_status_before;
+      };
       working = append_cuts(working, cuts);
       extend_carry(rows_before_append);
       Node recheck;
@@ -553,14 +597,36 @@ BranchAndBoundResult solve_milp(const Model& model,
       recheck.basic = carry_basic;
       recheck.basis_status = carry_status;
       NodeSolution after;
-      if (solve_node(recheck, &after)) {
+      // The check gets a few times what the uncut root cost, and no more.
+      //
+      // What that measures is not how long the check takes but what the cuts
+      // did to the relaxation, because it is the same relaxation plus their
+      // rows. newdano is the case: its root solves in about a second, twenty
+      // cuts turn it into five, and three of those are the whole fifteen second
+      // budget - so the tree never starts, no heuristic ever runs, and the
+      // instance ends with nothing. With cuts off it finds a solution in eight
+      // nodes.
+      //
+      // A round that cannot re-solve its own relaxation in a small multiple of
+      // what the relaxation used to cost has made every node below it that much
+      // more expensive, and it is buying a bound for a tree that will not be
+      // explored. Roll it back and stop cutting. That is also the safer
+      // behaviour on its own terms: this solve is what checks the bound did not
+      // fall, and cuts whose check did not finish used to be kept anyway.
+      const double check_deadline =
+          std::fmin(cut_budget, elapsed() + std::fmax(0.5, 3.0 * solve_cost));
+      if (solve_node(recheck, &after, -1, check_deadline)) {
         carry_from(after);
         const double raised = working.standard_objective(after.x);
         if (raised < working.standard_objective(root_solve.x) - 1e-6) {
-          working = before;
+          roll_back();
           result.cuts_rolled_back = true;
           break;
         }
+      } else {
+        roll_back();
+        ++result.cut_rounds_abandoned;
+        break;
       }
       for (const Cut& c : cuts) {
         cut_family.push_back(std::string(c.family) + " round " +
@@ -640,9 +706,15 @@ BranchAndBoundResult solve_milp(const Model& model,
           working = append_cuts(uncut, tight);
           kept_cuts.swap(tight);
           cut_family.swap(tight_family);
+          // The rows moved, so the basis that was carried no longer describes
+          // this relaxation. Dropping it is right; keeping it would be wrong.
+          carry_basic.clear();
+          carry_status.clear();
         }
       }
     }
+    root_basis = carry_basic;
+    root_basis_status = carry_status;
   }
 
   // Debug-solution tracking. `contains` asks whether the reference solution
@@ -698,6 +770,15 @@ BranchAndBoundResult solve_milp(const Model& model,
   Node root;
   root.lower = working.lower;
   root.upper = working.upper;
+  // The basis the cut loop ended on, when it left one that fits the relaxation
+  // the tree is about to search. Without it the root node has no basis and goes
+  // down the crossover path - a first-order seed and a cold simplex - to solve
+  // a relaxation the cut loop has just solved, two or three times over.
+  if (static_cast<Int>(root_basis.size()) == working.num_rows() &&
+      !root_basis_status.empty()) {
+    root.basic = root_basis;
+    root.basis_status = root_basis_status;
+  }
   stack.push_back(std::move(root));
 
   auto try_incumbent = [&](const std::vector<double>& candidate) {
@@ -820,6 +901,30 @@ BranchAndBoundResult solve_milp(const Model& model,
         } else if (target[sz(j)] >= upper - 0.5 && upper < kInf) {
           pump.c[sz(j)] = -1.0;
           ++pulled;
+        } else if (options.pump_interior_terms) {
+          // The target sits strictly inside the column's range, where
+          // |x_j - t_j| needs an auxiliary variable to be written linearly. The
+          // general-integer pump does that; this one used to give the column no
+          // term at all, so on a model whose integers are not binaries the pump
+          // was pulling on nothing and re-solving the same LP until it gave up.
+          //
+          // A subgradient of |x_j - t_j| at the current point costs no variable
+          // and points the right way: push the column back toward the target
+          // from whichever side it is on. It is only valid near the current
+          // point, which is all that is needed - the pump re-solves and
+          // re-rounds every round, so the linearisation is rebuilt each time
+          // from wherever the relaxation has moved to.
+          //
+          // The direction has to have a bound to stop at, or the objective is
+          // unbounded and the round returns nothing.
+          const double away = x[sz(j)] - target[sz(j)];
+          if (away > 1e-9 && lower > -kInf) {
+            pump.c[sz(j)] = 1.0;
+            ++pulled;
+          } else if (away < -1e-9 && upper < kInf) {
+            pump.c[sz(j)] = -1.0;
+            ++pulled;
+          }
         }
       }
       if (pulled == 0) break;
@@ -984,8 +1089,8 @@ BranchAndBoundResult solve_milp(const Model& model,
     return false;
   };
 
+  bool cuts_reverted = false;
   MilpStatus status = MilpStatus::kInfeasible;
-  double open_bound = -kInf;
   double pump_time_spent = 0.0;
   double lp_dive_time_spent = 0.0;
 
@@ -1023,6 +1128,31 @@ BranchAndBoundResult solve_milp(const Model& model,
       continue;
     }
     if (!relaxation.optimal) {
+      // A root that will not solve with the cuts on it should be tried without
+      // them before the run is given up on.
+      //
+      // neos-3046615-murg is the case. 105 cuts take its root bound from 192 to
+      // 288, and then the relaxation carrying them does not converge - so the
+      // solver reported "relaxation failed" after 0.104 seconds of a fifteen
+      // second budget, having spent all of it on a bound for a tree it then
+      // declined to search. The cuts are what made the relaxation hard; the
+      // relaxation without them is the one the tree was always entitled to.
+      //
+      // Same rule as the crossover basis two hundred lines up, and as the seeded
+      // simplex in the LP path: a thing that is meant to help may cost time and
+      // may do nothing, but it may not cost the answer. Once only, so a root
+      // that will not solve either way still terminates.
+      if (node.depth == 0 && !cuts_reverted && working.num_rows() > rows_before_cuts) {
+        cuts_reverted = true;
+        result.cuts_reverted_after_root_failure = true;
+        working = sf.lp;  // append_cuts leaves bounds alone, so this is the
+                          // same relaxation with the cut rows taken back off
+        Node again;
+        again.lower = working.lower;
+        again.upper = working.upper;
+        stack.push_back(std::move(again));
+        continue;
+      }
       // Treat a node whose relaxation did not solve as pruned, and say so, since
       // silently dropping subtrees would make the reported bound a lie.
       result.nodes_relaxation_failed++;
@@ -1056,7 +1186,6 @@ BranchAndBoundResult solve_milp(const Model& model,
              node_objective);
       continue;  // bound prune
     }
-    if (stack.empty()) open_bound = node_objective;
 
     // Before branching, try to turn this relaxation into a feasible point.
     //
@@ -1466,9 +1595,26 @@ BranchAndBoundResult solve_milp(const Model& model,
       if (status == MilpStatus::kInfeasible) status = MilpStatus::kFeasible;
       double best_open = incumbent;
       for (const Node& n : stack) best_open = std::fmin(best_open, n.parent_bound);
-      result.dual_bound = to_model_objective(best_open);
-      result.relative_gap = std::fabs(result.objective - result.dual_bound) /
-                            std::fmax(1e-10, std::fabs(result.objective));
+      // An open node is not an unfinished one. Every node still on the stack
+      // carries a bound its parent proved, and if the smallest of those has
+      // already reached the cutoff then nothing left in the tree can beat what
+      // is in hand - the nodes would each be discarded on that bound the moment
+      // they were popped, and popping them would establish nothing that is not
+      // established here.
+      //
+      // So this is the same proof the loop would have produced, read off the
+      // stack instead of walked. It costs one pass over the open nodes and it
+      // turns a run that stopped on the clock with the tree already decided into
+      // the proof it had.
+      if (best_open >= cutoff()) {
+        status = MilpStatus::kOptimal;
+        result.dual_bound = result.objective;
+        result.relative_gap = 0.0;
+      } else {
+        result.dual_bound = to_model_objective(best_open);
+        result.relative_gap = std::fabs(result.objective - result.dual_bound) /
+                              std::fmax(1e-10, std::fabs(result.objective));
+      }
     }
   } else {
     // No incumbent, whatever the reason. There is no solution to report, and
@@ -1513,7 +1659,6 @@ BranchAndBoundResult solve_milp(const Model& model,
     }
   }
 
-  (void)open_bound;
   if (result.nodes_relaxation_failed > 0) {
     result.message =
         std::to_string(result.nodes_relaxation_failed) +
