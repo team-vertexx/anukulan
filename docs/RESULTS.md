@@ -931,11 +931,24 @@ from the triad, arrived at from the other direction.
 **And the smallest kernels get worse the more threads they are given.** Over
 this instance's dual vector of eleven thousand entries, `advance_kx` and
 `dual_step` both degrade with thread count: the barrier is a larger share of the
-work than the work is. `bench/micro/kernel_threshold.cpp` puts the crossover for
-an elementwise kernel at roughly four to eight thousand entries — but it measures
-back to back with a hot pool, which is precisely the overstatement 10.5 is about,
-so the thresholds are **left where they are** pending an end-to-end sweep rather
-than moved on a kernel benchmark's say-so.
+work than the work is.
+
+That reads like an argument for raising the size threshold, and
+`bench/micro/kernel_threshold.cpp` — timing the fused primal step back to back
+with a hot pool — reads like an argument for *lowering* it, putting the crossover
+nearer 4,096 entries. Swept end to end, four instances at five threads, best of
+three, both are wrong:
+
+| element threshold | 4,096 | **8,192** | 32,768 | 131,072 |
+|---|---|---|---|---|
+| geomean solve seconds | 1.116 | **1.087** | 1.244 | 1.275 |
+
+The value does not move. It is a measurement now rather than the guess it was,
+and it is the **third** time in this section that kernel-level evidence has
+pointed the wrong way against an end-to-end number — after the microbenchmark's
+3.26× in 10.5 and the row-length correlation in 10.3 that failed its own
+controlled prediction. The pattern is consistent enough to be worth stating as a
+rule: on this component, measure the solver.
 
 A profiled run is slower than a real one by two clock reads per call and its wall
 clock is not a benchmark; the proportions are the point.
