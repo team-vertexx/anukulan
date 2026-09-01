@@ -364,6 +364,9 @@ int command_simplex(const std::vector<std::string>& args) {
   bool quiet = false;
   bool use_presolve = false;
   bool use_crossover = false;
+  // Threads for the crossover seed, which is a first-order solve and so the one
+  // part of this command that has any. The simplex itself is serial.
+  const sankhya::LinAlgBackend* backend = nullptr;
   double crossover_tolerance = 1e-4;
   // A seed that has not converged by here is not going to produce a better
   // basis for being run longer, and every iteration of it is iterations the
@@ -450,6 +453,11 @@ int command_simplex(const std::vector<std::string>& args) {
       options.pricing = sankhya::SimplexOptions::Pricing::kDantzig;
     } else if (a == "--devex") {
       options.pricing = sankhya::SimplexOptions::Pricing::kDevex;
+    } else if (value_of(a, "--threads=", &v)) {
+      // Only the crossover seed uses this; the simplex itself has no parallel
+      // path. The answer does not change either way - see backend.hpp.
+      const int t = v <= 0 ? sankhya::default_thread_count() : static_cast<int>(v);
+      backend = &sankhya::threaded_cpu_backend(t);
     } else if (a == "--presolve") {
       use_presolve = true;
     } else if (a == "--verbose") {
@@ -500,6 +508,7 @@ int command_simplex(const std::vector<std::string>& args) {
   sankhya::PdhgResult seed;
   if (use_crossover) {
     sankhya::PdhgOptions po;
+    po.backend = backend;
     po.tolerance = crossover_tolerance;
     po.gap_tolerance = crossover_tolerance;
     sankhya::Int budget = crossover_max_iterations;
@@ -1093,6 +1102,12 @@ int command_milp(const std::vector<std::string>& args) {
     } else if (a == "--no-heuristic") {
       options.rounding_heuristic = false;
       options.diving_heuristic = false;
+    } else if (value_of(a, "--threads=", &v)) {
+      // The node relaxations are simplex solves and serial. What this reaches
+      // is the root crossover seed, which is a first-order solve. The answer
+      // does not change either way - see backend.hpp.
+      const int t = v <= 0 ? sankhya::default_thread_count() : static_cast<int>(v);
+      options.relaxation.backend = &sankhya::threaded_cpu_backend(t);
     } else if (a == "--presolve") {
       use_presolve = true;
     } else if (a == "--verbose") {

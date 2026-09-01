@@ -3,6 +3,7 @@
 #include <cmath>
 #include <memory>
 #include <mutex>
+#include <vector>
 
 #include "sankhya/backend.hpp"
 #include "sankhya/threading.hpp"
@@ -53,17 +54,22 @@ constexpr Int kMinNonzerosToThread = 32768;
 // a nested polishing sub-solve, and anything past that evicts itself.
 class SplitCache {
  public:
-  const std::vector<Int>& get(const SparseMatrix& matrix, int blocks) {
+  // A shared_ptr rather than a reference into the ring. A reference would stay
+  // valid only until the fifth distinct matrix evicted the entry under it, and
+  // a split that changes shape while a loop is reading it is a race that would
+  // show up as a wrong answer on some other machine, months later.
+  std::shared_ptr<const std::vector<Int>> get(const SparseMatrix& matrix,
+                                              int blocks) {
     const Key key{&matrix, matrix.rows(), matrix.nnz(), blocks};
     std::lock_guard<std::mutex> guard(mutex_);
     for (const Entry& e : entries_) {
-      if (e.key == key) return e.cut;
+      if (e.cut && e.key == key) return e.cut;
     }
-    Entry fresh{key, split_rows_by_nonzeros(matrix, blocks)};
-    entries_[sz(static_cast<Int>(next_))] = std::move(fresh);
-    const std::size_t placed = sz(static_cast<Int>(next_));
+    auto cut = std::make_shared<const std::vector<Int>>(
+        split_rows_by_nonzeros(matrix, blocks));
+    entries_[sz(static_cast<Int>(next_))] = Entry{key, cut};
     next_ = (next_ + 1) % static_cast<int>(entries_.size());
-    return entries_[placed].cut;
+    return cut;
   }
 
  private:
@@ -79,7 +85,7 @@ class SplitCache {
   };
   struct Entry {
     Key key;
-    std::vector<Int> cut;
+    std::shared_ptr<const std::vector<Int>> cut;
   };
   std::array<Entry, 4> entries_{};
   int next_ = 0;
@@ -112,6 +118,8 @@ class SplitCache {
 class ThreadedCpuBackend final : public LinAlgBackend {
  public:
   explicit ThreadedCpuBackend(int threads) : pool_(threads) {}
+
+  int threads() const { return pool_.size(); }
 
   std::string name() const override {
     return "cpu-threaded(" + std::to_string(pool_.size()) + ")";
@@ -265,7 +273,8 @@ class ThreadedCpuBackend final : public LinAlgBackend {
       return;
     }
     const int blocks = blocks_for(a.nnz(), kMinNonzerosPerBlock, pool_.size());
-    const std::vector<Int>& cut = splits_.get(a, blocks);
+    const std::shared_ptr<const std::vector<Int>> held = splits_.get(a, blocks);
+    const std::vector<Int>& cut = *held;
     const auto& start = a.start();
     const auto& index = a.index();
     const auto& value = a.value();
@@ -285,19 +294,22 @@ class ThreadedCpuBackend final : public LinAlgBackend {
 };
 
 std::mutex g_backend_mutex;
-std::unique_ptr<ThreadedCpuBackend> g_threaded;
-int g_threaded_size = 0;
+// Kept per thread count and never replaced, so a reference handed out for one
+// solve cannot be destroyed by a later call asking for a different count. A
+// process asks for one count in practice; the cost of the general case is a
+// pool that outlives its use, which is threads sitting on a condition variable.
+std::vector<std::unique_ptr<ThreadedCpuBackend>> g_threaded;
 
 }  // namespace
 
 const LinAlgBackend& threaded_cpu_backend(int threads) {
   if (threads <= 1) return cpu_backend();
   std::lock_guard<std::mutex> guard(g_backend_mutex);
-  if (!g_threaded || g_threaded_size != threads) {
-    g_threaded = std::make_unique<ThreadedCpuBackend>(threads);
-    g_threaded_size = threads;
+  for (const std::unique_ptr<ThreadedCpuBackend>& b : g_threaded) {
+    if (b->threads() == threads) return *b;
   }
-  return *g_threaded;
+  g_threaded.push_back(std::make_unique<ThreadedCpuBackend>(threads));
+  return *g_threaded.back();
 }
 
 }  // namespace sankhya
