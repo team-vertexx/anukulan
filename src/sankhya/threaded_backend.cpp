@@ -1,8 +1,12 @@
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
+#include <cstdio>
+#include <map>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <vector>
 
 #include "sankhya/backend.hpp"
@@ -125,11 +129,13 @@ class ThreadedCpuBackend final : public LinAlgBackend {
   }
 
   void multiply(const SparseMatrix& a, const double* x, double* y) const override {
+    const Scope scope(this, "K x", threads_spmv(a));
     spmv(a, x, y);
   }
 
   void multiply_transpose(const SparseMatrix& at, const double* y,
                           double* x) const override {
+    const Scope scope(this, "K' y", threads_spmv(at));
     spmv(at, y, x);
   }
 
@@ -144,9 +150,11 @@ class ThreadedCpuBackend final : public LinAlgBackend {
     std::copy(source, source + sz(n), host);
   }
   void fill(double* target, Int n, double value) const override {
+    const Scope scope(this, "fill", threads_each(n));
     each(n, [&](Int lo, Int hi) { std::fill(target + sz(lo), target + sz(hi), value); });
   }
   void copy(const double* source, double* target, Int n) const override {
+    const Scope scope(this, "copy", threads_each(n));
     each(n, [&](Int lo, Int hi) {
       std::copy(source + sz(lo), source + sz(hi), target + sz(lo));
     });
@@ -154,6 +162,7 @@ class ThreadedCpuBackend final : public LinAlgBackend {
 
   // Serial, and the class comment says why.
   double dot(const double* a, const double* b, Int n) const override {
+    const Scope scope(this, "dot (serial)", false);
     double sum = 0.0;
     for (Int i = 0; i < n; ++i) sum += a[sz(i)] * b[sz(i)];
     return sum;
@@ -166,6 +175,7 @@ class ThreadedCpuBackend final : public LinAlgBackend {
   // Maximum is exactly associative, so this one splits without changing the
   // answer.
   double inf_norm(const double* a, Int n) const override {
+    const Scope scope(this, "inf_norm", threads_each(n));
     if (n < kMinElementsToThread || pool_.size() == 1) {
       double m = 0.0;
       for (Int i = 0; i < n; ++i) m = std::fmax(m, std::fabs(a[sz(i)]));
@@ -189,6 +199,7 @@ class ThreadedCpuBackend final : public LinAlgBackend {
   void primal_step(Int n, double tau, const double* x, const double* c,
                    const double* kt_y, const double* lower, const double* upper,
                    double* x_next, double* dx, double* x_bar) const override {
+    const Scope scope(this, "primal_step", threads_each(n));
     each(n, [&](Int lo, Int hi) {
       for (Int j = lo; j < hi; ++j) {
         const std::size_t sj = sz(j);
@@ -206,6 +217,7 @@ class ThreadedCpuBackend final : public LinAlgBackend {
   void dual_step(Int m, Int num_equalities, double sigma, const double* y,
                  const double* q, const double* k_x_bar, const double* k_x,
                  double* y_next, double* dy, double* k_dx) const override {
+    const Scope scope(this, "dual_step", threads_each(m));
     each(m, [&](Int lo, Int hi) {
       for (Int i = lo; i < hi; ++i) {
         const std::size_t si = sz(i);
@@ -219,24 +231,28 @@ class ThreadedCpuBackend final : public LinAlgBackend {
   }
 
   void advance_kx(Int m, const double* k_x_bar, double* k_x) const override {
+    const Scope scope(this, "advance_kx", threads_each(m));
     each(m, [&](Int lo, Int hi) {
       for (Int i = lo; i < hi; ++i) k_x[sz(i)] = 0.5 * (k_x_bar[sz(i)] + k_x[sz(i)]);
     });
   }
 
   void accumulate(Int n, double weight, const double* v, double* sum) const override {
+    const Scope scope(this, "accumulate", threads_each(n));
     each(n, [&](Int lo, Int hi) {
       for (Int i = lo; i < hi; ++i) sum[sz(i)] += weight * v[sz(i)];
     });
   }
 
   void scale_into(Int n, double weight, const double* sum, double* out) const override {
+    const Scope scope(this, "scale_into", threads_each(n));
     each(n, [&](Int lo, Int hi) {
       for (Int i = lo; i < hi; ++i) out[sz(i)] = sum[sz(i)] / weight;
     });
   }
 
   void blend(Int n, double a, double* z, double b, const double* anchor) const override {
+    const Scope scope(this, "blend", threads_each(n));
     each(n, [&](Int lo, Int hi) {
       for (Int i = lo; i < hi; ++i) z[sz(i)] = a * z[sz(i)] + b * anchor[sz(i)];
     });
@@ -247,7 +263,93 @@ class ThreadedCpuBackend final : public LinAlgBackend {
     return omega * dot(dx, dx, n) + dot(dy, dy, m) / omega;
   }
 
+  // Per-kernel timing, the same facility cuda_backend.cu carries and for the
+  // same reason: the question "which of these is the bottleneck" has to be
+  // answered by the backend, because only it knows what it launched.
+  //
+  // It earns its place here rather than being a debugging aid. The loop turned
+  // out to be memory-bound (docs/RESULTS.md 10.3), and once that is true the
+  // thing worth knowing is which kernel is moving the most bytes - which is not
+  // the one intuition picks, and was not the one this backend spent its effort
+  // on first.
+  //
+  // A profiled run is slower than a real one, by two clock reads a call, so its
+  // wall clock is not a benchmark. The proportions are what it is for.
+  void set_profiling(bool on) const override {
+    profiling_ = on;
+    if (!on) timings_.clear();
+  }
+
+  std::string profile_report() const override {
+    if (timings_.empty()) return {};
+    double total = 0.0;
+    long long calls = 0;
+    for (const auto& [name, t] : timings_) {
+      total += t.seconds;
+      calls += t.calls;
+    }
+    std::vector<std::pair<std::string, Timing>> sorted(timings_.begin(), timings_.end());
+    std::sort(sorted.begin(), sorted.end(),
+              [](const auto& a, const auto& b) { return a.second.seconds > b.second.seconds; });
+    char line[256];
+    std::string out;
+    std::snprintf(line, sizeof(line), "%-18s %11s %9s %12s %10s %10s\n", "kernel",
+                  "seconds", "share", "calls", "us each", "threaded");
+    out += line;
+    for (const auto& [name, t] : sorted) {
+      std::snprintf(line, sizeof(line), "%-18s %11.4f %8.1f%% %12lld %10.2f %10s\n",
+                    name.c_str(), t.seconds,
+                    total > 0.0 ? 100.0 * t.seconds / total : 0.0, t.calls,
+                    t.calls > 0 ? 1e6 * t.seconds / static_cast<double>(t.calls) : 0.0,
+                    t.threaded ? "yes" : "no");
+      out += line;
+    }
+    std::snprintf(line, sizeof(line), "%-18s %11.4f %8.1f%% %12lld\n", "total", total,
+                  100.0, calls);
+    out += line;
+    return out;
+  }
+
  private:
+  struct Timing {
+    double seconds = 0.0;
+    long long calls = 0;
+    bool threaded = false;
+  };
+
+  // Wraps one kernel. Does nothing unless profiling is on, so the ordinary path
+  // pays a branch.
+  struct Scope {
+    const ThreadedCpuBackend* owner;
+    const char* name;
+    bool threaded;
+    std::chrono::steady_clock::time_point started;
+    Scope(const ThreadedCpuBackend* o, const char* n, bool t)
+        : owner(o), name(n), threaded(t) {
+      if (owner->profiling_) started = std::chrono::steady_clock::now();
+    }
+    ~Scope() {
+      if (!owner->profiling_) return;
+      const double el = std::chrono::duration<double>(
+                            std::chrono::steady_clock::now() - started).count();
+      Timing& t = owner->timings_[name];
+      t.seconds += el;
+      t.calls += 1;
+      t.threaded = threaded;
+    }
+  };
+
+  // Whether a call of this size actually spreads, so the report can say which
+  // kernels are running on one thread despite the pool existing. That column is
+  // the point of the table: a kernel below the threshold is serial no matter
+  // what --threads says.
+  bool threads_each(Int n) const {
+    return n >= kMinElementsToThread && pool_.size() > 1;
+  }
+  bool threads_spmv(const SparseMatrix& a) const {
+    return a.nnz() >= kMinNonzerosToThread && pool_.size() > 1;
+  }
+
   // One elementwise loop over [0, n), given as a range so the body keeps the
   // serial inner loop verbatim.
   template <typename Body>
@@ -290,6 +392,8 @@ class ThreadedCpuBackend final : public LinAlgBackend {
 
   mutable ThreadPool pool_;
   mutable SplitCache splits_;
+  mutable bool profiling_ = false;
+  mutable std::map<std::string, Timing> timings_;
 };
 
 std::mutex g_backend_mutex;
