@@ -24,7 +24,7 @@ of one:
 | component | vs production | why |
 |---|---|---|
 | MPS reader | ~95 | genuinely at parity, and faster |
-| First-order LP | ~64 | strongest piece; now threaded, though §10 shows this machine caps that at 1.32x. Some cuPDLPx tuning still missing |
+| First-order LP | ~64 | strongest piece; multithreading is no longer missing, though §10 measures the gain at 1.41x on five threads and shows the memory bus is what caps it. Some cuPDLPx tuning still missing |
 | GPU | ~55 | real 2.7–7× measured, but not cuPDLP-C level |
 | QP | ~50 | OSQP's core is here; no AMD ordering, thin regularisation strategy |
 | Simplex | ~55 | 78/88 Netlib correct and none wrong, and it now takes a basis from the first-order method. Still no Forrest–Tomlin, no bound-flipping ratio test, no hypersparsity |
