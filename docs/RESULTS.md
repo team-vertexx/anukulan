@@ -678,8 +678,8 @@ Three of them exist because of a specific bug and are worth understanding:
 ## 10. Threads
 
 **What was threaded: the first-order method, and nothing else yet.** The
-simplex and the branch and bound tree are still serial, and sections 10.6 and
-10.7 are the measurements that say why rather than an apology for it.
+simplex and the branch and bound tree are still serial, and sections 10.7 and
+10.8 are the measurements that say why rather than an apology for it.
 
 Every number in this section was taken on the machine at the top of this
 document — an M4 with **four performance cores and six efficiency ones**. That
@@ -702,9 +702,11 @@ so against the number.
 This is the first claim because everything else is worthless without it.
 
 `threaded_cpu_backend` returns **bit-identical** results to `cpu_backend()` at
-every thread count. Not "reproducible at a fixed thread count", which is what
-CPLEX's deterministic mode and Gurobi promise, and not "agrees to 1e-13".
-Identical bits. `docs/ARCHITECTURE.md` §7a has the argument; this is the check.
+every thread count. Not "reproducible at a fixed thread count" — which is the
+shape of what production solvers offer, since Gurobi's guarantee is the same
+results from the same *parameters* and the thread count is one of them — and not
+"agrees to 1e-13". Identical bits. `docs/ARCHITECTURE.md` §7a has the argument
+and §10.8 the comparison; this is the check.
 
 Three checks, in increasing breadth.
 
@@ -830,7 +832,7 @@ number in either table being exact.
 **What I could not measure, and will not pretend to.** An earlier draft of this
 section claimed the ceiling was exactly 1.32× and that the solver's 1.32× sat
 precisely on it. That was wrong twice over: the solver number improved to 1.41×
-once the pool defects in 10.5 were fixed, and the single-thread bandwidth figure
+once the pool defects in 10.6 were fixed, and the single-thread bandwidth figure
 turned out not to be stable enough to divide by. Across seven runs it came back
 as 34.9, 35.6, 37.4, 53.2, 58.2, 59.4 and 60.0 GB/s — a factor of 1.7 — because
 one thread lands on a performance core or an efficiency core and the scheduler
@@ -849,17 +851,102 @@ times what this machine does, the method is bandwidth-bound, and the measured
 2.70×–7.09× is roughly that ratio appearing where it should. CPU threads are not
 a substitute for the device on this component.
 
-**One thing the spread does not explain.** Per-instance speedups run from 1.20×
-to 2.06×, and nothing measured here accounts for it: maros-r7 and qap15 have the
-same working set and the same cache residency and differ by a factor of 1.4. An
-earlier draft attributed the spread to cache residency, which the data supported
-until datt256_lp went from 1.17x to 1.46x on a pool fix. The mechanism is open.
+**The spread between instances, one candidate tested and eliminated.**
+Per-instance speedups run from 1.20× to 2.06×. Two explanations have now been
+tried and neither survived, and both are recorded so they are not tried again.
+
+*Cache residency.* It fitted until datt256_lp went from 1.17× to 1.46× on a pool
+fix and broke the correlation. maros-r7 and qap15 have the same working set and
+differ by a factor of 1.4.
+
+*Row length of the sparser product.* A product whose rows are very short
+degenerates into a stream over the matrix, and streams are what the bus caps —
+so the shorter-rowed of `K` and `K'` should be the one that limits the solve.
+Across the eight instances that correlates at **r = 0.957**:
+
+| instance | K nnz/row | K' nnz/row | shorter | speedup |
+|---|---|---|---|---|
+| cont1 | 2.2 | 10.9 | 2.2 | 1.25 |
+| sgpf5y6 | 3.4 | 2.7 | 2.7 | 1.24 |
+| watson_1 | 5.2 | 2.7 | 2.7 | 1.20 |
+| supportcase10 | 3.4 | 37.6 | 3.4 | 1.48 |
+| graph40-40 | 3.5 | 12.3 | 3.5 | 1.38 |
+| qap15 | 15.0 | 4.3 | 4.3 | 1.49 |
+| datt256_lp | 135.8 | 5.7 | 5.7 | 1.46 |
+| maros-r7 | 46.2 | 15.4 | 15.4 | **2.06** |
+
+That is a good-looking correlation on eight points and it is **wrong**, which is
+why the per-kernel profiler in 10.4 was worth building: it turns the idea into a
+prediction inside a single instance, where everything else is held fixed. On
+datt256_lp the two products differ in row length by a factor of 24 and their
+scaling does track it — `K x` improves 2.34× from two threads to eight, `K' y`
+only 1.17×. On supportcase10 the row lengths are **reversed**, so `K x` should
+be the poor one. It is not: the two come out at 1.47× and 1.49×, within noise of
+each other.
+
+The controlled test refutes it, and a correlation on eight points that fails its
+own prediction is a coincidence, not a mechanism. **The spread remains
+unexplained.**
 
 ```bash
 build/micro_triad 10 60
 ```
 
-### 10.4 What the kernel microbenchmark got wrong, and why it is kept
+### 10.4 Where the time actually goes, kernel by kernel
+
+`--profile` reported nothing on the CPU, so the question this work most needed
+answering could only be guessed at from outside the solver. The threaded backend
+now carries the same per-kernel timing the CUDA backend has, with one extra
+column: whether a call actually spread, or fell below the size threshold and ran
+on the calling thread.
+
+datt256_lp, six threads, 300 iterations:
+
+| kernel | share | µs each | threaded |
+|---|---|---|---|
+| `K x` | 29.8% | 1080 | yes |
+| `K' y` | 25.1% | 904 | yes |
+| `primal_step` | 15.3% | 563 | yes |
+| **`dot` (serial)** | **10.0%** | 185 | **no** |
+| `accumulate` | 7.7% | 95 | yes |
+| `blend` | 7.4% | 93 | yes |
+| `dual_step` | 2.1% | 79 | yes |
+| `advance_kx` | 2.1% | 77 | yes |
+
+Two things follow, and the first one corrects an assumption I had been carrying.
+
+**The serial reductions are not what caps this.** Leaving `dot` on the calling
+thread to keep the determinism guarantee costs 10% of the loop. Amdahl on 10%
+serial permits about 3.5× at six threads, and the measured figure is 1.46× — so
+the guarantee is not what is being paid for. **The parallel parts simply do not
+scale**, and that is worth stating plainly because the obvious suspicion about a
+backend that deliberately serialises its reductions is exactly the wrong one.
+
+**What does not scale is the streaming.** From two threads to eight, `K x`
+improves **2.34×** while `K' y` improves **1.17×** and `primal_step` **1.23×** —
+and those last two are 40% of the run between them. Both are dominated by moving
+bytes rather than by chasing indices, which is the same conclusion 10.3 reaches
+from the triad, arrived at from the other direction.
+
+**And the smallest kernels get worse the more threads they are given.** Over
+this instance's dual vector of eleven thousand entries, `advance_kx` and
+`dual_step` both degrade with thread count: the barrier is a larger share of the
+work than the work is. `bench/micro/kernel_threshold.cpp` puts the crossover for
+an elementwise kernel at roughly four to eight thousand entries — but it measures
+back to back with a hot pool, which is precisely the overstatement 10.5 is about,
+so the thresholds are **left where they are** pending an end-to-end sweep rather
+than moved on a kernel benchmark's say-so.
+
+A profiled run is slower than a real one by two clock reads per call and its wall
+clock is not a benchmark; the proportions are the point.
+
+```bash
+build/sankhya solve data/lptestset/datt256_lp.mps --no-polish \
+    --max-iter=300 --threads=6 --profile
+python3 bench/micro/kernel_scaling.py data/lptestset/datt256_lp.mps 300
+```
+
+### 10.5 What the kernel microbenchmark got wrong, and why it is kept
 
 `bench/micro/spmv_scaling.cpp` measures `K*x` alone, run back to back. On
 datt256_lp it reaches **3.26×** on seven threads. The solver, on the same
@@ -874,7 +961,7 @@ It is kept, with this paragraph, because the gap is the most useful thing either
 measurement produced — and because 3.26× nearly became the headline of this
 section. A kernel benchmark is evidence about a kernel.
 
-### 10.5 Cores of two different speeds, and a barrier that must not spin
+### 10.6 Cores of two different speeds, and a barrier that must not spin
 
 This is an M4: **four performance cores and six efficiency ones**. Three things
 follow, all measured, all now designed around, and two of them were defects that
@@ -918,7 +1005,7 @@ takes a spinner off its core and everyone waits out its quantum. It is why
 `--threads=0` asks for the performance core count rather than for every core —
 that default previously returned nine, which 10.2 shows is a **loss**.
 
-### 10.6 The simplex, and why it is still serial
+### 10.7 The simplex, and why it is still serial
 
 Two measurements decided this, and the second one contradicts a claim this
 repository has been making.
@@ -951,7 +1038,7 @@ discrepancy may already be fixed there; it is written down because both numbers
 above were measured on the same run and the second one is only meaningful with
 the first beside it.
 
-### 10.7 The branch and bound tree, measured and not attempted
+### 10.8 The branch and bound tree, measured and not attempted
 
 The prompt for this work called node parallelism the most valuable and the
 hardest, and both halves check out.
@@ -993,23 +1080,37 @@ caps §10.3 at 1.32×. The component that cannot be helped by threads and the
 component that could be are opposite ones, which is the reverse of where
 intuition points.
 
-It was not built, for two reasons and neither is that it would not pay.
+**What it would be worth is published.** Para-B&B ([arXiv:2604.09556]
+(https://arxiv.org/abs/2604.09556)) is a deterministic parallel branch and bound
+built on HiGHS, and over 80 MIPLIB 2017 instances it reports a **geometric mean
+speedup of 2.17× on eight threads** with determinism preserved, reaching 5.12×
+on the node-heavy instances — and still averaging a 34.7% thread idle rate even
+with a learned load balancer. So the honest comparison is 2.17× for the tree
+against the 1.41× in §10.2 for the first-order path. The tree is worth more, on
+the same machine class, and by roughly the factor the reasoning above predicts.
 
-The first is determinism, and it is the real one. A parallel tree changes the
-order nodes are explored, which changes when the incumbent is found, which
-changes what gets pruned, which changes the node count — so the reproducibility
-this section opened with cannot be had the same way. What established codes do
-instead is give up thread-count invariance and keep run-to-run reproducibility:
-SCIP and its parallel front ends synchronise on a *deterministic clock* counted
-in LP iterations rather than in seconds, and CPLEX's deterministic mode and
-Gurobi both promise the same answer only for a fixed thread count and seed.
-**No major solver offers what §10.1 offers here**, and it is worth being clear
-that this is because the first-order path happens to allow it and a search tree
-does not, rather than because of anything clever.
+It was not built here, for two reasons, and neither is that it would not pay.
 
-The second is scope. Doing it properly means a deterministic clock,
+The first is determinism. A parallel tree changes the order nodes are explored,
+which changes when the incumbent is found, which changes what is pruned, which
+changes the node count — so the guarantee §10.1 opens with cannot be had the
+same way. What the established codes offer instead is narrower than it sounds.
+Gurobi's guarantee is the same results "from the same inputs (model and
+parameters)" — and the thread count *is* a parameter, so it does not span thread
+counts. The same page lists `TimeLimit` as undermining determinism outright,
+because wall-clock timing varies with machine load, which is exactly the effect
+that made `miplib_survey.py` differ between the two runs in §10.1 and is worth
+knowing is a documented property of production solvers rather than a defect
+here. Para-B&B gets its determinism by replicating full solver state per worker
+and removing non-deterministic synchronisation.
+
+**So no major solver promises what §10.1 promises**, and the reason is not
+cleverness on this side: the first-order path happens to admit bit-identity
+because its parallel work is elementwise and row-disjoint, and a search tree
+does not.
+
+The second reason is scope. Doing it properly means a deterministic clock,
 synchronisation points, race-free work stealing against a shared incumbent, and
 per-thread node pools — inside `branch_and_bound.cpp`, which another work stream
-owns. The honest estimate is weeks, not days, and half-doing it would produce
-exactly the solver this section exists to avoid: one whose node counts move
-between runs.
+owns. Weeks, not days, and half-doing it produces exactly the solver this
+section exists to avoid: one whose node counts move between runs.

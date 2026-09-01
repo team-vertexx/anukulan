@@ -316,8 +316,10 @@ offer:
 > The threaded backend returns **bit-identical** results to the serial one, at
 > every thread count, on every run.
 
-Not "reproducible for a fixed thread count", which is what CPLEX's deterministic
-mode and Gurobi both promise, and not "close to". Identical. The matrix products
+Not "reproducible for a fixed thread count", which is the shape of what
+production solvers offer — Gurobi guarantees the same results from the same
+model and parameters, and the thread count is a parameter — and not "close to".
+Identical. The matrix products
 split by rows, so each output entry is still accumulated by the same serial inner
 loop in the same order and no two blocks write the same entry; the elementwise
 steps have no cross-entry dependence at all; and the one reduction that is
