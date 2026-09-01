@@ -24,8 +24,12 @@ BIN = os.environ.get("SANKHYA", "build/sankhya")
 
 
 def solve(path, threads, limit, tol):
+    # An iteration cap, deliberately, not a time limit. A time limit stops the
+    # solve wherever the wall clock happens to be, so the two runs would stop at
+    # different iterations under any load at all and the comparison would report
+    # differences that are the clock's doing rather than the backend's.
     cmd = [BIN, "solve", path, "--format=json", "--presolve",
-           f"--tol={tol}", f"--time-limit={limit}", f"--threads={threads}"]
+           f"--tol={tol}", f"--max-iter={limit}", f"--threads={threads}"]
     p = subprocess.run(cmd, capture_output=True, text=True)
     try:
         return json.loads(p.stdout.strip().splitlines()[-1])
@@ -35,7 +39,7 @@ def solve(path, threads, limit, tol):
 
 def main():
     threads = sys.argv[1] if len(sys.argv) > 1 else "6"
-    limit = sys.argv[2] if len(sys.argv) > 2 else "60"
+    limit = sys.argv[2] if len(sys.argv) > 2 else "20000"
     tol = sys.argv[3] if len(sys.argv) > 3 else "1e-6"
 
     published = {}
@@ -72,7 +76,8 @@ def main():
             if err <= 1e-6:
                 matched += 1
 
-    print(f"\n{checked} instances compared at 1 thread against {threads}")
+    print(f"\n{checked} instances compared at 1 thread against {threads}, "
+          f"iteration cap {limit}")
     print(f"  identical objective, iterations and status : {same}")
     print(f"  differing                                  : {differ}")
     print(f"  of those reaching optimal, matching the published value: {matched}")

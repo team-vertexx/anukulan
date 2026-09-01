@@ -15,13 +15,12 @@ namespace {
 //
 // More blocks than threads is what lets a worker that finished early take
 // another one, and on cores of two different speeds that is the difference
-// between scaling and not: on datt256_lp's K*x at six threads, one block per
-// thread reaches 2.42x and eight blocks per thread reaches 3.15x.
+// between scaling and not: on datt256_lp's K*x at six threads, a static split
+// reaches 2.30x and dynamic block-stealing reaches 3.17x.
 //
 // But a block costs an atomic increment, and once the blocks are small enough
-// that is all it is doing. 25fv47 has 10,400 nonzeros, so eight blocks a thread
-// at seven threads is 186 nonzeros a block, and there dynamic scheduling
-// measures 0.36x where a plain one-block-per-thread split measures 3.40x.
+// that is all it is doing. On 25fv47, which has 10,400 nonzeros, the same
+// comparison at six threads runs the other way: static 3.30x, dynamic 1.53x.
 //
 // So the block count follows the work rather than the thread count: enough
 // nonzeros in a block to pay for taking it, and never more than eight blocks a

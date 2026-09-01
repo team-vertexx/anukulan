@@ -1,0 +1,144 @@
+    1/103 10teams                     time limit     100.000%   28.0s
+    2/103 a2c1s1                      time limit     100.000%   15.0s
+    3/103 acc-tight4                  time limit       0.000%   31.2s
+    4/103 aflow30a                    time limit      42.832%   15.0s
+    5/103 app2-1                      time limit       0.001%   15.0s
+    6/103 b1c1s1                      time limit     100.000%   15.0s
+    7/103 beasleyC2                   time limit      77.778%   15.0s
+    8/103 berlin                      time limit     100.000%   15.0s
+    9/103 binkar10_1                  time limit       5.119%   15.0s
+   10/103 bppc4-08                    time limit      50.943%   15.0s
+   11/103 bppc8-09                    time limit       7.627%   15.0s
+   12/103 breastcancer-regularized    time limit     100.000%   15.0s
+   13/103 csched007                   time limit     100.000%   15.0s
+   14/103 cvrpsimple2i                read/parse failed
+   15/103 cvs16r128-89                time limit     100.000%   32.2s
+   16/103 danoint                     time limit     100.000%   15.1s
+   17/103 enlight8                    time limit       0.000%   15.0s
+   18/103 f2gap401600                 time limit       0.000%   15.0s
+   19/103 fiber                       time limit      20.972%   15.0s
+   20/103 flugpl                      optimal          0.000%    0.0s
+   21/103 gen-ip021                   time limit       0.472%   15.0s
+   22/103 gen                         optimal          0.000%    3.3s
+   23/103 ger50-17-ptp-pop-6t         time limit     100.000%   15.0s
+   24/103 gmu-35-50                   time limit       4.359%   15.0s
+   25/103 graphdraw-gemcutter         time limit       6.378%   15.0s
+   26/103 gt2                         optimal          0.000%    2.7s
+   27/103 haprp                       time limit     100.000%   15.0s
+   28/103 ic97_tension                time limit     100.000%   15.0s
+   29/103 mad                         time limit      32.820%   15.0s
+   30/103 markshare1                  time limit    1800.000%   15.0s
+   31/103 markshare_5_0               time limit     600.000%   15.0s
+   32/103 mc8                         time limit     214.432%   15.0s
+   33/103 mik-250-20-75-2             time limit       0.725%   15.0s
+   34/103 mik-250-20-75-5             time limit       0.388%   15.0s
+   35/103 milo-v13-4-3d-3-0           time limit      39.092%   15.0s
+   36/103 misc07                      time limit      15.302%   15.0s
+   37/103 mkc1                        time limit     100.000%   18.6s
+   38/103 mtest4ma                    time limit     121.420%   15.0s
+   39/103 n5-3                        time limit     100.000%   15.0s
+   40/103 neos-1112782                time limit     100.000%   15.3s
+   41/103 neos-1425699                time limit      21.691%   15.0s
+   42/103 neos-2652786-brda           time limit    2291.077%   15.0s
+   43/103 neos-3046615-murg           relaxation f      0.2s
+   44/103 neos-3072252-nete           time limit      35.895%   15.0s
+   45/103 neos-3530903-gauja          time limit     100.000%   15.0s
+   46/103 neos-3610040-iskar          time limit       5.405%   15.0s
+   47/103 neos-3611447-jijia          time limit      14.953%   15.0s
+   48/103 neos-3754480-nidda          time limit      21.758%   15.0s
+   49/103 neos-4333596-skien          time limit     105.210%   15.0s
+   50/103 neos-503737                 time limit     100.000%   28.3s
+   51/103 neos-5078479-escaut         time limit     100.000%   15.2s
+   52/103 neos-5192052-neckar         optimal          0.000%    0.0s
+   53/103 neos-555343                 time limit     100.000%   16.0s
+   54/103 neos-807639                 time limit      10.744%   15.1s
+   55/103 neos16                      time limit     100.000%   15.0s
+   56/103 neos2                       time limit     100.000%   15.0s
+   57/103 neos5                       time limit       3.333%   15.0s
+   58/103 newdano                     time limit     100.000%   15.0s
+   59/103 nexp-50-20-1-1              time limit      13.793%   15.0s
+   60/103 nh97_tension                time limit     100.000%   15.0s
+   61/103 p0201                       optimal          0.000%    3.4s
+   62/103 pb-market-split8-70-4       time limit       0.000%   15.0s
+   63/103 pg5_34                      time limit       2.485%   15.0s
+   64/103 pigeon-08                   time limit     100.000%   15.3s
+   65/103 pigeon-16                   time limit     100.000%   15.3s
+   66/103 prod1                       time limit       8.929%   15.0s
+   67/103 qnet1                       time limit      17.105%   15.0s
+   68/103 r50x360                     time limit      30.490%   15.0s
+   69/103 ran13x13                    time limit      14.207%   15.0s
+   70/103 rococoC10-001000            time limit     100.000%   15.0s
+instance                     status              err%    secs     nodes
+flugpl                       optimal            0.000     0.0       246
+neos-5192052-neckar          optimal            0.000     0.0         9
+gen                          optimal            0.000     3.3       283
+p0201                        optimal            0.000     3.4      1104
+gt2                          optimal            0.000     2.7      3230
+acc-tight4                   time limit         0.000    31.2         0
+enlight8                     time limit         0.000    15.0     58932
+pb-market-split8-70-4        time limit         0.000    15.0     46031
+f2gap401600                  time limit         0.000    15.0      1372
+app2-1                       time limit         0.001    15.0       941
+mik-250-20-75-5              time limit         0.388    15.0      5862
+gen-ip021                    time limit         0.472    15.0     59290
+mik-250-20-75-2              time limit         0.725    15.0      9741
+pg5_34                       time limit         2.485    15.0       120
+neos5                        time limit         3.333    15.0      2062
+gmu-35-50                    time limit         4.359    15.0      2014
+binkar10_1                   time limit         5.119    15.0      3389
+neos-3610040-iskar           time limit         5.405    15.0       105
+graphdraw-gemcutter          time limit         6.378    15.0     15099
+bppc8-09                     time limit         7.627    15.0       287
+prod1                        time limit         8.929    15.0       787
+neos-807639                  time limit        10.744    15.1         3
+nexp-50-20-1-1               time limit        13.793    15.0      7415
+ran13x13                     time limit        14.207    15.0     10772
+neos-3611447-jijia           time limit        14.953    15.0        75
+misc07                       time limit        15.302    15.0      2547
+qnet1                        time limit        17.105    15.0       146
+fiber                        time limit        20.972    15.0      1544
+neos-1425699                 time limit        21.691    15.0    194409
+neos-3754480-nidda           time limit        21.758    15.0      6525
+r50x360                      time limit        30.490    15.0     16071
+mad                          time limit        32.820    15.0     13000
+neos-3072252-nete            time limit        35.895    15.0     25836
+milo-v13-4-3d-3-0            time limit        39.092    15.0       116
+aflow30a                     time limit        42.832    15.0      2562
+bppc4-08                     time limit        50.943    15.0       517
+beasleyC2                    time limit        77.778    15.0       906
+10teams                      time limit       100.000    28.0         0
+a2c1s1                       time limit       100.000    15.0       130
+b1c1s1                       time limit       100.000    15.0         7
+berlin                       time limit       100.000    15.0         2
+breastcancer-regularized     time limit       100.000    15.0         3
+csched007                    time limit       100.000    15.0       207
+cvs16r128-89                 time limit       100.000    32.2         0
+danoint                      time limit       100.000    15.1         0
+ger50-17-ptp-pop-6t          time limit       100.000    15.0       426
+haprp                        time limit       100.000    15.0      3800
+ic97_tension                 time limit       100.000    15.0     10646
+mkc1                         time limit       100.000    18.6         0
+n5-3                         time limit       100.000    15.0         5
+neos-1112782                 time limit       100.000    15.3       450
+neos-3530903-gauja           time limit       100.000    15.0      1508
+neos-503737                  time limit       100.000    28.3         0
+neos-5078479-escaut          time limit       100.000    15.2         1
+neos-555343                  time limit       100.000    16.0         0
+neos16                       time limit       100.000    15.0       152
+neos2                        time limit       100.000    15.0       473
+newdano                      time limit       100.000    15.0         0
+nh97_tension                 time limit       100.000    15.0      2881
+pigeon-08                    time limit       100.000    15.3         0
+pigeon-16                    time limit       100.000    15.3         0
+rococoC10-001000             time limit       100.000    15.0         3
+neos-4333596-skien           time limit       105.210    15.0      2251
+mtest4ma                     time limit       121.420    15.0      4776
+mc8                          time limit       214.432    15.0      2044
+markshare_5_0                time limit       600.000    15.0    173118
+markshare1                   time limit      1800.000    15.0     68507
+neos-2652786-brda            time limit      2291.077    15.0      4521
+cvrpsimple2i                 read/parse fa          -     0.0         0
+neos-3046615-murg            relaxation fa          -     0.2         1
+
+70 instances: 5 proved optimal, 8 more within 1% of the published optimum
+every instance claimed optimal matches the published optimum

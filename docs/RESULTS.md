@@ -672,3 +672,344 @@ Three of them exist because of a specific bug and are worth understanding:
   backend that summed in a different order, and a different sum changes the
   iteration count. It runs at thread counts past this machine's core count,
   because a pool that only behaves when it fits will misbehave elsewhere.
+
+---
+
+## 10. Threads
+
+**What was threaded: the first-order method, and nothing else yet.** The
+simplex and the branch and bound tree are still serial, and sections 10.6 and
+10.7 are the measurements that say why rather than an apology for it.
+
+Every number in this section was taken on the machine at the top of this
+document — an M4 with **four performance cores and six efficiency ones**. That
+split is not a footnote; it is most of what the numbers below are about, and a
+reader on a homogeneous machine should expect a different shape.
+
+**On the conditions.** This box was shared with other work for the whole
+period these were measured, and a thread-scaling measurement is the one kind
+that a second busy process does not merely add noise to but can invert — at ten
+threads there is no spare core to absorb it. Three defences are in the harness
+and none of them is a substitute for a quiet machine: every configuration is
+run three times and the **minimum** is kept, the thread counts are visited in a
+rotated order on each pass so one burst of interference cannot land entirely on
+one row, and the load average is recorded at the start and end of every run and
+printed with the results. Where the load was high enough to matter it is said
+so against the number.
+
+### 10.1 The answers do not change
+
+This is the first claim because everything else is worthless without it.
+
+`threaded_cpu_backend` returns **bit-identical** results to `cpu_backend()` at
+every thread count. Not "reproducible at a fixed thread count", which is what
+CPLEX's deterministic mode and Gurobi promise, and not "agrees to 1e-13".
+Identical bits. `docs/ARCHITECTURE.md` §7a has the argument; this is the check.
+
+Three checks, in increasing breadth.
+
+**Byte-for-byte on the solution files.** Six Netlib instances solved at two,
+four, six and eight threads, each compared against `--backend=cpu`:
+
+```bash
+build/sankhya solve data/netlib/25fv47.mps --tol=1e-8 --presolve \
+    --backend=cpu --solution=/tmp/serial
+build/sankhya solve data/netlib/25fv47.mps --tol=1e-8 --presolve \
+    --threads=6 --solution=/tmp/threaded
+cmp /tmp/serial /tmp/threaded
+```
+
+Twenty-four comparisons, all identical. Not close — the same bytes.
+
+**The whole Netlib set through the simplex.** `verify_simplex.py` with
+`--presolve --crossover`, which reaches the threaded backend through the
+crossover seed, run serially and at six threads:
+
+| | serial | 6 threads |
+|---|---|---|
+| correct against the published optimum | **83/88** | **83/88** |
+| wrong | **0** | **0** |
+| did not finish | 5 | 5 |
+
+The two output files are identical, down to which five instances did not finish
+and why — `cycle` on a numerical error, `d6cube`, `degen3`, `dfl001` and
+`pilot87` on the time limit. That the same five stopped in the same way under a
+*time* limit, on a shared machine, is a stronger result than it looks.
+
+**The whole Netlib set through the first-order method**, which is the path that
+is actually threaded rather than one that merely touches it.
+`bench/verify_parallel_solve.py` compares objective, iteration count and status
+at one thread against six, over all 88 instances:
+
+| | |
+|---|---|
+| identical objective, iterations and status | **88 / 88** |
+| differing | **0** |
+
+It compares under an **iteration** cap rather than a time limit, and that is not
+a detail. A time limit stops the solve wherever the wall clock happens to be, so
+the two runs would stop at different iterations under any load at all, and the
+harness would report differences that are the clock's doing rather than the
+backend's.
+
+```bash
+python3 bench/verify_parallel_solve.py 6 20000 1e-6
+```
+
+**One caveat, stated rather than buried.** `miplib_survey.py` is run under a
+*time* limit, and a time-limited branch and bound explores as many nodes as it
+gets through — so on a shared box the node counts and the remaining gaps move
+between runs whatever the thread count does. Differences there are the time
+limit interacting with load, not the parallel path, which in `milp` reaches
+only the root crossover seed. The invariant that has to hold, and does, is the
+last line of both runs: *every instance claimed optimal matches the published
+optimum*.
+
+### 10.2 The speedup curve
+
+Eight instances, the largest available here — six from `data/lptestset/` and the
+two biggest Netlib ones. Every configuration runs a **fixed iteration budget**,
+calibrated per instance to about three seconds serially, so every thread count
+does identical work and the comparison is of speed rather than of luck. Three
+repeats, minimum kept, thread counts visited in a rotated order.
+
+Geometric mean over the set, against the serial baseline measured in the same
+run:
+
+| threads | solve | end-to-end |
+|---|---|---|
+| 1 | 1.00 | 1.00 |
+| 2 | 1.28 | 1.24 |
+| 3 | 1.35 | 1.29 |
+| 4 | 1.37 | 1.30 |
+| **5** | **1.41** | **1.33** |
+| 6 | 1.39 | 1.31 |
+| 7 | 1.29 | 1.23 |
+| 8 | 0.96 | 0.95 |
+| 9 | 0.83 | 0.82 |
+| 10 | 0.78 | 0.78 |
+
+**It peaks at 1.41× on five threads and is a loss from eight.** Per instance, at
+each one's own best count:
+
+| instance | best speedup | at threads |
+|---|---|---|
+| maros-r7 | **2.06×** | 6 |
+| qap15 | 1.49× | 6 |
+| supportcase10 | 1.48× | 4 |
+| datt256_lp | 1.46× | 5 |
+| graph40-40 | 1.38× | 5 |
+| cont1 | 1.25× | 3 |
+| sgpf5y6 | 1.24× | 5 |
+| watson_1 | 1.20× | 5 |
+
+`bench/results/thread_scaling.txt` has the full grid, and the load average at
+each end of it: 3.57 rising to 7.77, so the eight-and-above rows carry
+contention as well as oversubscription and should be read as "this is where it
+stops helping" rather than as precise figures.
+
+```bash
+python3 bench/thread_scaling.py data/lptestset/*.mps --extra=--no-polish
+```
+
+### 10.3 Why the numbers are in this range: the loop saturates the bus
+
+A streaming triad — `c[i] = a[i] + 3*b[i]` over 384 MB arrays, far past any
+cache — measures what this machine can move. Best of sixty interleaved trials:
+
+| threads | 1 | 2 | 3 | **4** | 5 | 6 | 7 |
+|---|---|---|---|---|---|---|---|
+| GB/s | 37.4 | 71.7 | 77.9 | **88.5** | 85.4 | 78.1 | 80.9 |
+
+**The machine's memory bandwidth saturates at four threads, and the solver's
+speedup peaks at five.** That coincidence is the argument. Both curves stop
+improving at the same place, several threads short of the core count, which is
+what a memory-bound loop looks like — and it does not depend on any single
+number in either table being exact.
+
+**What I could not measure, and will not pretend to.** An earlier draft of this
+section claimed the ceiling was exactly 1.32× and that the solver's 1.32× sat
+precisely on it. That was wrong twice over: the solver number improved to 1.41×
+once the pool defects in 10.5 were fixed, and the single-thread bandwidth figure
+turned out not to be stable enough to divide by. Across seven runs it came back
+as 34.9, 35.6, 37.4, 53.2, 58.2, 59.4 and 60.0 GB/s — a factor of 1.7 — because
+one thread lands on a performance core or an efficiency core and the scheduler
+decides which. The multi-thread figures repeat to within a few per cent; the
+single-thread one does not. So the honest form of the ceiling is a range, **very
+roughly 1.5× to 2.4×**, and the solver's 1.41× is at or a little under the
+bottom of it rather than exactly on a line.
+
+The conclusion that survives all of that: this component is limited by memory
+rather than by arithmetic, on a machine whose bus is saturated by about four of
+its ten cores. That is a property of the hardware, and no amount of better
+threading moves it.
+
+It is also what makes sense of the GPU numbers in section 8. A T4 moves several
+times what this machine does, the method is bandwidth-bound, and the measured
+2.70×–7.09× is roughly that ratio appearing where it should. CPU threads are not
+a substitute for the device on this component.
+
+**One thing the spread does not explain.** Per-instance speedups run from 1.20×
+to 2.06×, and nothing measured here accounts for it: maros-r7 and qap15 have the
+same working set and the same cache residency and differ by a factor of 1.4. An
+earlier draft attributed the spread to cache residency, which the data supported
+until datt256_lp went from 1.17x to 1.46x on a pool fix. The mechanism is open.
+
+```bash
+build/micro_triad 10 60
+```
+
+### 10.4 What the kernel microbenchmark got wrong, and why it is kept
+
+`bench/micro/spmv_scaling.cpp` measures `K*x` alone, run back to back. On
+datt256_lp it reaches **3.26×** on seven threads. The solver, on the same
+instance, gets **1.46×**.
+
+The microbenchmark is not wrong about the kernel; it is wrong about the problem.
+Repeating one product leaves the matrix in cache so it never pays the traffic
+the real loop pays, and the real loop also runs elementwise steps over vectors
+larger than cache and serial inner products between them.
+
+It is kept, with this paragraph, because the gap is the most useful thing either
+measurement produced — and because 3.26× nearly became the headline of this
+section. A kernel benchmark is evidence about a kernel.
+
+### 10.5 Cores of two different speeds, and a barrier that must not spin
+
+This is an M4: **four performance cores and six efficiency ones**. Three things
+follow, all measured, all now designed around, and two of them were defects that
+made the threaded path slower than the serial one.
+
+**Blocks are taken, not dealt.** Under an even static split every barrier waits
+for whichever chunk landed on an efficiency core. On datt256_lp's `K*x` at six
+threads, a static split reaches 2.30× and dynamic block-stealing reaches
+**3.17×**.
+
+**But the block count has to follow the work, not the thread count.** A block
+costs an atomic increment, and past a point that is all it is doing. On 25fv47,
+which has 10,400 nonzeros, the same comparison at six threads runs the other
+way: static **3.30×**, dynamic **1.53×**. So the count is chosen from the
+nonzero count, floored at one block per thread and capped at eight.
+
+**Idle workers must sleep, and busy ones must spin long enough.** Both halves
+were wrong in the first version and both showed up as the threaded path losing
+to the serial one:
+
+- A worker that spins forever burns a core. Passing `--threads=6` to `milp`,
+  where the node LPs are small enough that the backend correctly runs them
+  serially, left five workers spinning against the one doing the work: gt2
+  measured **1.92 s serial against 2.47 s at six threads**, same 3,230 nodes.
+  With a condition variable it is 1.89 against 1.88.
+- A worker that sleeps too eagerly has to be woken for every kernel. The spin
+  has to cover the serial part of the iteration — the inner products this
+  backend deliberately does not thread. maros-r7 at four threads: **1.465 s at a
+  spin limit of 1,000, 0.941 s at 100,000**. The idle case is flat across that
+  sweep, because the spin happens once and then the worker sleeps until woken.
+  The full table is in `threading.cpp` beside the constant.
+
+The barrier itself, once both were fixed:
+
+| threads | 2 | 4 | 6 | 8 | 9 | 10 |
+|---|---|---|---|---|---|---|
+| µs | 0.14 | 0.50 | 0.58 | 0.68 | 0.85 | **17.8** |
+
+The cliff at ten is oversubscription: with every core occupied the scheduler
+takes a spinner off its core and everyone waits out its quantum. It is why
+`--threads=0` asks for the performance core count rather than for every core —
+that default previously returned nine, which 10.2 shows is a **loss**.
+
+### 10.6 The simplex, and why it is still serial
+
+Two measurements decided this, and the second one contradicts a claim this
+repository has been making.
+
+**Pricing is not where the time is.** The obvious thing to thread in a simplex
+is the pricing pass, since it walks every nonbasic column. On `degen3` — the
+slowest Netlib instance here — `compute_duals` is **2.0%** of samples. Threading
+2.0% perfectly and paying a barrier for it is a loss, not a win.
+
+**The time is in the factorisation, which does not thread.** A sampling profile
+of `degen3 --presolve` puts **66.4%** of samples in `LuFactor::factorize`, and
+67.7% counting both of the symbols it compiles to.
+Markowitz-ordered sparse LU with threshold pivoting is a sequential algorithm:
+each elimination step chooses its pivot from what the previous step left behind.
+Parallelising it is a research problem, not an afternoon.
+
+This matters beyond the threading question. `ARCHITECTURE.md` §16.3 rejects
+Forrest–Tomlin updates on the grounds that a profile of `degen3` put
+`LuFactor::factorize` at **11 samples out of about 4,500** — 0.2%. That profile
+and this one cannot both describe the same code. The rejection of Forrest–Tomlin
+rests on the old number, so it should be re-argued against the new one rather
+than left standing — and re-argued in the direction of *doing* it, since a
+refactorisation every fifty pivots is 3,991 of them here and two thirds of the
+run. `bench/results/profile_degen3.txt` is the profile.
+
+Recorded alongside: on this baseline `degen3 --presolve` reaches the 200,000
+iteration limit in 145.5 s and refactorises 3,991 times, where §5 documents
+105,433 iterations and 66.2 s. The simplex is another stream's file and the
+discrepancy may already be fixed there; it is written down because both numbers
+above were measured on the same run and the second one is only meaningful with
+the first beside it.
+
+### 10.7 The branch and bound tree, measured and not attempted
+
+The prompt for this work called node parallelism the most valuable and the
+hardest, and both halves check out.
+
+**Strong branching probes are independent, and they help the wrong instances.**
+Up to eight candidates a node, two bounded LP solves each, none of them
+depending on another — the easiest thing in the tree to thread, and the tree
+would not change shape, since a probe is pure information and the deltas can be
+reduced in candidate order. But probing is capped at depth ten, so the share it
+holds depends entirely on whether an instance is shallow or deep:
+
+| instance | relaxations | probes | probes as a share | finishes? |
+|---|---|---|---|---|
+| 22433 | 260 | 218 | **83.8%** | yes, 1.9 s |
+| beasleyC1 | 336 | 176 | 52.4% | no |
+| khb05250 | 154 | 62 | 40.3% | yes, 0.8 s |
+| p0201 | 1,665 | 556 | 33.4% | yes, 3.4 s |
+| gt2 | 3,663 | 512 | 14.0% | yes, 2.7 s |
+| aflow30a | 1,825 | 176 | 9.6% | no |
+| binkar10_1 | 2,710 | 176 | 6.5% | no |
+| **mas76** | **21,502** | **84** | **0.4%** | no |
+| **gen-ip054** | **78,915** | **98** | **0.1%** | no |
+
+**The instances where probing is most of the work are the instances that already
+finish, and the ones that run out of time spend essentially nothing on it.**
+Threading the probes would make `khb05250` finish in half of the 0.8 s it
+already takes and would do nothing at all for `gen-ip054`. That is the wrong end
+of the problem, and it is why this was measured rather than built.
+
+Do not read the aggregate here as the answer: over these twelve instances probes
+are 2.3% of relaxations, but that single number is just the two enormous trees
+outvoting everything else, and it hides the split that makes the decision.
+
+**The tree itself is where the win would be, and it is not small.** `gen-ip054`
+explores 78,811 nodes in ten seconds. Those nodes are independent subtrees, and
+unlike the first-order path they would actually scale: a node relaxation here is
+a few dozen rows, so it sits in cache and never touches the memory bus that
+caps §10.3 at 1.32×. The component that cannot be helped by threads and the
+component that could be are opposite ones, which is the reverse of where
+intuition points.
+
+It was not built, for two reasons and neither is that it would not pay.
+
+The first is determinism, and it is the real one. A parallel tree changes the
+order nodes are explored, which changes when the incumbent is found, which
+changes what gets pruned, which changes the node count — so the reproducibility
+this section opened with cannot be had the same way. What established codes do
+instead is give up thread-count invariance and keep run-to-run reproducibility:
+SCIP and its parallel front ends synchronise on a *deterministic clock* counted
+in LP iterations rather than in seconds, and CPLEX's deterministic mode and
+Gurobi both promise the same answer only for a fixed thread count and seed.
+**No major solver offers what §10.1 offers here**, and it is worth being clear
+that this is because the first-order path happens to allow it and a search tree
+does not, rather than because of anything clever.
+
+The second is scope. Doing it properly means a deterministic clock,
+synchronisation points, race-free work stealing against a shared incumbent, and
+per-thread node pools — inside `branch_and_bound.cpp`, which another work stream
+owns. The honest estimate is weeks, not days, and half-doing it would produce
+exactly the solver this section exists to avoid: one whose node counts move
+between runs.

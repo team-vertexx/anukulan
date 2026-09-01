@@ -1,0 +1,12 @@
+  cycle        numerical error
+  d6cube       time limit
+  degen3       time limit
+  dfl001       time limit
+  pilot87      time limit
+
+88 instances: 83 correct, 0 WRONG, 5 did not finish
+  did not finish: cycle (numerical error)
+  did not finish: d6cube (time limit)
+  did not finish: degen3 (time limit)
+  did not finish: dfl001 (time limit)
+  did not finish: pilot87 (time limit)
