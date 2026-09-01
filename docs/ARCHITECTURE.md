@@ -285,6 +285,93 @@ for any warm start.
 
 ---
 
+## 7a. Threads (`threading.hpp`, `threaded_backend.cpp`)
+
+The same seam that carries the CUDA backend carries a threaded CPU one.
+`LinAlgBackend` was written so the solver loop is expressed once and the
+arithmetic under it can be replaced; `threaded_cpu_backend(n)` is a second
+implementation of that interface and nothing in `pdhg.cpp` knows it exists.
+`--threads=n` selects it. The default is 1, which is `cpu_backend()` itself.
+
+### What is threaded, and what is deliberately not
+
+| operation | threaded | why |
+|---|---|---|
+| `multiply`, `multiply_transpose` | yes | rows are independent and disjoint |
+| `primal_step`, `dual_step`, `advance_kx` | yes | no cross-entry dependence |
+| `accumulate`, `scale_into`, `blend`, `fill`, `copy` | yes | elementwise |
+| `inf_norm` | yes | maximum is exactly associative |
+| **`dot`, `two_norm`, `weighted_norm_squared`** | **no** | **summation is not** |
+
+That last row is the whole design. Floating point addition is not associative,
+so splitting a sum changes it in the last bits — and this method restarts on a
+residual computed from these sums, so the last bits decide when an epoch ends
+and therefore the iteration count. A solver whose iteration count moves with the
+thread count cannot be demonstrated, benchmarked or debugged, which is exactly
+the failure this component had to avoid.
+
+Leaving them serial buys a guarantee that is stronger than what production codes
+offer:
+
+> The threaded backend returns **bit-identical** results to the serial one, at
+> every thread count, on every run.
+
+Not "reproducible for a fixed thread count", which is what CPLEX's deterministic
+mode and Gurobi both promise, and not "close to". Identical. The matrix products
+split by rows, so each output entry is still accumulated by the same serial inner
+loop in the same order and no two blocks write the same entry; the elementwise
+steps have no cross-entry dependence at all; and the one reduction that is
+threaded is a maximum, which is associative and commutative in floating point.
+
+The cost is bounded by Amdahl on whatever share the inner products hold, and
+that share is small — see RESULTS.
+
+`test_threading` asserts equality rather than closeness, at thread counts past
+this machine's core count, because a pool that only behaves when it fits is one
+that will misbehave on somebody else's laptop.
+
+### Two things the machine decided
+
+**Blocks are taken, not dealt.** This is an M4: four performance cores and six
+efficiency ones. Under an even static split every barrier waits for whichever
+chunk landed on an efficiency core, and that chunk takes about three times as
+long. The clearest evidence is a streaming triad, which should be flat once
+memory is saturated and instead falls by more than half when the efficiency
+cores join. So the loop is cut into more blocks than there are threads and
+workers take the next free one. Which thread runs which block does not affect
+the answer, by the argument above — that is what makes dynamic scheduling
+available here at all.
+
+**The block count follows the work, not the thread count.** A block costs an
+atomic increment, and past a point that is all it is doing: on a small matrix,
+eight blocks per thread is markedly *slower* than one. So the count is chosen
+from the nonzero count, floored at one block per thread and capped at eight.
+
+**Workers spin briefly, then yield.** Pure spinning made a ten-thread barrier
+cost milliseconds rather than microseconds: with every core occupied the
+scheduler takes a spinner off its core and everyone waits out its quantum.
+`default_thread_count()` also leaves one core alone, for the same reason.
+
+### Why not OpenMP
+
+Three reasons, in the order they decided it.
+
+1. **It cannot promise a reduction order.** The combining order in a `reduction`
+   clause is the runtime's business and may vary with the thread count. Every
+   guarantee above rests on owning the partition.
+2. **Apple Clang ships without libomp.** Requiring it means a Homebrew
+   dependency on every machine that builds this, which breaks the one thing the
+   build currently promises: clone it and run `cmake`.
+3. **A thread pool is ninety lines.** The sparse LU is three hundred, and it is
+   ours. The premise of the project is that the stack is its own.
+
+### What is not threaded, and why
+
+The simplex is serial, and so is the branch and bound tree. Both are
+measurements rather than omissions, and RESULTS carries them.
+
+---
+
 ## 8. Simplex (`simplex.cpp`, `lu.cpp`)
 
 A revised simplex with both algorithms.

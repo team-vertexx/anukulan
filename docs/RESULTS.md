@@ -24,7 +24,7 @@ of one:
 | component | vs production | why |
 |---|---|---|
 | MPS reader | ~95 | genuinely at parity, and faster |
-| First-order LP | ~62 | strongest piece; missing multithreading and some cuPDLPx tuning |
+| First-order LP | ~64 | strongest piece; now threaded, though §10 shows this machine caps that at 1.32x. Some cuPDLPx tuning still missing |
 | GPU | ~55 | real 2.7–7× measured, but not cuPDLP-C level |
 | QP | ~50 | OSQP's core is here; no AMD ordering, thin regularisation strategy |
 | Simplex | ~55 | 78/88 Netlib correct and none wrong, and it now takes a basis from the first-order method. Still no Forrest–Tomlin, no bound-flipping ratio test, no hypersparsity |
@@ -653,8 +653,9 @@ tests) is the gating check.
 ctest --test-dir build --output-on-failure
 ```
 
-Eleven suites, all passing: `sparse`, `mps`, `standard_form`, `scaling`, `pdhg`,
-`backend`, `cuts`, `lu`, `simplex`, `presolve`, `ldl`.
+Thirteen suites, all passing: `sparse`, `mps`, `standard_form`, `scaling`,
+`pdhg`, `backend`, `cuts`, `lu`, `simplex`, `crossover`, `presolve`, `ldl`,
+`threading`.
 
 Three of them exist because of a specific bug and are worth understanding:
 
@@ -666,3 +667,8 @@ Three of them exist because of a specific bug and are worth understanding:
 - `test_presolve` gives each column a **distinct** reduced cost when checking
   dual postsolve. The three older dual tests all passed an all-zero vector,
   which is the one input that cannot tell two different indexings apart.
+- `test_threading` asserts **bit equality** between the threaded and serial
+  backends, not closeness. A tolerance of 1e-13 would pass just as happily on a
+  backend that summed in a different order, and a different sum changes the
+  iteration count. It runs at thread counts past this machine's core count,
+  because a pool that only behaves when it fits will misbehave elsewhere.

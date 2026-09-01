@@ -1,0 +1,17 @@
+# time limit 10s per instance
+instance                  nodes    relax   probes  probe/relax   cuts    secs
+flugpl                      246      273       41       15.0%     15     0.0
+gt2                        3230     3663      512       14.0%     58     1.9
+khb05250                     86      154       62       40.3%     31     0.6
+p0201                      1104     1665      556       33.4%     38     2.7
+mas76                     25116    25206       84        0.3%      3    10.0
+neos5                      1603     1784      176        9.9%      2    10.0
+gen-ip054                 80314    80418       98        0.1%      4    10.0
+22433                        35      260      218       83.8%     19     1.9
+23588                       916     1325      411       31.0%      5     2.7
+aflow30a                   1863     2038      176        8.6%     40    10.0
+beasleyC1                   155      339      176       51.9%     39    10.0
+binkar10_1                 2472     2663      176        6.6%     95    10.0
+
+probes are at most 2.2% of the relaxations solved, over 12 instances
+(2686 probes, 119788 relaxations)
