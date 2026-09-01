@@ -108,7 +108,7 @@ void SparseMatrix::row_norms(Norm norm, double* out) const {
     const Int hi = start_[sz(r) + 1];
     for (Int k = lo; k < hi; ++k) {
       const double v = std::fabs(value_[sz(k)]);
-      acc = (norm == Norm::kInf) ? std::fmax(acc, v) : acc + v;
+      acc = (norm == Norm::kInfinity) ? std::fmax(acc, v) : acc + v;
     }
     out[r] = acc;
   }
@@ -119,7 +119,7 @@ void SparseMatrix::col_norms(Norm norm, double* out) const {
   for (std::size_t k = 0; k < value_.size(); ++k) {
     const double v = std::fabs(value_[k]);
     double& acc = out[index_[k]];
-    acc = (norm == Norm::kInf) ? std::fmax(acc, v) : acc + v;
+    acc = (norm == Norm::kInfinity) ? std::fmax(acc, v) : acc + v;
   }
 }
 

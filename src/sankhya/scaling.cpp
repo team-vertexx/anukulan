@@ -79,18 +79,18 @@ ScalingReport scale_lp(StandardLp* lp, const ScalingOptions& options) {
 
   std::vector<double> row_norm;
   std::vector<double> col_norm;
-  norms_of(*lp, Norm::kInf, &row_norm, &col_norm);
+  norms_of(*lp, Norm::kInfinity, &row_norm, &col_norm);
   report.row_spread_before = spread(row_norm);
   report.col_spread_before = spread(col_norm);
 
   for (int iteration = 0; iteration < options.ruiz_iterations; ++iteration) {
-    equilibrate(lp, Norm::kInf, &report.scaling);
+    equilibrate(lp, Norm::kInfinity, &report.scaling);
   }
   if (options.pock_chambolle) {
     equilibrate(lp, Norm::kOne, &report.scaling);
   }
 
-  norms_of(*lp, Norm::kInf, &row_norm, &col_norm);
+  norms_of(*lp, Norm::kInfinity, &row_norm, &col_norm);
   report.row_spread_after = spread(row_norm);
   report.col_spread_after = spread(col_norm);
 

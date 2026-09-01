@@ -88,8 +88,8 @@ double min_nonzero_norm(const StandardLp& lp, bool rows, Norm norm) {
 
 void test_reduces_spread() {
   StandardLp lp = build(kBadlyScaled);
-  const double before_rows = max_norm(lp, true, Norm::kInf) /
-                             min_nonzero_norm(lp, true, Norm::kInf);
+  const double before_rows = max_norm(lp, true, Norm::kInfinity) /
+                             min_nonzero_norm(lp, true, Norm::kInfinity);
   // Row norms in the fixture run from 1e-4 to 1e6, so a spread of about 1e10.
   CHECK(before_rows > 1e9);
 
@@ -105,8 +105,8 @@ void test_reduces_spread() {
   // Ruiz drives every row and column norm towards one. Pock-Chambolle runs after
   // it in the 1-norm, so the infinity norms end up near one rather than exactly
   // at it - a factor of a few either side is what to expect.
-  CHECK(max_norm(lp, true, Norm::kInf) < 10.0);
-  CHECK(min_nonzero_norm(lp, true, Norm::kInf) > 0.01);
+  CHECK(max_norm(lp, true, Norm::kInfinity) < 10.0);
+  CHECK(min_nonzero_norm(lp, true, Norm::kInfinity) > 0.01);
 }
 
 void test_scaled_problem_is_equivalent() {
@@ -207,13 +207,13 @@ void test_scaling_is_stable_when_repeated() {
   // A second pass over an already equilibrated matrix must not drift or blow up.
   StandardLp once = build(kBadlyScaled);
   sankhya::scale_lp(&once);
-  const double spread_once = max_norm(once, true, Norm::kInf) /
-                             min_nonzero_norm(once, true, Norm::kInf);
+  const double spread_once = max_norm(once, true, Norm::kInfinity) /
+                             min_nonzero_norm(once, true, Norm::kInfinity);
 
   StandardLp twice = once;
   sankhya::scale_lp(&twice);
-  const double spread_twice = max_norm(twice, true, Norm::kInf) /
-                              min_nonzero_norm(twice, true, Norm::kInf);
+  const double spread_twice = max_norm(twice, true, Norm::kInfinity) /
+                              min_nonzero_norm(twice, true, Norm::kInfinity);
   CHECK(spread_twice < spread_once * 10.0);
   CHECK(std::isfinite(spread_twice));
 }

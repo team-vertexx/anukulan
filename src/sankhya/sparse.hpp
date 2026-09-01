@@ -24,7 +24,12 @@ struct Triplet {
   double value = 0.0;
 };
 
-enum class Norm { kInf, kOne };
+// kInfinity rather than kInf, because GCC's -Wshadow treats an enumerator that
+// matches a namespace-scope name as shadowing it and this build is -Werror. A
+// scoped enumerator cannot actually be named unqualified, so nothing was ever
+// shadowed - but the first Linux build in the project's life failed on it, and
+// renaming one enumerator is cheaper than arguing with the warning.
+enum class Norm { kInfinity, kOne };
 
 // Compressed sparse matrix, stored row-wise (CSR). A CSC view of A is simply the
 // CSR of A^T, so there is one storage type and `transpose()` moves between them.

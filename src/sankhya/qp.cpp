@@ -93,9 +93,9 @@ QpScaling equilibrate(SplitQp* s, Int iterations) {
   std::vector<double> p_col(sz(s->n));
 
   for (Int iteration = 0; iteration < iterations; ++iteration) {
-    s->a.col_norms(Norm::kInf, col_inf.data());
-    s->a.row_norms(Norm::kInf, row_inf.data());
-    s->p.col_norms(Norm::kInf, p_col.data());
+    s->a.col_norms(Norm::kInfinity, col_inf.data());
+    s->a.row_norms(Norm::kInfinity, row_inf.data());
+    s->p.col_norms(Norm::kInfinity, p_col.data());
 
     std::vector<double> dd(sz(s->n));
     std::vector<double> ee(sz(s->m));
@@ -123,7 +123,7 @@ QpScaling equilibrate(SplitQp* s, Int iterations) {
 
     // Cost scaling: OSQP's addition to plain Ruiz, which stops a very large
     // objective from dominating the whole system.
-    s->p.col_norms(Norm::kInf, p_col.data());
+    s->p.col_norms(Norm::kInfinity, p_col.data());
     double mean_p = 0.0;
     for (const double v : p_col) mean_p += v;
     mean_p /= std::fmax(1.0, static_cast<double>(s->n));

@@ -114,7 +114,7 @@ void test_transpose() {
 void test_norms() {
   const SparseMatrix a = make_a();
   double rn[3];
-  a.row_norms(Norm::kInf, rn);
+  a.row_norms(Norm::kInfinity, rn);
   CHECK_NEAR(rn[0], 2.0, 0.0);
   CHECK_NEAR(rn[1], 3.0, 0.0);
   CHECK_NEAR(rn[2], 4.0, 0.0);
@@ -124,7 +124,7 @@ void test_norms() {
   CHECK_NEAR(rn[2], 8.0, 0.0);
 
   double cn[4];
-  a.col_norms(Norm::kInf, cn);
+  a.col_norms(Norm::kInfinity, cn);
   CHECK_NEAR(cn[0], 4.0, 0.0);
   CHECK_NEAR(cn[1], 3.0, 0.0);
   CHECK_NEAR(cn[2], 2.0, 0.0);
