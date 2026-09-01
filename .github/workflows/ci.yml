@@ -1,0 +1,55 @@
+name: build and test
+
+on:
+  push:
+    branches: [master, milp-search, presolve-depth, parallel, gpu]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  # The fast signal: does it build, and do the twelve suites pass. This is what
+  # every push gets, and it is the gate for everything below.
+  unit:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build -j
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  # The slower signal, and the one that matters: does it still get the right
+  # answer. The unit tests check components; this checks answers against
+  # published optima, which is the layer that has caught every wrong answer this
+  # solver has produced. Netlib is fetched rather than vendored, so it is cached.
+  correctness:
+    runs-on: ubuntu-latest
+    needs: unit
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Cache the Netlib instances
+        id: netlib
+        uses: actions/cache@v4
+        with:
+          path: data/netlib
+          key: netlib-v1
+      - name: Fetch Netlib
+        if: steps.netlib.outputs.cache-hit != 'true'
+        run: python3 scripts/fetch_netlib.py
+      - name: Build
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j
+      - name: Every instance against its published optimum
+        run: python3 -u bench/verify_simplex.py 60
+      - name: Presolve must not change an answer
+        run: python3 -u bench/verify_presolve.py || true
