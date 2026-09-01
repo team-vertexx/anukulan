@@ -37,12 +37,16 @@ namespace sankhya {
 //   a static split - adding six cores made it less than half as fast. On K*x
 //   for datt256_lp, static peaks at 2.64x and dynamic reaches 3.15x.
 //
-//   Workers spin briefly and then yield. Pure spinning measured a ten-thread
-//   barrier at 6,161 microseconds, against 1.2 at nine: with every core
-//   occupied the scheduler takes a spinner off its core and everyone waits out
-//   its quantum. With the yield it is 0.14 to 0.73 microseconds from two
-//   threads to nine, and still 16.8 at ten - which is why default_thread_count
-//   leaves a core alone.
+//   Workers spin briefly and then sleep on a condition variable. Both halves
+//   are measured. Pure spinning made a ten-thread barrier cost 6,161
+//   microseconds against 1.2 at nine, because with every core occupied the
+//   scheduler takes a spinner off its core and everyone waits out its quantum.
+//   And spinning *between* runs is worse than it looks: an idle worker that
+//   never sleeps burns a core, so asking for six threads and then solving
+//   something small enough to run serially leaves five threads spinning against
+//   the one doing the work. That measured 28% slower on gt2 - identical tree,
+//   3,230 nodes either way, just slower - and it is why the wait ends in a real
+//   sleep rather than a yield loop.
 class ThreadPool {
  public:
   explicit ThreadPool(int threads);
@@ -70,6 +74,9 @@ class ThreadPool {
   std::atomic<int> finished_{0};
   std::atomic<unsigned> generation_{0};
   std::atomic<bool> stopping_{false};
+  std::atomic<int> sleepers_{0};
+  std::mutex mutex_;
+  std::condition_variable wake_;
 };
 
 // Threads the solver should use when it is not told a number. One below the

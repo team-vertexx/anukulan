@@ -350,7 +350,15 @@ from the nonzero count, floored at one block per thread and capped at eight.
 **Workers spin briefly, then yield.** Pure spinning made a ten-thread barrier
 cost milliseconds rather than microseconds: with every core occupied the
 scheduler takes a spinner off its core and everyone waits out its quantum.
-`default_thread_count()` also leaves one core alone, for the same reason.
+
+**`--threads=0` asks for the performance core count, not every core.** The
+measured speedup peaks at four threads here and is a *loss* at nine and ten, so
+a default that took the whole machine would ship a flag that slows the solver
+down when it is used. Where the system will report how many performance cores
+it has, that is the number; otherwise half the logical cores, which is the
+closest guess available on a machine that does not distinguish them. It is a
+starting point rather than a tuned value — the right number depends on the
+machine's bandwidth per core, and `bench/thread_scaling.py` is how to find it.
 
 ### Why not OpenMP
 
