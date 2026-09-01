@@ -24,6 +24,11 @@ struct Node {
   Int branch_column = -1;
   bool branch_up = false;
   double branch_fraction = 0.0;
+  // Forrest's estimate of the best integer objective obtainable below this
+  // node: the parent's relaxation value plus, for every column still
+  // fractional there, the cheaper of the two roundings priced by its
+  // pseudocost. See the node selection option in branch_and_bound.hpp.
+  double estimate = -kInf;
   // The parent's relaxation solution, used as a starting guess. Only the
   // first-order node solver consumes it, so only that solver pays to carry it -
   // it is n doubles on every open node, which is the largest single thing a
@@ -1099,10 +1104,76 @@ BranchAndBoundResult solve_milp(const Model& model,
     return false;
   };
 
+  // RINS. See branch_and_bound.hpp for the argument; the mechanics are that the
+  // columns the incumbent and this node's relaxation agree on get fixed, and
+  // what is left is handed to this same solver as a MIP in its own right.
+  //
+  // Recursion is bounded by switching RINS off in the child. Everything else is
+  // left on, because a sub-MIP is a different problem and the strategies that
+  // suit the parent need not suit it - which is Rothberg's point about why
+  // fixing changes the nature of the problem rather than only its size.
+  auto run_rins = [&](const std::vector<double>& node_x, double deadline) {
+    if (incumbent_x.empty() || node_x.empty() || integer_columns.empty())
+      return false;
+
+    Model sub = model;
+    Int fixed = 0;
+    for (const Int j : integer_columns) {
+      const double a = incumbent_x[sz(j)];
+      const double b = node_x[sz(j)];
+      if (fractionality(b) > options.integrality_tolerance) continue;
+      if (std::fabs(a - b) > 0.5) continue;
+      const double v = std::round(a);
+      // Only inside the column's own bounds; the incumbent is feasible for the
+      // model, so this always is, but the model's bounds are what the sub-MIP
+      // will be validated against.
+      if (v < sub.col_lower[sz(j)] - 1e-9 || v > sub.col_upper[sz(j)] + 1e-9)
+        continue;
+      sub.col_lower[sz(j)] = v;
+      sub.col_upper[sz(j)] = v;
+      ++fixed;
+    }
+    const double share = static_cast<double>(fixed) /
+                         static_cast<double>(integer_columns.size());
+    if (share < options.rins_min_fixed_fraction) return false;
+
+    ++result.rins_run;
+    result.rins_fixed += fixed;
+
+    BranchAndBoundOptions so = options;
+    so.rins = false;  // the recursion stops here
+    so.debug_solution = nullptr;
+    so.node_limit = options.rins_node_limit;
+    so.time_limit_seconds = std::fmax(0.0, deadline - elapsed());
+    so.verbose = false;
+    // The sub-MIP is small by construction; a cut loop on top of it is the
+    // fixed cost this whole file has just been taught to avoid.
+    so.root_cuts = false;
+    so.root_crossover = false;
+    if (so.time_limit_seconds <= 0.0) return false;
+
+    const BranchAndBoundResult sr = solve_milp(sub, so);
+    if (sr.x.empty()) return false;
+    // Through the same gate every other heuristic goes through: the point is
+    // re-checked against the rows and the bounds of the problem being solved,
+    // not trusted because a solver returned it.
+    if (try_incumbent(sr.x)) {
+      ++result.rins_successes;
+      return true;
+    }
+    return false;
+  };
+
   bool cuts_reverted = false;
+  // Whether a plunge is in progress, and how deep it has gone. A plunge ends
+  // when a node produces no children - pruned, infeasible, integral - or when
+  // it has gone deeper than the limit, whichever comes first.
+  bool plunging = false;
+  Int plunge_depth = 0;
   MilpStatus status = MilpStatus::kInfeasible;
   double pump_time_spent = 0.0;
   double lp_dive_time_spent = 0.0;
+  double rins_time_spent = 0.0;
 
   while (!stack.empty()) {
     if (result.nodes >= options.node_limit) {
@@ -1114,10 +1185,46 @@ BranchAndBoundResult solve_milp(const Model& model,
       break;
     }
 
+    // Which open node to take next.
+    //
+    // Depth first takes the last one pushed, which is the child just created,
+    // and that is the right thing while a plunge is running: the child differs
+    // from its parent in one bound, so the parent's basis re-optimises it in a
+    // handful of pivots, and diving is what finds feasible points.
+    //
+    // It is the wrong thing between plunges. The open list under depth first
+    // always holds a node whose parent bound is the root's, so the smallest
+    // bound over open nodes - which is the only lower bound the solver can
+    // report - does not move until the tree is nearly exhausted. Depth first
+    // does not merely improve the dual bound slowly; it disregards it.
+    //
+    // So: plunge, and when the plunge ends take the node with the best estimate
+    // of what lies below it rather than the deepest one. That is SCIP's default
+    // node selector.
+    std::size_t take = stack.size() - 1;
+    if (options.node_selection == BranchAndBoundOptions::NodeSelection::kBestEstimate &&
+        !plunging) {
+      double best = kInf;
+      for (std::size_t i = 0; i < stack.size(); ++i) {
+        // Ties, and nodes whose estimate was never set, fall back to the bound.
+        const double key = std::isfinite(stack[i].estimate) ? stack[i].estimate
+                                                            : stack[i].parent_bound;
+        if (key < best) {
+          best = key;
+          take = i;
+        }
+      }
+      ++result.best_estimate_jumps;
+      plunge_depth = 0;
+    }
+    if (take != stack.size() - 1) std::swap(stack[take], stack.back());
     Node node = std::move(stack.back());
     stack.pop_back();
     result.nodes++;
     result.max_depth = std::max(result.max_depth, node.depth);
+    // Every path out of this iteration that does not push children ends the
+    // plunge; the one that does re-arms it below.
+    plunging = false;
 
     // Nothing below this node can beat the incumbent.
     if (node.parent_bound >= cutoff()) {
@@ -1249,6 +1356,23 @@ BranchAndBoundResult solve_milp(const Model& model,
         const double deadline = std::fmin(options.time_limit_seconds, began + left);
         if (run_lp_dive(node, relaxation, deadline)) result.heuristic_successes++;
         lp_dive_time_spent += elapsed() - began;
+      }
+    }
+
+    // RINS, which is the other way round from all of the above: it needs an
+    // incumbent and makes it better, where they need nothing and find the first
+    // one.
+    if (options.rins && !incumbent_x.empty() && options.rins_nodes > 0 &&
+        result.nodes % options.rins_nodes == 0) {
+      const double budget = options.rins_time_share * options.time_limit_seconds;
+      const double left = budget - rins_time_spent;
+      if (left > 0.0) {
+        const double began = elapsed();
+        if (run_rins(relaxation.x,
+                     std::fmin(options.time_limit_seconds, began + left))) {
+          result.heuristic_successes++;
+        }
+        rins_time_spent += elapsed() - began;
       }
     }
 
@@ -1474,6 +1598,32 @@ BranchAndBoundResult solve_milp(const Model& model,
     const double floor_value = std::floor(value);
     const double ceil_value = std::ceil(value);
 
+    // Forrest's estimate of the best integer objective obtainable below here:
+    // this node's relaxation value, plus for every column still fractional the
+    // cheaper of its two roundings priced by the pseudocost that says what a
+    // unit of that rounding has historically cost.
+    //
+    //   e = z + sum_j min( P_j^-  (x_j - floor x_j),  P_j^+  (ceil x_j - x_j) )
+    //
+    // Forrest, Hirst and Tomlin; it is what SCIP's default node selector ranks
+    // on. It is not a bound and must never be used as one - it is a guess at
+    // where a subtree ends up, which is what makes it the right thing to sort
+    // by when the question is "which open node is worth going to next" and the
+    // wrong thing entirely when the question is "can this subtree be discarded".
+    double estimate_base = node_objective;
+    double branch_share = 0.0;
+    for (const Int j : integer_columns) {
+      const double v = relaxation.x[sz(j)];
+      if (fractionality(v) <= options.integrality_tolerance) continue;
+      const double down = (v - std::floor(v)) *
+                          (pseudo_down_n[sz(j)] ? pseudo_down[sz(j)] : 1.0);
+      const double up = (std::ceil(v) - v) *
+                        (pseudo_up_n[sz(j)] ? pseudo_up[sz(j)] : 1.0);
+      const double cheaper = std::fmin(down, up);
+      estimate_base += cheaper;
+      if (j == branch_column) branch_share = cheaper;
+    }
+
     // Reduced-cost fixing, for the children only. This node's bound plus what
     // it costs to move a variable off its bound is a lower bound on anything
     // below here that moves it; where that exceeds the incumbent, the rest of
@@ -1534,8 +1684,10 @@ BranchAndBoundResult solve_milp(const Model& model,
       report(node.lower, node.upper, "reduced-cost fixing excluded it", incumbent);
     }
 
-    // Depth first, and the child nearer the relaxation value is explored first,
-    // because it is the likelier place to find a feasible point early.
+    // Depth first within a plunge, and the child nearer the relaxation value is
+    // explored first, because it is the likelier place to find a feasible point
+    // early.
+    bool pushed = false;
     const bool up_first = (value - floor_value) > 0.5;
     for (int which = 0; which < 2; ++which) {
       const bool take_up = (which == 0) ? !up_first : up_first;
@@ -1548,6 +1700,15 @@ BranchAndBoundResult solve_milp(const Model& model,
       child.branch_up = take_up;
       child.branch_fraction =
           take_up ? (ceil_value - value) : (value - floor_value);
+      // The branched column is no longer free to take the cheaper rounding: in
+      // this child it has taken the one the branch pinned. So the shared term
+      // comes out and that side's own cost goes in.
+      const double taken =
+          take_up ? (ceil_value - value) *
+                        (pseudo_up_n[sz(branch_column)] ? pseudo_up[sz(branch_column)] : 1.0)
+                  : (value - floor_value) *
+                        (pseudo_down_n[sz(branch_column)] ? pseudo_down[sz(branch_column)] : 1.0);
+      child.estimate = estimate_base - branch_share + taken;
       if (options.warm_start &&
           options.node_solver == BranchAndBoundOptions::NodeSolver::kFirstOrder) {
         child.warm_x = relaxation.x;
@@ -1591,6 +1752,14 @@ BranchAndBoundResult solve_milp(const Model& model,
       }
 
       stack.push_back(std::move(child));
+      pushed = true;
+    }
+    // A node that produced children continues the plunge, up to the limit. The
+    // limit is what stops a single dive from becoming the whole search again -
+    // without it this is depth first with extra bookkeeping.
+    if (pushed) {
+      ++plunge_depth;
+      plunging = options.max_plunge_depth < 0 || plunge_depth < options.max_plunge_depth;
     }
   }
 

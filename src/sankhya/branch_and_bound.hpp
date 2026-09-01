@@ -308,9 +308,43 @@ struct BranchAndBoundOptions {
   // The cost is real but deferred: branching moves the relaxation, and a cut
   // slack at the root can bind once a variable is pinned. A cut pool would keep
   // those and re-add them where they bite, which is what cuts.hpp says is
-  // missing and still is. This is the part of cut management that fits a tree
-  // whose nodes all share one matrix - keep what did the work at the root, drop
-  // what only costs.
+  // missing and still is.
+  //
+  // On, and it is the sharpest two-sided trade in this file, so both sides are
+  // written down.
+  //
+  // What it buys is the proof. gt2 keeps 58 cuts, drops 18 of them as slack, and
+  // proves optimality in 982 nodes and 0.63 seconds; without the drop it is at
+  // 19,928 nodes when the fifteen seconds run out, and the answer it hands back
+  // is 5.556% off rather than exact. fiber is the same story and goes from not
+  // finishing to proved. Over the 70 instances of the wider set those two are
+  // the whole difference between four proved and six.
+  //
+  // What it costs is the answer on instances that do not finish either way. On
+  // the eleven the wider set flagged as worse or lost:
+  //
+  //                        on        off
+  //   aflow30a          86.788%    46.200%     20 cuts dropped
+  //   mik-250-20-75-5    3.887%     0.050%     43 dropped
+  //   neos-3611447      17.757%    14.019%     19 dropped
+  //   nexp-50-20-1-1    13.793%    10.345%     14 dropped
+  //   r50x360           41.440%    37.810%      5 dropped
+  //   beasleyC2         81.250%    76.389%     13 dropped
+  //   qnet1             18.193%    25.552%     45 dropped
+  //   ran13x13           6.765%     8.057%     11 dropped
+  //   berlin           277.682%   317.625%     10 dropped
+  //   mc8, newdano      unchanged, nothing dropped either way
+  //
+  // Six worse for it, three better, two untouched. Smaller nodes let the tree go
+  // further, and going further is what proves gt2 and what costs aflow30a - the
+  // same mechanism both times, because a tree that explores differently ends
+  // somewhere different.
+  //
+  // It was switched off on the strength of that table and switched back on when
+  // the whole set was counted. Worth recording why the first answer was wrong:
+  // those eleven instances are the ones a comparison had already picked out as
+  // having got worse, so a feature can only look bad on them. A sample chosen by
+  // the outcome cannot decide the outcome.
   bool root_cut_filtering = true;
 
   // Now on, because the rule above is what decides per instance.
@@ -334,6 +368,43 @@ struct BranchAndBoundOptions {
   // beyond bookkeeping.
   enum class Branching { kMostFractional, kPseudocost };
   Branching branching = Branching::kPseudocost;
+
+  // Which open node to explore next.
+  //
+  // Depth first was the only order this tree had, and it is half right. Inside
+  // a plunge it is exactly right: a child differs from its parent in one bound,
+  // so the parent's basis re-optimises it in a handful of pivots, and diving is
+  // what finds feasible points at all.
+  //
+  // Between plunges it is not merely slow at improving the dual bound, it
+  // ignores it. The bound this solver can report is the smallest bound over the
+  // open nodes, and under depth first the open list always contains a node
+  // whose parent bound is the root's - the root's own second child, sitting
+  // there until its sibling's entire subtree is finished. So the reported bound
+  // is the root bound for almost the whole run, and optimality can only be
+  // proved by exhausting the tree rather than by the bound meeting the
+  // incumbent.
+  //
+  // Best estimate ranks an open node by Forrest's estimate of the best integer
+  // objective obtainable below it,
+  //
+  //   e = z_node + sum_j min( P_j^- (x_j - floor x_j), P_j^+ (ceil x_j - x_j) )
+  //
+  // over the columns still fractional there, priced by the pseudocosts the tree
+  // is already keeping. Forrest, Hirst and Tomlin; Linderoth and Savelsbergh
+  // report it beating the older best-projection rule of Benichou et al. It is
+  // SCIP's default node selector, which combines it with plunging exactly as
+  // here: dive while the diving is cheap, and when the dive ends jump to the
+  // best-estimated open node rather than to the deepest one.
+  //
+  // The estimate is a guess and never a bound. Nothing prunes on it.
+  enum class NodeSelection { kDepthFirst, kBestEstimate };
+  NodeSelection node_selection = NodeSelection::kBestEstimate;
+
+  // How far a plunge may go before the next node is chosen by estimate instead.
+  // Without a cap this is depth first wearing a different name, since a plunge
+  // only ends on its own when a node is pruned. Negative means no cap.
+  Int max_plunge_depth = 10;
 
   // Try rounding the relaxation to an integer point, and then dive by fixing one
   // variable at a time. Without a heuristic there is no incumbent until the
@@ -364,7 +435,29 @@ struct BranchAndBoundOptions {
   // range live, where fixing throws away everything the LP might still have
   // wanted. Where the rounded side comes back infeasible, the other side is
   // tried once, and a step with neither side available ends the dive.
-  bool lp_diving = true;
+  //
+  // Off, and that is the measurement rather than an oversight. Over the 28
+  // instances of the wider MIPLIB set that ended a fifteen second run with no
+  // feasible solution at all - which is the population it was built for - it
+  // finds the same five either way:
+  //
+  //   lp_diving on    5 of 28
+  //   lp_diving off   5 of 28
+  //
+  // The same five instances, not five different ones. So the dives are running
+  // and they are not what is finding anything; the incumbents come from the
+  // pump and from the tree. It dives deep before it dies rather than falling
+  // over at the first step - 22 probe solves per dive on haprp, 135 on neos2 -
+  // so what it lacks is not budget. The reason is the one diving has in the
+  // literature: a dive that fixes forwards with a single-level backtrack cannot
+  // recover from a decision made twenty steps earlier, and on instances this
+  // hard the wrong decision is made early.
+  //
+  // Kept rather than deleted because it is correct and the shape is right, and
+  // because what would make it work is known: several dives with different
+  // rules - coefficient, pseudocost, guided - rather than one, which is how
+  // SCIP gets value out of the family. One rule is not the family.
+  bool lp_diving = false;
   // The column whose value is nearest an integer goes first. It is the smallest
   // disturbance available, so it is the decision least likely to make the
   // relaxation infeasible, and rounding it is the decision the relaxation is
@@ -402,6 +495,39 @@ struct BranchAndBoundOptions {
   // bounds and rows are untouched and the previous basis is still primal
   // feasible. The primal simplex warm starts from it and finishes in a few
   // pivots, exactly as a branch and bound child does for the dual.
+  // Relaxation induced neighbourhood search, following Danna, Rothberg and Le
+  // Pape (Math. Prog. 102, 2005).
+  //
+  // Everything else in this file that finds a solution works forwards from the
+  // relaxation and hopes. RINS works from two points at once: the incumbent,
+  // which is integral and feasible, and the node's relaxation, which is neither
+  // but is optimal for a problem containing the answer. Where those two agree
+  // on an integer column, that value is very likely right - both a good
+  // solution and the best bound available say so - and it is fixed. What is
+  // left is a small MIP over the columns they disagree about, solved as a
+  // problem in its own right with a node limit.
+  //
+  // The reason it is worth the sub-solve, in Rothberg's words: fixing variables
+  // does not just make the problem smaller, it changes what the problem is.
+  // Resolving a few key decisions can decompose the rest.
+  //
+  // This is an improvement heuristic - it needs an incumbent and makes it
+  // better - where the pump and the dives are start heuristics that find the
+  // first one. The tree here had only start heuristics, which is why instances
+  // that found something early and then wandered ended up where they did.
+  bool rins = true;
+  // Run it every this many nodes while there is an incumbent.
+  Int rins_nodes = 200;
+  // Nodes the sub-MIP may explore. It is a heuristic; if it cannot find
+  // something in a small tree it should hand the time back.
+  Int rins_node_limit = 500;
+  // Share of the whole budget all RINS calls together may spend.
+  double rins_time_share = 0.15;
+  // Do not bother unless this fraction of the integer columns would be fixed.
+  // Below it the sub-MIP is nearly the original problem and solving it inside
+  // the original problem's budget is not a heuristic, it is a recursion.
+  double rins_min_fixed_fraction = 0.3;
+
   bool feasibility_pump = true;
   Int pump_max_rounds = 60;
   // Two identical roundings in a row means the distance LP has stopped moving.
@@ -535,6 +661,13 @@ struct BranchAndBoundResult {
   // Whether the objective was found to take only whole-number values, which is
   // what lets the cutoff move a unit below the incumbent.
   bool integral_objective = false;
+  // Times the search left a plunge and jumped to the best-estimated open node.
+  Int best_estimate_jumps = 0;
+  // RINS: sub-MIPs built, how many improved the incumbent, and how many columns
+  // the incumbent and the relaxation agreed on across all of them.
+  Int rins_run = 0;
+  Int rins_successes = 0;
+  Int rins_fixed = 0;
   Int lp_dives_run = 0;
   Int lp_dive_successes = 0;
   Int lp_dive_steps = 0;

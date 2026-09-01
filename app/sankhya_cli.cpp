@@ -1057,6 +1057,17 @@ int command_milp(const std::vector<std::string>& args) {
       options.pump_time_share = v;
     } else if (a == "--no-cut-filtering") {
       options.root_cut_filtering = false;
+    } else if (a == "--no-rins") {
+      options.rins = false;
+    } else if (value_of(a, "--rins-nodes=", &v)) {
+      options.rins_nodes = static_cast<sankhya::Int>(v);
+    } else if (value_of(a, "--rins-share=", &v)) {
+      options.rins_time_share = v;
+    } else if (a == "--depth-first") {
+      options.node_selection =
+          sankhya::BranchAndBoundOptions::NodeSelection::kDepthFirst;
+    } else if (value_of(a, "--plunge-depth=", &v)) {
+      options.max_plunge_depth = static_cast<sankhya::Int>(v);
     } else if (a == "--no-lp-diving") {
       options.lp_diving = false;
     } else if (value_of(a, "--lp-dive-steps=", &v)) {
@@ -1196,6 +1207,9 @@ int command_milp(const std::vector<std::string>& args) {
         << "\"relaxations\":" << r.relaxations_solved << ","
         << "\"incumbents\":" << r.incumbents_found << ","
         << "\"heuristic_successes\":" << r.heuristic_successes << ","
+        << "\"best_estimate_jumps\":" << r.best_estimate_jumps << ","
+        << "\"rins_run\":" << r.rins_run << ","
+        << "\"rins_successes\":" << r.rins_successes << ","
         << "\"lp_dives_run\":" << r.lp_dives_run << ","
         << "\"lp_dive_successes\":" << r.lp_dive_successes << ","
         << "\"lp_dive_steps\":" << r.lp_dive_steps << ","
