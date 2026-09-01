@@ -86,7 +86,8 @@ double enumerated_optimum(const Model& model, bool* found) {
 // Solve under one set of options and check the proved answer against the
 // enumerated one.
 void agrees_with_enumeration(const std::string& text, const char* label,
-                             const BranchAndBoundOptions& options) {
+                             const BranchAndBoundOptions& options,
+                             bool require_proof = true) {
   const Model model = read(text);
   bool feasible = false;
   const double truth = enumerated_optimum(model, &feasible);
@@ -106,6 +107,11 @@ void agrees_with_enumeration(const std::string& text, const char* label,
   }
 
   if (r.status != MilpStatus::kOptimal) {
+    // Failing to prove is allowed where the caller says so - a first-order node
+    // solver stops on a tolerance and need not converge on every fixture. What
+    // is never allowed is claiming a proof and being wrong, which is what the
+    // rest of this function checks.
+    if (!require_proof) return;
     std::fprintf(stderr, "%s: did not prove optimality (%s)\n", label,
                  sankhya::to_string(r.status).c_str());
     CHECK(false);
@@ -169,6 +175,33 @@ void agrees_under_every_pruning_option(const std::string& text,
       }
     }
   }
+}
+
+// The same models with the node relaxations solved by the first-order method
+// rather than the simplex.
+//
+// The two differ in a way the tree has to respect. A simplex stops on an exact
+// optimality test, so the objective at the vertex it stops on is the
+// relaxation's optimum and is a lower bound on the subtree. A first-order
+// method stops on a tolerance, and a point that is feasible but a little short
+// of optimal has an objective ABOVE that optimum - so using it as a lower bound
+// over-estimates the bound, and an over-estimated lower bound is how a prune
+// discards the answer. The tree takes the dual objective instead, which is a
+// bound by weak duality whether or not anything is optimal.
+//
+// Not required to prove optimality here: the point is that when it claims one,
+// the claim is true.
+void agrees_under_the_first_order_node_solver(const std::string& text,
+                                              const char* label) {
+  BranchAndBoundOptions o = quiet_options();
+  o.node_solver = BranchAndBoundOptions::NodeSolver::kFirstOrder;
+  // Gomory cuts are read off a tableau this solver does not have, and the
+  // crossover seed is for the simplex.
+  o.root_cuts = false;
+  o.root_crossover = false;
+  o.relaxation.tolerance = 1e-9;
+  o.relaxation.max_iterations = 100000;
+  agrees_with_enumeration(text, label, o, /*require_proof=*/false);
 }
 
 // A knapsack whose LP relaxation rounds the wrong way. This is the example from
@@ -432,6 +465,11 @@ int main() {
   agrees_under_every_pruning_option(kMaximise, "maximisation");
   agrees_under_every_pruning_option(kLargeIntegralObjective, "large integral objective");
   agrees_under_every_pruning_option(kInfeasible, "infeasible");
+  agrees_under_the_first_order_node_solver(kRoundsWrong, "first-order nodes: rounds wrong");
+  agrees_under_the_first_order_node_solver(kIntegralObjective, "first-order nodes: integral objective");
+  agrees_under_the_first_order_node_solver(kFractionalObjective, "first-order nodes: fractional objective");
+  agrees_under_the_first_order_node_solver(kMaximise, "first-order nodes: maximisation");
+  agrees_under_the_first_order_node_solver(kInfeasible, "first-order nodes: infeasible");
   random_programs();
   reports_nothing_when_it_has_nothing();
   heuristics_do_not_poison_the_bound();

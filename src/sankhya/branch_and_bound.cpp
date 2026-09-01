@@ -45,6 +45,11 @@ struct NodeSolution {
   bool optimal = false;
   bool proved_infeasible = false;
   bool warm = false;
+  // The lower bound this node establishes on its own subtree, which is not the
+  // same thing as the objective at the point the solver returned. See where it
+  // is set in solve_node: for the simplex those two coincide, and for a
+  // first-order method they do not.
+  double bound = -kInf;
   std::vector<double> x;
   std::vector<double> y;  // row duals, for reduced-cost fixing
   std::vector<Int> basic;
@@ -448,6 +453,9 @@ BranchAndBoundResult solve_milp(const Model& model,
         out->y = r.y;
         out->basic = r.final_basic;
         out->basis_status = r.final_status;
+        // The simplex stops on an exact optimality test, so the objective at
+        // the vertex it stopped on is the relaxation's optimum and is a bound.
+        out->bound = lp.standard_objective(out->x);
       }
       return out->optimal;
     }
@@ -460,9 +468,38 @@ BranchAndBoundResult solve_milp(const Model& model,
       po.warm_x = &node.warm_x;
     }
     const PdhgResult p = solve_pdhg(lp, po);
-    out->optimal = p.status == PdhgStatus::kOptimal;
     out->proved_infeasible = p.status == PdhgStatus::kPrimalInfeasible;
     out->x = p.x;
+
+    // Where a first-order node's bound has to come from, and it is not from the
+    // point the method returned.
+    //
+    // A first-order method stops on a tolerance. The point it hands back is
+    // nearly feasible and nearly optimal, and a point that is feasible but a
+    // little short of optimal has an objective ABOVE the relaxation's optimum.
+    // Using that as a lower bound on the subtree over-estimates the bound, and
+    // an over-estimated lower bound is exactly how a prune throws away the
+    // answer - the failure this file already carries two write-ups of.
+    //
+    // What is a bound is the dual objective, q'y plus the bound term, by weak
+    // duality: any dual feasible y gives a lower bound on every primal feasible
+    // x, with no assumption that either is optimal. The condition is that y is
+    // dual feasible, which is what dual_residual_inf measures. Where it is not
+    // small this node has established nothing, and it is reported unsolved -
+    // which the tree already handles by refusing to certify optimality - rather
+    // than pruned on a number that is not a proof.
+    //
+    // The presolve session found the way this bites from the other side: a
+    // stronger presolve moves the quantities the relative convergence test
+    // divides by, so the same tolerance is a weaker requirement on the reduced
+    // model, and the returned point can sit further above the optimum than the
+    // tolerance suggests. On dfl001 that is 0.08% of the objective while every
+    // violation is under 1e-6. The simplex is not exposed to it; this path is.
+    const double dual_feasible_enough =
+        1e-7 * std::fmax(1.0, std::fabs(p.residual.dual_objective));
+    out->optimal = p.status == PdhgStatus::kOptimal &&
+                   p.residual.dual_residual_inf <= dual_feasible_enough;
+    if (out->optimal) out->bound = p.residual.dual_objective;
     return out->optimal;
   };
   // Which cut produced which appended row, so an invalid one can be named.
@@ -528,13 +565,11 @@ BranchAndBoundResult solve_milp(const Model& model,
       carry_from(root_solve);
       if (round == 0) {
         result.root_bound_before_cuts =
-            sf.lp.objective_scale * sf.lp.standard_objective(root_solve.x) +
-            sf.lp.objective_offset;
+            sf.lp.objective_scale * root_solve.bound + sf.lp.objective_offset;
       }
       result.root_bound_after_cuts =
-          sf.lp.objective_scale * sf.lp.standard_objective(root_solve.x) +
-          sf.lp.objective_offset;
-      root_std_after = working.standard_objective(root_solve.x);
+          sf.lp.objective_scale * root_solve.bound + sf.lp.objective_offset;
+      root_std_after = root_solve.bound;
       if (!have_root_std) {
         root_std_before = root_std_after;
         have_root_std = true;
@@ -632,8 +667,8 @@ BranchAndBoundResult solve_milp(const Model& model,
           std::fmin(cut_budget, elapsed() + std::fmax(0.5, 3.0 * solve_cost));
       if (solve_node(recheck, &after, -1, check_deadline)) {
         carry_from(after);
-        const double raised = working.standard_objective(after.x);
-        if (raised < working.standard_objective(root_solve.x) - 1e-6) {
+        const double raised = after.bound;
+        if (raised < root_solve.bound - 1e-6) {
           roll_back();
           result.cuts_rolled_back = true;
           break;
@@ -668,7 +703,7 @@ BranchAndBoundResult solve_milp(const Model& model,
       NodeSolution final_solve;
       const bool solved = solve_node(final_probe, &final_solve);
       if (solved) {
-        root_std_after = working.standard_objective(final_solve.x);
+        root_std_after = final_solve.bound;
         result.root_bound_after_cuts =
             sf.lp.objective_scale * root_std_after + sf.lp.objective_offset;
       }
@@ -1087,7 +1122,7 @@ BranchAndBoundResult solve_milp(const Model& model,
         // A dive whose relaxation is already worse than the incumbent cannot
         // reach anything worth having, and carrying on would spend the slice on
         // a point that would be rejected at the end.
-        if (working.standard_objective(solved.x) >= cutoff()) return false;
+        if (solved.bound >= cutoff()) return false;
 
         lo.swap(trial_lo);
         hi.swap(trial_hi);
@@ -1276,7 +1311,10 @@ BranchAndBoundResult solve_milp(const Model& model,
       continue;
     }
 
-    const double node_objective = working.standard_objective(relaxation.x);
+    // The bound the node's own solver established, not the objective at
+    // whatever point it returned. Those are the same number under the simplex
+    // and are not under a first-order method; see solve_node.
+    const double node_objective = relaxation.bound;
 
     // Update the pseudocost for the branch that created this node: how much did
     // the objective actually degrade, per unit of fractionality given up.
@@ -1517,8 +1555,9 @@ BranchAndBoundResult solve_milp(const Model& model,
             ++result.strong_branch_probes;
             if (solve_node(probe, &probe_solve,
                            options.strong_branch_iteration_factor)) {
-              delta[side] = std::fmax(
-                  0.0, working.standard_objective(probe_solve.x) - node_objective);
+              // The probe's bound against this node's, both established rather
+            // than read off a returned point. Identical under the simplex.
+            delta[side] = std::fmax(0.0, probe_solve.bound - node_objective);
               measured[side] = true;
             } else if (probe_solve.proved_infeasible) {
               // One side is empty, so this variable settles a whole subtree.
