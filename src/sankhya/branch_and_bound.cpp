@@ -275,7 +275,17 @@ BranchAndBoundResult solve_milp(const Model& model,
   // is -c for those, and the negative of a whole number is a whole number. The
   // offset does not disturb it either, because everything below compares two
   // objective values and the offset cancels.
-  bool integral_objective = options.objective_integrality && !integer_columns.empty();
+  //
+  // The loop below walks the model's columns and reads the standard form's
+  // objective, which is only the same list while the two have the same width.
+  // They do today - to_standard_form splits rows, never columns - and if that
+  // ever stops being true this reads a short list and concludes "integral" from
+  // the coefficients it happened to see. Checking costs nothing and the failure
+  // it guards against is a wrong answer, which is the expensive kind.
+  bool integral_objective = options.objective_integrality &&
+                            !integer_columns.empty() &&
+                            sf.lp.num_cols() == model.num_cols() &&
+                            sf.lp.c.size() == sz(model.num_cols());
   for (Int j = 0; j < model.num_cols() && integral_objective; ++j) {
     const double cj = sf.lp.c[sz(j)];
     if (cj == 0.0) continue;

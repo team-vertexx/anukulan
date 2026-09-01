@@ -1,0 +1,9 @@
+name,optimal,checked_against,note
+80bau3b,987224.19241,HiGHS 1.15.0,README table gives 987232.16072
+e226,-11.638929066,HiGHS 1.15.0,README gives -18.751929066; the difference is exactly 7.113, this instance's objective constant
+ganges,-109585.73613,HiGHS 1.15.0,README gives -109586.36356
+greenbea,-72555248.130,HiGHS 1.15.0,README gives -72462405.908
+greenbeb,-4302260.2612,HiGHS 1.15.0,README gives -4302147.6065
+nesm,14076036.488,HiGHS 1.15.0,README gives 14076073.035
+pilot,-557.48972928,HiGHS 1.15.0,README gives -557.40430007
+scrs8,904.29695380,HiGHS 1.15.0,README gives 904.29998619

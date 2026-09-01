@@ -89,10 +89,38 @@ def main() -> int:
     if not readme_path.exists():
         print("fetching README")
         fetch(BASE + "readme", readme_path)
-    entries = list(parse_readme(readme_path.read_text(errors="ignore")))
+    entries = [list(e) for e in parse_readme(readme_path.read_text(errors="ignore"))]
     if not entries:
         print("could not parse any rows out of the README", file=sys.stderr)
         return 1
+
+    # The README's own optimal values are wrong on eight instances - it handles
+    # the objective row's constant differently from every solver that reads the
+    # file. A full-set verification made this solver look wrong on eleven Netlib
+    # instances at once, which is usually the reference and not the code, and on
+    # eight of them it was: HiGHS returns what this solver returns. e226 is the
+    # clearest, off by exactly 7.113, which is that instance's objective
+    # constant.
+    #
+    # The corrections live in their own file so re-fetching cannot silently undo
+    # them, which is exactly what happened the first time CI ran this.
+    corrections_path = ref_dir / "netlib_corrections.csv"
+    corrections = {}
+    if corrections_path.exists():
+        with corrections_path.open() as handle:
+            for row in csv.DictReader(handle):
+                corrections[row["name"]] = (row["optimal"], row["note"])
+    applied = 0
+    for entry in entries:
+        fix = corrections.get(entry[0])
+        if fix is None:
+            continue
+        entry[4], entry[5] = fix[0], f"corrected against {fix[1]}"
+        applied += 1
+    if corrections and applied != len(corrections):
+        missing = set(corrections) - {e[0] for e in entries}
+        print(f"warning: corrections for {sorted(missing)} matched no instance",
+              file=sys.stderr)
 
     ref_path = ref_dir / "netlib.csv"
     with ref_path.open("w", newline="") as handle:
@@ -101,7 +129,8 @@ def main() -> int:
             ["name", "table_rows", "table_cols", "table_nonzeros", "optimal", "note"]
         )
         writer.writerows(entries)
-    print(f"reference table: {len(entries)} instances -> {ref_path}")
+    print(f"reference table: {len(entries)} instances "
+          f"({applied} corrected) -> {ref_path}")
     if args.table_only:
         return 0
 

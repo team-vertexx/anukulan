@@ -50,6 +50,11 @@ jobs:
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
           cmake --build build -j
       - name: Every instance against its published optimum
-        run: python3 -u bench/verify_simplex.py 60
+        # 120 rather than 60: a hosted runner is slower than a development
+        # machine, and an instance that runs out of time is reported as not
+        # finishing rather than as wrong - so a short limit does not produce a
+        # false failure, it produces a weaker check. This is the gate that has
+        # to actually mean something.
+        run: python3 -u bench/verify_simplex.py 120
       - name: Presolve must not change an answer
         run: python3 -u bench/verify_presolve.py || true
