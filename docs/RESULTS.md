@@ -30,18 +30,22 @@ of one:
 | Simplex | ~55 | 78/88 Netlib correct and none wrong, and it now takes a basis from the first-order method. Still no Forrest–Tomlin, no bound-flipping ratio test, no hypersparsity |
 | Presolve | ~38 | 10 reductions; HiGHS/PaPILO have roughly 25 |
 | Infrastructure | ~70 | good tests, no CI, no packaging |
-| **MILP** | **~30** | **the weak leg — see below.** Time limits are now enforced, cuts get a slice of the budget rather than all of it, there is a feasibility pump, and the root relaxation gets a crossover basis |
+| **MILP** | **~40** | **still the weak leg — see below.** Time limits are now actually enforced, a cut round has to pay for itself before it starts, node selection is best-estimate with plunging rather than depth first, and RINS is in. Missing: conflict analysis, restarts, clique tables, symmetry detection, node presolve, a real cut pool |
 
-Weighted, that is about **60/100** as of 2026-08-30, up from 50. The move is
-mostly the simplex — six wrong answers is a worse problem than any slow one, and
-fixing them is worth more than the speed that came with it.
+Weighted, that is about **62/100** as of 2026-09-01, up from 50. Most of that
+move is the simplex — six wrong answers is a worse problem than any slow one, and
+fixing them is worth more than the speed that came with it. The MILP part of it
+is smaller than the ten points look: roughly half is a solver that had stopped
+wasting its own budget rather than one that could do anything new.
 
 **MILP is the honest gap.** What is missing: node presolve, symmetry detection,
-feasibility pump, RINS, local branching, conflict analysis, restarts, clique
-tables, strong branching. Five of seven exact is on the *smallest* MIPLIB
-instances. Real refinery scheduling is MILP, so this is both the weakest
-component and the one the problem statement cares most about. Do not let a
-demo imply otherwise.
+local branching, conflict analysis, restarts, clique tables, and cut management
+with a pool rather than one shared matrix. On the wider MIPLIB set at a fifteen
+second limit, **twenty-three of seventy still end with no feasible solution at
+all**, and several of those never get past the root because the root relaxation
+itself is too slow — which is the simplex's problem, not the tree's. Real
+refinery scheduling is MILP, so this is both the weakest component and the one
+the problem statement cares most about. Do not let a demo imply otherwise.
 
 ---
 
@@ -565,6 +569,213 @@ back to back, and a measurement taken under load is not a measurement.
 build/sankhya milp data/miplib/gt2.mps
 ```
 
+### The wider set says something the seven do not
+
+Everything above this line was measured on seven MIPLIB instances, and every
+branch-and-bound constant in the code was fitted against them. The wider set —
+70 instances from `data/miplib/` with a published optimum, fifteen second limit
+— is not the same picture:
+
+| | before | after |
+|---|---|---|
+| ended with a feasible solution | 38 | **47** |
+| proved optimality | 5 | **6** |
+
+Ten instances newly found a solution, one lost it, seventeen ended closer to the
+published optimum and six further. Every instance claimed optimal matches the
+published value, on both sides.
+
+The before column moves between runs — 38, 41, 42, 43 on four runs of the same
+binary — because the build it measures does not enforce its own time limit, so
+how much work it gets done in fifteen seconds depends on the machine. The after
+column moves much less: 45, 46, 46, 47. Which instances sit on the feasibility
+boundary is not stable; the shape is.
+
+**Twenty-nine of the seventy ended with no feasible solution at all** — not a
+poor gap, nothing. A tree with no incumbent has nothing to prune against, so it
+explores blind and the bound never moves. Thirteen of those never got past the
+root node.
+
+Both binaries are run back to back on each instance, so load hits both sides of a
+pair equally. That is not fastidiousness: this repository has twice recorded a
+regression that did not exist because a measurement was taken under load, and the
+machine these were taken on was shared with other work.
+
+```bash
+python3 bench/milp_ab.py old-binary new-binary 15
+python3 bench/miplib_survey.py 15
+```
+
+### A run that found nothing reported an objective of zero
+
+`BranchAndBoundResult::objective` was left at its default on every exit path but
+the infeasible one, so a solve that hit the time limit with no incumbent came
+back reporting zero.
+
+On `acc-tight4`, whose published optimum is 0, the survey scored that as a
+**0.000% error** — an exact answer, from a run that never found a feasible point.
+On `10teams` it read as 100%, which is at least visibly wrong. Both are the same
+missing line. It now reports infinity by sense, which the CLI prints as JSON
+`null`, and the harnesses count incumbents rather than objectives.
+
+### The time limit was read once and spent three times
+
+`solve_node` computed its remaining budget at the top, then ran a first-order seed
+that may take a fifth of what is left, then a warm simplex solve entitled to the
+whole limit, then — when the seeded basis did not work out — a cold retry handed a
+copy of the same stale number.
+
+At a fifteen second limit: `acc-tight4` took 31.3 s, `cvs16r128-89` 32.1 s,
+`10teams` 28.8 s. The budget is now read immediately before each solve. The
+comment above the fix already said *"a solver ignoring a time limit"* — the defect
+had survived one layer down.
+
+### Cuts that cost more than they buy
+
+Over the 29 instances that ended with nothing, turning root cuts off outright took
+that from **1 finding something to 4**. Cutting the cut loop's time share to a
+tenth changed nothing: still 1. So the cost was never the slice.
+
+A cut round is not one LP. It separates, appends, and re-solves to check the bound
+did not fall, and the loop ends with a third solve to decide whether any of it
+paid. `newdano`'s root relaxation takes about a second; twenty cuts make the same
+relaxation take five, and three of those are the entire budget. It explored **zero
+nodes**, ran no heuristic, and ended with nothing — and finds a solution in eight
+nodes with cuts off.
+
+Three changes, none of which turn cuts off: a round is started only if two more
+solves of what the last one cost still fit; the check that follows gets a few
+times what the uncut root cost and the round is rolled back when it does not
+finish; and cuts the root optimum does not sit on are dropped afterwards, which
+leaves the root bound unchanged by construction because a slack constraint carries
+a zero multiplier.
+
+`neos-3046615-murg` is the sharpest case. 105 cuts take its root bound from 192 to
+288, and then the relaxation carrying them does not converge, so the solver
+reported "relaxation failed" after **0.104 seconds of a fifteen second budget** —
+having spent all of it on a bound for a tree it then declined to search. A root
+that will not solve with cuts now drops them and tries once more, and it goes from
+nothing at all to **33 incumbents over 29,570 nodes**.
+
+### Node selection was depth first, which ignores the bound
+
+Depth first is right inside a plunge — a child differs from its parent in one
+bound, so the parent's basis re-optimises it in a few pivots — and wrong between
+plunges. The bound this solver reports is the smallest bound over its open nodes,
+and under depth first the open list always contains the root's own second child,
+sitting there until its sibling's entire subtree is finished. The reported bound
+is therefore the root bound for almost the whole run, and optimality can only be
+proved by exhausting the tree, never by the bound meeting the incumbent.
+
+The replacement is Forrest, Hirst and Tomlin's estimate of the best integer
+objective obtainable below a node,
+
+$$e = z_{\text{node}} + \sum_j \min\left(P_j^-\,(x_j - \lfloor x_j \rfloor),\; P_j^+\,(\lceil x_j \rceil - x_j)\right)$$
+
+over the columns still fractional there, priced by the pseudocosts the tree
+already keeps. Plunge, and when the plunge ends jump to the best-estimated open
+node. That is SCIP's default node selector. The estimate is a guess and never a
+bound; nothing prunes on it.
+
+| instance | depth first | best estimate |
+|---|---|---|
+| gt2 | 982 nodes | **307** |
+| p0201 | 3,364 | **989** |
+| khb05250 | 72 | **52** |
+| fiber | 1,139 | **1,087** |
+| flugpl | 246 | 262 |
+
+And on the two that do not finish, where the point is the bound and not the tree:
+
+| instance | gap, depth first | gap, best estimate | dual bound |
+|---|---|---|---|
+| mas76 | 4.470% | **2.418%** | 38,893.90 → 39,037.85 |
+| gen-ip054 | 2.292% | **1.294%** | 6,765.21 → 6,772.53 |
+
+```bash
+build/sankhya milp data/miplib/gt2.mps --depth-first
+build/sankhya milp data/miplib/gt2.mps
+```
+
+### RINS — the first heuristic here that improves a solution
+
+Every other heuristic in this tree is a *start* heuristic: rounding, fix-and-
+propagate, the feasibility pump. They find a first solution and have nothing to
+say afterwards. That is why instances which found something early and then
+wandered ended where they did.
+
+RINS works from two points at once — the incumbent, integral and feasible, and the
+node relaxation, neither but optimal for a problem that contains the answer. Where
+those two agree on an integer column, both a good solution and the best available
+bound say the value is right, so it is fixed; what remains is a small MIP over the
+columns they disagree about, solved with a node limit as a problem in its own
+right. Danna, Rothberg and Le Pape, *Math. Prog.* 102 (2005).
+
+| instance | without RINS | with RINS | sub-MIPs, improved |
+|---|---|---|---|
+| aflow30a | 318.221% | **21.589%** | 3, 2 |
+| mik-250-20-75-5 | 700.138% | **0.050%** | 4, 2 |
+| r50x360 | 41.440% | **18.512%** | 5, 4 |
+| ran13x13 | 9.041% | **4.643%** | 16, 3 |
+| nexp-50-20-1-1 | 13.793% | **3.448%** | 2, 1 |
+| beasleyC2 | 81.250% | 81.250% | 1, 0 |
+
+Four of those end better than they did before any of this work, not merely better
+than they had become. Rothberg's explanation is the one that fits: fixing
+variables does not only make the problem smaller, it changes what the problem is,
+and resolving a few key decisions can decompose the rest.
+
+### Objective integrality
+
+When the objective touches no continuous column and every coefficient it does
+touch is a whole number, every feasible objective value is a whole number — so a
+node whose bound is anywhere above `incumbent - 1` is dead, and the prune arrives
+up to a full unit earlier. It is exact rather than a tolerance: there is no
+version of it that discards a better answer.
+
+What it needs is for a unit to be larger than the noise. A node bound is an LP
+objective carrying about 1e-9 of relative rounding, so on a model whose objective
+runs to 1e9 the slack required is itself about a unit, and the rule turns itself
+off rather than claim what it cannot measure. Same lesson as the two absolute
+tolerances in this file that each cost an answer.
+
+Checked with the debug-solution tracker, which is now reachable from the command
+line rather than only from C++. On `flugpl`, `gt2`, `khb05250`, `p0201` and
+`fiber` — the instance that once returned a proved optimum 60.8% wrong — no prune
+discards the known optimum, no kept cut is invalid, and all five reach the
+published value.
+
+```bash
+build/sankhya milp data/miplib/fiber.mps --no-objective-integrality --solution=fiber.sol
+build/sankhya milp data/miplib/fiber.mps --debug-solution=fiber.sol
+```
+
+### Two things that were built and do not pay
+
+**LP-guided diving.** A dive that re-solves the relaxation after every decision
+rather than reading all of them off one, which is what the fix-and-propagate dive
+does. It is affordable — a dive step bounds one column, which is a branching
+child, so the dual simplex re-optimises it in a handful of pivots — and on the 28
+instances that end with nothing, which is the population it was built for, it
+finds the *same five* whether it is on or off. Not five different ones. The dives
+run and go deep before they die (22 probe solves per dive on `haprp`, 135 on
+`neos2`), so what they lack is not budget: a dive that fixes forwards with a
+single-level backtrack cannot recover from a decision made twenty steps earlier.
+Off, kept, switchable. What would make it work is several dives with different
+rules, which is how the family earns its place in SCIP; one rule is not the
+family.
+
+**Root cut filtering, nearly.** Dropping cuts the root optimum does not sit on is
+free on the root bound — a slack constraint carries a zero multiplier — and costs
+the tree below, where a cut slack at the root can bind once a variable is pinned.
+Measured on the eleven instances a comparison had flagged as worse, it looked
+clearly bad: six worse, three better. It was switched off on that evidence and
+switched back on when the whole set was counted, because those eleven were the
+instances *selected for having got worse* — a sample chosen by the outcome cannot
+decide the outcome. On the whole set it is what proves `gt2` and `fiber`, and
+without it `gt2` does not merely lose the proof, it returns a 5.556% answer
+instead of the exact one.
+
 ---
 
 ## 7. QP
@@ -653,10 +864,20 @@ tests) is the gating check.
 ctest --test-dir build --output-on-failure
 ```
 
-Eleven suites, all passing: `sparse`, `mps`, `standard_form`, `scaling`, `pdhg`,
-`backend`, `cuts`, `lu`, `simplex`, `presolve`, `ldl`.
+Thirteen suites, all passing: `sparse`, `mps`, `standard_form`, `scaling`,
+`pdhg`, `backend`, `cuts`, `branch_and_bound`, `lu`, `simplex`, `crossover`,
+`presolve`, `ldl`.
 
-Three of them exist because of a specific bug and are worth understanding:
+Four of them exist because of a specific bug or a specific silence, and are worth
+understanding:
+
+- `test_branch_and_bound` enumerates every integer point of small models and
+  checks what the tree *proves* against that, under all sixteen combinations of
+  the switches that discard nodes. The tree is the component this repository
+  rates lowest and the one that has twice returned a proved optimum that was
+  wrong, and it had no test at all. Checked that it can fail rather than assumed:
+  changing the integral-objective cutoff from one unit to two makes nine cases
+  fail and names the instance.
 
 - `test_cuts` separates at **simplex vertices** as well as random interior
   points. 426 random-point separations missed the cover-cut sign bug; the first
