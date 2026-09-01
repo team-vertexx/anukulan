@@ -42,8 +42,26 @@ int blocks_for(Int work, Int min_per_block, int threads) {
 
 // Below these sizes the loop is run on the calling thread. A barrier costs
 // about half a microsecond at the thread counts this pool uses, so a loop that
-// takes less than a few microseconds serially cannot win. The crossover is
-// measured in docs/RESULTS.md.
+// takes less than a few microseconds serially cannot win.
+//
+// Swept end to end rather than on the kernels, and that distinction is the
+// whole reason the number is what it is. Four instances at five threads, best
+// of three, geometric mean of the solve time:
+//
+//     element threshold   geomean seconds
+//        4,096                1.116
+//        8,192                1.087
+//       32,768                1.244
+//      131,072                1.275
+//
+// Two separate pieces of kernel-level evidence pointed away from this value and
+// both were wrong. bench/micro/kernel_threshold.cpp, timing the fused primal
+// step back to back with a hot pool, puts the crossover nearer 4,096 - and 4,096
+// measures worse here. The per-kernel profile in docs/RESULTS.md 10.4 shows the
+// small kernels degrading with thread count, which argues for raising the
+// threshold - and raising it is worse still. A kernel measured back to back is
+// not the kernel the solver runs, and this constant is the third place in this
+// file where that has now been true.
 constexpr Int kMinElementsToThread = 8192;
 constexpr Int kMinNonzerosToThread = 32768;
 
