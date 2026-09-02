@@ -1,6 +1,6 @@
 ---
 title: "Sankhya — the complete account"
-subtitle: "From the mathematics up: what is being built, how it works, what was rejected and why"
+subtitle: "The complete account — the mathematics with proofs, every method derived, where each idea came from, what was measured, what failed, and where it stands"
 author: "Team Vertex"
 date: "30 August 2026"
 geometry: margin=2.4cm
@@ -1402,7 +1402,59 @@ and if $\text{maxact} < q$ the row cannot be satisfied.
 
 Measured: `flugpl` from 28,917 nodes to **477**.
 
-### 12.4 Reliability branching
+### 12.5 Which node to explore next
+
+The tree holds a set of open subproblems. Choosing among them is a real decision
+and the two obvious answers pull in opposite directions.
+
+**Depth-first** takes the deepest node. It is cheap — a child differs from its
+parent in one bound, so the dual simplex re-optimises in a few pivots — and it
+reaches feasible solutions quickly, because going deep is how variables get
+fixed. But it barely moves the *dual bound*, since it keeps working in one
+corner of the tree while nodes elsewhere still hold weak bounds.
+
+**Best-bound** takes the node with the weakest bound, which is the one that has
+to be resolved before the global bound can improve. It moves the bound fastest
+and finds solutions slowest, and it jumps around the tree so every node is a
+cold-ish start.
+
+**What is implemented is best-estimate with plunging**, which is the standard
+compromise and is neither of the above. The estimate for a node is its bound
+plus the pseudocost-predicted degradation from the fractional variables still
+outstanding — an answer to *"if I finish this subtree, what will I get?"* rather
+than *"what is it worth now?"*. That picks where to go.
+
+Then, having picked, the search **plunges**: it follows children depth-first
+rather than re-selecting, because during a plunge the warm start is exactly
+right — one bound differs from the parent. The plunge is capped:
+
+$$\text{plunge depth} \le 10$$
+
+Without a cap it is depth-first wearing a different name.
+
+### 12.6 RINS — improving a solution you already have
+
+Every heuristic so far works forwards from the relaxation: round it, or pin
+variables one at a time and hope. **RINS** (Danna, Rothberg & Le Pape, 2005)
+works from *two* points, and only exists once there is an incumbent.
+
+Compare the incumbent with the current node's relaxation. Wherever they
+**agree** on an integer variable, fix it — the reasoning being that a value both
+a feasible solution and a bound relaxation settled on is unlikely to be the
+thing that is wrong. What remains is a much smaller MILP over the variables they
+disagree about, and it is solved as a sub-MIP with its own node limit.
+
+Two guards, both measurements rather than taste:
+
+- It only runs when at least **30%** of the integer variables are fixed by the
+  agreement. Below that the sub-MIP is nearly the original problem and the call
+  is pure cost.
+- All RINS calls together get **15%** of the time budget, and it is tried every
+  200 nodes. A heuristic that is worth a lot when it works and nothing when it
+  does not should get a slice, not the run — the same rule the feasibility pump
+  follows.
+
+### 12.7 Reliability branching
 
 Pseudocost branching estimates, from history, how much the bound rises when a
 variable is branched. But a variable never branched has no history and gets the
@@ -1570,7 +1622,7 @@ solutions can be discarded, and one wrong claim discards the answer. The very
 first wrong answer this project produced came from here.
 
 
-Eleven reductions are implemented. Here is what each actually computes.
+Twelve reductions are implemented. Here is what each actually computes.
 
 **Empty row.** No entries. Either the bounds contain zero (drop it) or they do
 not (the model is infeasible, and this is a proof).
@@ -1682,15 +1734,505 @@ memory where the CPU allocator value-initialises (Section 17), and on one
 instance **79% of solve time was outside the kernels**, in the convergence check
 that still runs on the host. That is the top remaining performance item.
 
-# Part IV — Every option that was rejected, and why
+\newpage
+
+# Part IV — The proofs, written out
+
+Part II stated four theorems and argued them on numbers. This part proves them.
+It is separable — nothing later depends on reading it — but the solver's
+correctness arguments rest on these, and "we checked it on an example" is not
+the same as knowing why a thing is true.
+
+## 16. Weak duality
+
+> **Theorem.** For the primal $\max\{c^\top x : Ax \le b,\ x \ge 0\}$ and its
+> dual $\min\{b^\top y : A^\top y \ge c,\ y \ge 0\}$, every feasible pair
+> satisfies $c^\top x \le b^\top y$.
+
+**Proof.** Let $x$ be primal feasible and $y$ dual feasible. Since $A^\top y \ge c$
+componentwise and $x \ge 0$, multiplying each inequality by the corresponding
+non-negative $x_j$ and summing preserves the direction:
+
+$$c^\top x = \sum_j c_j x_j \;\le\; \sum_j (A^\top y)_j\,x_j = (A^\top y)^\top x$$
+
+Rebracket, using $(A^\top y)^\top x = y^\top A x$:
+
+$$y^\top (Ax) \;\le\; y^\top b$$
+
+which holds because $Ax \le b$ componentwise and $y \ge 0$, by the same argument.
+Chaining the two gives $c^\top x \le b^\top y$. $\blacksquare$
+
+Two consequences the solver uses constantly. **Any** dual feasible $y$ certifies
+a bound, so a partial dual solution is already useful — that is what a
+branch-and-bound node bound *is*. And if $c^\top x = b^\top y$ for some feasible
+pair, both are optimal, since neither can improve past the other.
+
+## 17. Farkas' lemma
+
+Everything else in this part follows from this one, so it goes first.
+
+> **Farkas' lemma.** For $A \in \mathbb{R}^{m\times n}$ and $b \in \mathbb{R}^m$,
+> exactly one of the following holds:
+>
+> $$\text{(i) } \exists\, x \ge 0 \text{ with } Ax = b
+> \qquad\text{(ii) } \exists\, y \text{ with } A^\top y \le 0 \text{ and } b^\top y > 0$$
+
+**Proof that both cannot hold.** Suppose $x \ge 0$ with $Ax = b$, and $y$ with
+$A^\top y \le 0$. Then
+
+$$b^\top y = (Ax)^\top y = x^\top (A^\top y) \le 0$$
+
+since each $x_j \ge 0$ multiplies a non-positive $(A^\top y)_j$. That contradicts
+$b^\top y > 0$.
+
+**Proof that at least one holds.** Let
+$C = \{Ax : x \ge 0\} \subseteq \mathbb{R}^m$ — the **cone** generated by the
+columns of $A$. It is convex (a non-negative combination of two non-negative
+combinations is one) and it is closed. *Closedness is the part that needs care*
+and it is where the finite generation matters: a finitely generated cone is
+closed, which is not true of arbitrary convex cones.
+
+If $b \in C$, case (i) holds and we are done. So suppose $b \notin C$. Since $C$
+is closed, convex and non-empty, the **separating hyperplane theorem** gives a
+$y \in \mathbb{R}^m$ and $\alpha \in \mathbb{R}$ with
+
+$$y^\top b > \alpha \quad\text{and}\quad y^\top v \le \alpha \ \ \text{for all } v \in C$$
+
+$C$ contains $0$ (take $x = 0$), so $\alpha \ge 0$, and therefore $b^\top y > 0$.
+
+Now fix a column index $j$ and take $v = t\,A_j$ for $t > 0$, which lies in $C$.
+Then $t\,y^\top A_j \le \alpha$ for **every** $t > 0$. If $y^\top A_j$ were
+positive, letting $t \to \infty$ would violate the bound. So $y^\top A_j \le 0$
+for every $j$, which is exactly $A^\top y \le 0$. That is case (ii).
+$\blacksquare$
+
+**What the solver does with it.** The $y$ of case (ii) is an infeasibility
+certificate. Section 11.8 describes how the first-order method finds one — the
+normalised difference between successive iterates converges to it — and the
+check is a single matrix-vector product, so a reader who trusts nothing about
+the solver can still verify the claim.
+
+## 18. Strong duality
+
+> **Theorem.** If both the primal and the dual are feasible, their optima are
+> equal.
+
+**Proof.** Weak duality (Section 16) gives $c^\top x \le b^\top y$ for all
+feasible pairs, so it suffices to exhibit a pair with equality. Consider the
+system asking for exactly that:
+
+$$Ax \le b, \quad x \ge 0, \qquad A^\top y \ge c, \quad y \ge 0, \qquad c^\top x \ge b^\top y$$
+
+If it has a solution, weak duality forces $c^\top x = b^\top y$ and both are
+optimal. Suppose it has none. Written in the standard form Farkas needs — with
+slacks turning each inequality into an equation — the lemma supplies a
+certificate: a non-negative combination of these constraints that is
+contradictory.
+
+Unpacking that certificate gives multipliers $(u, v, t)$ with $u, v, t \ge 0$
+satisfying
+
+$$A^\top u \ge t\,c, \qquad A v \le t\,b, \qquad b^\top u < c^\top v$$
+
+Two cases.
+
+If $t > 0$, divide through: $u/t$ is dual feasible and $v/t$ is primal feasible,
+and they satisfy $b^\top (u/t) < c^\top (v/t)$ — a feasible pair violating weak
+duality, which Section 16 proved impossible.
+
+If $t = 0$, then $A^\top u \ge 0$ and $Av \le 0$ with $b^\top u < c^\top v$. Take
+any feasible $\hat x$ and $\hat y$, which exist by assumption. Then
+$\hat{x} + \lambda v$ stays primal feasible for every $\lambda > 0$ (since
+$Av \le 0$ and $v \ge 0$), and its objective is $c^\top\hat{x} + \lambda\,c^\top v$.
+Likewise $\hat{y} + \lambda u$ stays dual feasible with objective
+$b^\top\hat{y} + \lambda\,b^\top u$. Weak duality must hold for every $\lambda$:
+
+$$c^\top\hat{x} + \lambda\,c^\top v \;\le\; b^\top\hat{y} + \lambda\,b^\top u$$
+
+Since $b^\top u < c^\top v$, the left side grows strictly faster, and for large
+enough $\lambda$ the inequality fails. Contradiction.
+
+Both cases are impossible, so the system has a solution. $\blacksquare$
+
+**Why this is the load-bearing theorem of the whole project.** It is what makes
+"optimal" a *checkable claim* rather than an assertion about a search having
+stopped. The solver returns $x$ and $y$; anyone can verify feasibility of each
+and compare the two objectives. If they match, no better plan exists — and that
+argument does not depend on trusting a single line of the solver.
+
+## 19. Complementary slackness
+
+> **Theorem.** Feasible $x$ and $y$ are both optimal if and only if
+>
+> $$y_i\,(b_i - (Ax)_i) = 0 \ \ \forall i \qquad\text{and}\qquad x_j\,((A^\top y)_j - c_j) = 0 \ \ \forall j$$
+
+**Proof.** From the proof of Section 16, the gap decomposes exactly:
+
+$$b^\top y - c^\top x = \underbrace{y^\top(b - Ax)}_{\ge\,0} + \underbrace{x^\top(A^\top y - c)}_{\ge\,0}$$
+
+Each term is a sum of products of non-negative factors: $y_i \ge 0$ times the
+slack $b_i - (Ax)_i \ge 0$, and $x_j \ge 0$ times the reduced cost
+$(A^\top y)_j - c_j \ge 0$. A sum of non-negative terms is zero exactly when
+every term is zero. By Section 18 the gap is zero at optimality, and conversely a
+zero gap forces optimality by Section 16. $\blacksquare$
+
+**In plain terms:** *a resource you are not using up is free, and anything you
+are actively doing is exactly break-even at the margin.* This is the optimality
+test the simplex runs on itself, and it is what caught `fit1p` reporting 33,609
+against a true 9,146.38.
+
+## 20. The optimum is attained at a vertex
+
+> **Theorem.** If $P = \{x : Ax \le b,\ x \ge 0\}$ is non-empty and $c^\top x$ is
+> bounded above on it, the maximum is attained at an extreme point of $P$.
+
+**Proof sketch, and the part that matters.** Let $x^\star$ be optimal and suppose
+it is not extreme. Then there is a direction $d \ne 0$ with $x^\star \pm \epsilon d
+\in P$ for small $\epsilon$. Optimality forces $c^\top d = 0$ — otherwise one of
+the two directions improves — so both perturbed points are also optimal.
+
+Move along $d$ until a constraint becomes tight, which must happen in at least
+one direction or the objective would be unbounded along a line in $P$. The new
+point is optimal and satisfies strictly more constraints with equality. Repeat.
+Each step increases the count of tight constraints, which is bounded by $m + n$,
+so the process terminates — at a point where the tight constraints pin it down
+completely, which is an extreme point. $\blacksquare$
+
+This is why the simplex may restrict its search to bases: a basis *is* a choice
+of which constraints are tight, and the theorem says the answer is among them.
+
+## 21. Projection onto a convex set is non-expansive
+
+The one fact the first-order method's convergence rests on.
+
+> **Theorem.** For a closed convex $C$ and any $p, q$:
+> $\|\Pi_C(p) - \Pi_C(q)\| \le \|p - q\|$.
+
+**Proof.** Write $p' = \Pi_C(p)$, $q' = \Pi_C(q)$. The projection is
+characterised by the variational inequality
+
+$$\langle p - p',\ z - p'\rangle \le 0 \qquad \text{for all } z \in C$$
+
+which says geometrically that the vector from $p'$ to $p$ makes a non-acute angle
+with every direction into $C$. Apply it with $z = q'$, and the mirror version
+with $z = p'$:
+
+$$\langle p - p',\ q' - p'\rangle \le 0, \qquad \langle q - q',\ p' - q'\rangle \le 0$$
+
+Add them. Writing $u = p' - q'$, the sum rearranges to
+
+$$\langle (p - q) - u,\ u \rangle \ge 0 \quad\Longrightarrow\quad \|u\|^2 \le \langle p - q,\ u\rangle \le \|p-q\|\,\|u\|$$
+
+the last step by Cauchy–Schwarz. Dividing by $\|u\|$ (or noting $u = 0$
+otherwise) gives the claim. $\blacksquare$
+
+**Why the solver needs it.** Every PDHG iteration is a gradient step followed by
+a projection. The step can overshoot; the projection provably cannot make things
+worse in the metric that matters. That is what turns a sequence of
+possibly-overshooting steps into a convergent method — and it is also the
+property that justifies feasibility polishing in Section 11.5, since the iterates
+are non-increasing in distance to any optimal solution.
+
+## 22. Vanderbei's theorem, and why the QP is fast
+
+> **Theorem (Vanderbei, 1995).** Let
+> $K = \begin{bmatrix} E & A^\top \\ A & -F\end{bmatrix}$ with $E \succ 0$ and
+> $F \succ 0$ — a **quasi-definite** matrix. Then for *every* permutation matrix
+> $P$, the matrix $P K P^\top$ has an $LDL^\top$ factorisation with $D$ diagonal
+> and non-singular.
+
+**Why it is true, in one line of intuition.** Ordinary symmetric indefinite
+elimination can produce a zero pivot, which is why general codes need
+Bunch–Kaufman pivoting. Quasi-definiteness rules that out: at every elimination
+step the remaining Schur complement is again quasi-definite, and a
+quasi-definite matrix has no zero diagonal entry — the leading block is
+positive definite and the trailing block negative definite, and definiteness
+means the diagonal cannot vanish. Induction on the elimination steps completes
+it.
+
+**What it buys, and this is the entire reason the QP solver is fast.** Because
+*any* ordering works, the ordering can be chosen purely to minimise fill,
+computed **once** from the sparsity pattern before any arithmetic, and reused for
+every iteration. No numerical pivoting, no symbolic re-analysis per iteration.
+
+It is also why the $\sigma I$ regularisation exists at all: it is not
+regularisation for its own sake, it is what makes $Q + \sigma I$ strictly
+positive definite so the theorem applies even when $Q$ is only positive
+semi-definite.
+
+\newpage
+
+# Part V — Where every idea came from
+
+The problem statement requires a solver built from scratch, not one assembled
+from a library. That does not mean the *ideas* are invented here — it means the
+implementation is. This part says exactly which paper each piece comes from,
+what was taken, and what was changed, so the line between the two is visible.
+
+Everything in the "changed" column is a decision made against a measurement in
+this repository, not a preference.
+
+## 23. The first-order method
+
+| | |
+|---|---|
+| **Base** | Chambolle & Pock, *A First-Order Primal-Dual Algorithm for Convex Problems with Applications to Imaging*, JMIV 40(1), 2011 |
+| **Taken** | The PDHG iteration itself: gradient step, projection, extrapolated point $\bar{x} = 2x^{k+1} - x^k$, and the step-size condition $\tau\sigma\|K\|^2 \le 1$ |
+
+| | |
+|---|---|
+| **Applied to LP by** | Applegate, Díaz, Hinder, Lu, Lubin, O'Donoghue & Schudy, *Practical Large-Scale Linear Programming using Primal-Dual Hybrid Gradient* (PDLP), NeurIPS 2021 |
+| **Taken** | Ruiz + Pock–Chambolle scaling, adaptive step size, primal weight, the restart criteria, and the relative termination test |
+| **Changed** | The restart constants were re-swept here rather than inherited. Adaptive step size beat every constant $\theta$ on this instance set: 76 of 88 against 75 at $\theta = 0.90$, 74 at 0.95 and 74 at 0.998 — so the literature's 0.998 is *not* the default here |
+
+| | |
+|---|---|
+| **Feasibility polishing** | Lu & Applegate et al., arXiv:2501.07018, §4, Algorithm 4 |
+| **Taken** | The two subproblems — primal with $c := 0$ started from $(x, 0)$, dual with $q := 0$ and finite bounds zeroed, started from $(0, y)$ — and Lemma 1, which bounds how far the polish can move |
+| **Changed** | The doubling schedule's constants were re-fitted. The first attempt at implementing this failed because the acceptance test demanded full convergence, and polishing *deliberately* trades gap for feasibility — that is the whole point of it, and reading the paper properly is what fixed it |
+
+| | |
+|---|---|
+| **Halpern, reflection, PID weight** | Lu & Yang, arXiv:2407.16144 (restarted Halpern PDHG); cuPDLPx, arXiv:2507.14051 |
+| **Taken** | The Halpern anchor $z^{k+1} = \frac{k+1}{k+2}T(z^k) + \frac{1}{k+2}z^0$, reflection $R(z) = (1+\gamma)T(z) - \gamma z$, fixed-point restart, PID primal weight |
+| **Changed** | The PID integral term is **zero** here. It was measured and it accumulates and overshoots on this set; $K_p = 0.5$, $K_i = 0$, $K_d = 0.3$ |
+
+| | |
+|---|---|
+| **What the method actually is** | Chen, Sun, Yuan, Zhang & Zhao, arXiv:2509.23903, **Proposition 3.1** |
+| **Taken** | The identification itself. Reflected restarted Halpern PDHG at $\gamma = 1$ **is** the Halpern Peaceman–Rachford method, with $T_1 = \lambda_A I - AA^*$, $\sigma = \eta/\omega$, $\lambda_A = 1/\eta^2 \ge \|A\|^2$ |
+| **Why it matters** | Our default reflection is 1.0, so this is an HPR method rather than a pile of enhancements on PDHG — and that is a checkable statement, not a claim. The same paper measures the gap to the best implementation at 1.1×–1.8× and concludes the difference is *implementation, not algorithm* |
+
+## 24. The simplex
+
+| | |
+|---|---|
+| **LU factorisation** | Suhl & Suhl, *Computing Sparse LU Factorizations for Large-Scale Linear Programming Bases*, ORSA J. Comput. 2(1), 1990 |
+| **Taken** | Triangularisation first — peel off singleton rows and columns until only the nucleus remains — then Markowitz elimination with a stability threshold on the nucleus |
+| **Changed** | Nothing structural. The refactorisation trigger is on accumulated growth rather than a fixed pivot count, because growth is what actually decays the representation and a counter only guesses at when that happened |
+
+| | |
+|---|---|
+| **Devex pricing** | Harris, *Pivot Selection Methods of the Devex LP Code*, Math. Prog. 5, 1973 |
+| **Taken** | The reference framework and the weight update $w_j \leftarrow \max(w_j, (\alpha_{rj}/\alpha_{rq})^2 w_q)$ |
+| **Changed** | Reduced costs are updated incrementally from the pivot row Devex already computes, so two passes over the matrix become one — measured at 0.818× the iterations and 0.801× the time |
+
+| | |
+|---|---|
+| **Dual simplex** | Koberstein, *The Dual Simplex Method: Techniques for a Fast and Stable Implementation*, 2005 |
+| **Taken** | Algorithm 2, the bound-flipping dual start, and the dual steepest-edge weight recurrence (3.47b, which uses the *old* $\beta_r$) |
+| **Changed** | Bland's rule is **not** applied to the dual ratio test, and that is a correctness fix rather than a preference — see Section 30 |
+
+| | |
+|---|---|
+| **Degeneracy** | Gill, Murray, Saunders & Wright, EXPAND, Math. Prog. 45, 1989 |
+| **Taken** | The slowly growing bound relaxation that guarantees a strictly positive step |
+| **Changed** | The ratio test breaks ties by pivot magnitude when the chosen pivot is below $10^{-2}$ of the column's largest entry. That rescue is not in the reference and it is what fixed six wrong answers |
+
+## 25. Branch and cut
+
+| | |
+|---|---|
+| **The tree** | Achterberg, *Constraint Integer Programming* (thesis, 2007), and the SCIP papers |
+| **Taken** | Pseudocost branching, reliability branching, node selection by best estimate with plunging, reduced-cost fixing, the `debug_solution` facility |
+| **Changed** | Reliability branching is **capped by depth**, which the reference does not require. Uncapped it made `gt2` nearly three times worse — 783 nodes to 2,225; capped at ten it is 194 |
+
+| | |
+|---|---|
+| **Cuts** | Nemhauser & Wolsey for cover cuts; Marchand & Wolsey for c-MIR; Gomory (1960) for the mixed-integer cut |
+| **Taken** | The separators and the rounding function $\lfloor a_j\rfloor + \max(0, f_j - f)/(1-f)$ |
+| **Changed** | Gomory rounds are limited to two, and cut families are kept per instance only if they moved the root bound by more than 2%. Both are measurements: past two rounds the tableau describes a problem that is mostly previous cuts, and on `gt2` the root bound runs *past* the optimum and then comes back down — a bound that falls after a cut is not a bound |
+
+| | |
+|---|---|
+| **Feasibility pump** | Fischetti, Glover & Lodi, Math. Prog. 104, 2005; objective variant from Achterberg & Berthold, CPAIOR 2007 |
+| **Taken** | The two-point iteration, the cycle-breaking flip of the least-confident columns, and the decaying objective mix |
+| **Changed** | Only the objective changes between rounds, so the previous basis stays primal feasible and the primal simplex re-optimises from it — the same warm-start trick the tree uses for the dual |
+
+| | |
+|---|---|
+| **RINS** | Danna, Rothberg & Le Pape, Math. Prog. 102, 2005 |
+| **Taken** | Fix the variables where the incumbent and the relaxation agree, solve the sub-MIP |
+
+## 26. QP
+
+| | |
+|---|---|
+| **ADMM formulation** | Stellato, Banjac, Goulart, Bemporad & Boyd, *OSQP*, Math. Prog. Comp. 12, 2020 |
+| **Taken** | The splitting, the quasi-definite KKT system, over-relaxation $\alpha = 1.6$, adaptive $\rho$, and solution polishing |
+| **Changed** | Nothing that worked. Three attempts at the adaptive-$\rho$ failure are recorded in Section 28 and all three lost |
+
+| | |
+|---|---|
+| **The factorisation** | Vanderbei, *Symmetric Quasi-Definite Matrices*, SIAM J. Optim. 5(1), 1995; Davis, Algorithm 849, ACM TOMS 31(4), 2005 |
+| **Taken** | The theorem that makes a fixed ordering safe (proved in Section 22), and the up-looking $LDL^\top$ with its elimination tree |
+| **Changed** | No AMD ordering yet, which is the largest single gap in this component |
+
+## 27. Presolve
+
+| | |
+|---|---|
+| **Reductions** | Andersen & Andersen, *Presolving in Linear Programming*, Math. Prog. 71, 1995; Achterberg, Bixby, Gu, Rothberg & Weninger, INFORMS J. Comput. 32(2), 2020 for the integer case |
+| **Taken** | Twelve of the standard reductions, and the postsolve-as-replay structure |
+| **Changed** | Two tolerances rather than one — a tight one to *fire* a reduction and a looser one to *declare infeasibility*, with a refusal to act in the band between. The first wrong answer this project ever produced came from having only one |
+| **Added** | A `dual_is_exact()` flag per reduction. Where a reduction cannot invert its dual exactly the solver says so rather than returning a shadow price nobody can stand behind — and Section 5.5 explains why that matters when someone may size capital on the number |
+
+\newpage
+
+# Part VI — The engineering underneath
+
+Parts III and IV are the mathematics. This part is the machinery that makes it
+run — the parts that are not in any paper because they are not ideas, they are
+decisions about memory, threads and hardware.
+
+## 28. The backend abstraction, and why it exists
+
+Every vector operation the first-order method needs goes through one interface,
+`LinAlgBackend`. Three implementations satisfy it: a reference CPU one, a
+threaded CPU one, and a CUDA one.
+
+The interface is deliberately **coarse**. It does not expose "add two vectors";
+it exposes `primal_update` and `dual_update`, which are entire steps of the
+algorithm:
+
+$$\begin{aligned}
+x_{\text{pdhg}} &= \Pi_{[l,u]}(x - \tau(c - K^\top y)), \quad dx = x_{\text{pdhg}} - x, \quad \bar{x} = x_{\text{pdhg}} + dx\\
+x_{\text{out}} &= h\,(x_{\text{pdhg}} + \gamma\,dx) + (1-h)\,x_{\text{anchor}}
+\end{aligned}$$
+
+**Why coarse.** A fine-grained interface would mean one kernel launch and one
+full pass over memory per elementary operation. Fusing the projection, the
+reflection and the Halpern blend into a single pass turns five sweeps over the
+vector into one — and on a GPU it turns five launches into one. That is not a
+micro-optimisation; on this algorithm the vector work *is* the algorithm.
+
+There is a second, subtler reason, and it is the one that produced a measurable
+result. $K\bar{x} = 2Kx_{\text{pdhg}} - Kx$, and $K$ is linear, so the reflection
+and the Halpern blend can be applied to $Kz$ as well as to $z$. Recomputing
+$Kx$ instead costs **one sparse product per iteration** — which on this set was
+the entire difference between Halpern winning and losing.
+
+## 29. Threading, and the honest result
+
+The first-order method is threaded. The simplex and the tree are not.
+
+**The requirement was determinism, not speed.** A parallel solver that returns a
+different answer, or the same answer after a different number of iterations, on
+each run cannot be demonstrated, benchmarked, or debugged. So the threaded
+backend is **bit-identical** to the serial one — not "reproducible at a fixed
+thread count", which is the guarantee production solvers actually offer, and not
+"agrees to $10^{-13}$". The same bits.
+
+That is achievable because the parallelism is over *disjoint index ranges* with
+a fixed partition. Each thread writes its own slice; nothing is reduced across
+threads in a floating-point-order-dependent way except the dot products, and
+those use a fixed-size deterministic tree reduction rather than an atomic
+accumulate.
+
+Verified three ways: twenty-four byte-for-byte solution file comparisons across
+six instances at two, four, six and eight threads; the whole Netlib set through
+the simplex at one and six threads (**82/88 correct, 0 wrong, both**); and all
+88 instances compared on objective, iteration count and status — **88/88
+identical, 0 differing**.
+
+**And the speedup is modest, which is the honest part:**
+
+| threads | 1 | 2 | 3 | 4 | **5** | 6 | 7 | 8 | 9 | 10 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| solve | 1.00 | 1.28 | 1.35 | 1.37 | **1.41** | 1.39 | 1.29 | 0.96 | 0.83 | 0.78 |
+
+**It peaks at 1.41× on five threads and is a net loss from eight.** The machine
+is an M4 with four performance cores and six efficiency ones, and that split is
+most of what the curve is about — but the deeper cause is that a sparse
+matrix-vector product is **memory-bandwidth bound**. Threads do not help a
+kernel that is already waiting on the bus; they add contention for it. Past five
+threads the efficiency cores contribute less than the coordination costs.
+
+This is worth stating plainly because the obvious expectation is otherwise. The
+number is 1.41×, not 6×, and the reason is architectural rather than a defect in
+the implementation.
+
+## 30. The GPU
+
+Same algorithm, same interface, different backend.
+
+| instance | speedup over the same algorithm on CPU |
+|---|---|
+| supportcase10 | **7.09×** |
+| graph40-40 | 3.00× |
+| datt256_lp | 2.82× |
+| qap15 | 2.70× |
+
+Measured on a rented **NVIDIA Tesla T4**. Accuracy against the CPU answer:
+$1.9\times10^{-8}$ to exactly zero.
+
+**Setup time is excluded and is identical on both sides** — it is MPS parsing,
+which is serial and unrelated to the algorithm. Reporting end-to-end wall clock
+instead would be Amdahl's law quietly eating the result.
+
+**What is on the device now:** the iterate, the residuals, the matrix norm
+estimate, the convergence check, and the fused update kernels. That last group
+matters more than it sounds — the convergence check used to run on the host,
+which forced a device-to-host copy of the iterate every time it ran, and on one
+instance **79% of solve time was outside the kernels**.
+
+`spmv K x` went from 0.207 s to 0.042 s from adaptive vector-width selection
+(Bell & Garland): the number of threads assigned per row is chosen from the row's
+nonzero count rather than fixed, so a matrix with a few dense rows and many
+sparse ones does not pay for its worst row everywhere.
+
+**The trap that cost the most time here, and it is worth knowing:**
+`cudaMalloc` does **not** zero its memory, while the CPU allocator
+value-initialises. A missing upload of the dual iterate was therefore completely
+invisible on CPU — everything started at zero anyway — and silently fatal on the
+device for any warm start, which read whatever was in the allocation.
+
+**What is honestly unverified.** The development machine is Apple Silicon and
+has no NVIDIA GPU, so every GPU number requires rented hardware. A substantial
+amount has landed since the last T4 run — the device-side convergence check
+among it. `scripts/check_cuda_syntax.sh` type-checks the kernels without a GPU
+and `scripts/gpu_test.sh` runs the full sequence on a CUDA box, with step 3 (the
+backend contract tests) as the gating check. **Until that runs, the numbers in
+this section describe an earlier build.**
+
+## 31. Numerics: the rules this codebase follows
+
+Not from a paper — these are the rules that emerged from the failures in Part
+VIII, written down so they are not re-derived.
+
+**A tolerance is relative unless the quantity has no scale.** A row violation of
+$10^{-4}$ means nothing until you know whether the right-hand side is 1 or
+$10^6$. The one place this was got wrong — an absolute violation held against a
+relative tolerance — gave `graph40-40` opposite verdicts on the same answer
+depending on whether presolve ran.
+
+**Two tolerances, not one, wherever a decision is irreversible.** A tight one to
+*fire* a reduction or a prune, a looser one to *declare infeasibility*, and a
+refusal to act in the band between. Both the first presolve failure and the
+`fiber` wrong answer are the same bug: two pieces of code disagreeing about what
+"empty" means, with the answer falling through the gap.
+
+**Never validate a component with a number that component produced.** The
+$LDL^\top$ that silently became a diagonal factorisation passed its own residual
+check at $10^{-14}$. The simplex that returned an infeasible point as optimal
+passed its own feasibility test, because both went through the same decayed
+basis. The rule that follows: recompute $Ax$ **from the matrix** before the word
+"optimal" leaves the function.
+
+**Prefer the larger pivot when the ratio ties.** The chosen $\alpha_{qr}$ becomes
+a divisor in the basis update. A candidate winning the ratio by $10^{-12}$ and
+losing the pivot by six orders of magnitude is not a better choice — and this one
+rule, missing, was responsible for six wrong answers.
+
+# Part VII — Every option that was rejected, and why
 
 This is the part that is usually missing from a project write-up. Each of these
 is standard, respectable and in the textbooks. Each was measured against *this*
 instance set and each lost.
 
-## 16. Rejected, with the numbers
+## 32. Rejected, with the numbers
 
-### 16.1 Interior point methods — the full argument
+### 32.1 Interior point methods — the full argument
 
 The plan disposed of this in eight words. Here it is from every side.
 
@@ -1742,7 +2284,7 @@ three to four weeks.
 impractical *and* tight accuracy is required. Written down so the decision gets
 revisited on evidence.
 
-### 16.2 Hypersparsity
+### 32.2 Hypersparsity
 
 Hall and McKinnon report a **5.2× mean speedup** from exploiting it. Their
 criterion: an instance is hyper-sparse when more than 60% of FTRAN/BTRAN results
@@ -1762,24 +2304,24 @@ Four of twenty-one clear the threshold. Their 5.2× came from a test set
 *selected* for the property (KEN-18, PDS-20, STOCFOR3 — network-structured).
 Netlib is not that. Six to eight weeks of work to help four instances.
 
-### 16.3 Forrest–Tomlin updates
+### 32.3 Forrest–Tomlin updates
 
 A sampling profile of `degen3`, the slowest instance at 66 s, puts 67% of samples
 in one place and `LuFactor::factorize` at **11 samples out of ~4,500**. Basis
 updates are not where the time goes. Aimed at something that is not hot.
 
-### 16.4 Bound-flipping ratio test
+### 32.4 Bound-flipping ratio test
 
 Needs boxed columns. Measured: `pilot87` 36.8%, `80bau3b` 35.6%, `fit1p` 23.8% —
 and **0%** for afiro, sctap1, degen3, 25fv47, woodw, stocfor2 and maros-r7.
 
-### 16.5 Coefficient tightening
+### 32.5 Coefficient tightening
 
 Implemented in full. Fires **three times** across seven MIPLIB instances, all on
 one, and moves that instance's root bound from 6875.00000004 to 6875.00000002 —
 which is noise. Kept in the source, switched off, with the measurement beside it.
 
-### 16.6 Parallel column merging
+### 32.6 Parallel column merging
 
 20% of Netlib columns are parallel to another — 31,954 of 159,369, all
 continuous, which is the safe case. Compelling until the merge condition is
@@ -1790,11 +2332,39 @@ applied: it also needs the objective in the same ratio, which cuts it to
 columns from one merged value — the most dangerous part of this codebase to
 extend. Measured, not built.
 
-### 16.7 Harris ratio test without EXPAND
+### 32.7 Harris ratio test without EXPAND
 
 Three instances better, six worse, and `blend` stopped solving entirely.
 
-### 16.8 Two fixes for a QP convergence failure
+### 32.9 Threads past five
+
+The first-order method is threaded and the curve peaks at **1.41× on five
+threads**, then falls: 1.29× at seven, 0.96× at eight, 0.78× at ten. Past eight
+it is a net loss.
+
+Threading was not rejected — it is in and on. What was rejected is the
+expectation. A sparse matrix-vector product is memory-bandwidth bound, and
+threads do not help a kernel already waiting on the bus; they contend for it.
+Three explanations for the per-instance spread were proposed and measured, and
+**all three failed to survive re-measurement** — which is recorded rather than
+quietly dropped, because a plausible explanation that does not predict anything
+is worse than no explanation.
+
+### 32.10 Raising the simplex iteration cap
+
+`d6cube` and `scsd8` both stop at exactly 200,000 iterations — the default cap —
+with time left in the budget, which looks like a cap set too low.
+
+It is not. At two million iterations `d6cube` reaches 315.694 against a
+published 315.4917 and then runs out of *time* at 180 s, so it is genuinely slow
+rather than capped. `scsd8` reaches **904.9999999 against a published
+904.99999993** — correct to ten digits — and still cannot prove optimality
+within two million pivots, which is a degeneracy problem and not a budget one.
+
+Raising the default would make both failures slower without changing either
+outcome. Left where it is, with this measurement beside it.
+
+### 32.8 Two fixes for a QP convergence failure
 
 Five QP instances fail, four of them the PRIMALC family whose DUALC counterparts
 all solve. Diagnosis was clear: the adaptive step-size rule drives $\rho$ from
@@ -1808,9 +2378,9 @@ the measurements kept where the option would have been.
 
 \newpage
 
-# Part V — What went wrong, and what it taught
+# Part VIII — What went wrong, and what it taught
 
-## 17. Seven times the solver was confidently wrong
+## 33. Seven times the solver was confidently wrong
 
 The plan's risk register had eleven risks and ten were about *finishing on time*.
 That risk never materialised. This one did, repeatedly.
@@ -1885,7 +2455,7 @@ was off by exactly 7.113, which is that instance's objective constant. Eleven
 disagreements at once is usually the reference and not the code; the way to tell
 is a third opinion, not more staring.
 
-## 18. The tools that exist because something got through
+## 34. The tools that exist because something got through
 
 - A **dual-feasibility check** the simplex runs on itself before claiming
   optimality. It found the Bland bug on its first run.
@@ -1901,7 +2471,7 @@ is a third opinion, not more staring.
   facility. It found both `fiber` bugs in minutes after four layers of manual
   elimination had found neither.
 
-## 19. Traps in measuring, not in the code
+## 35. Traps in measuring, not in the code
 
 - **`zsh` does not word-split unquoted variables.** A variable holding two flags
   arrives as one argument, the program rejects it, and the checker silently reads
@@ -1913,27 +2483,63 @@ is a third opinion, not more staring.
 
 \newpage
 
-# Part VI — Where it stands and what is next
+# Part IX — Where it stands and what is next
 
-## 20. Verified against published answers
+## 36. Verified against published answers
 
-- Reader matches HiGHS on all 88 Netlib instances, 1.4–1.5× faster.
-- **Simplex: 72 of 88 Netlib instances reach the published optimum**, and no
-  instance returns a wrong answer. Sixteen do not finish inside the limit or
-  stop with a numerical error, which is a failure the caller can see. This
-  replaces an earlier "16 of 16" that was true of a sixteen-instance subset and
-  hid six wrong answers on the rest — Section 17.
-- Crossover from a first-order point takes the simplex to **0.52× the pivots**
-  over the whole set, and turns five instances that returned no answer at all
-  (`degen3`, `stocfor2`, `scsd8`, `wood1p`, `modszk1`) into correct ones.
-- Presolve removes ~19% of rows and ~12% of columns without changing any answer,
-  and recovers duals as well as primals.
-- GPU measured 2.70×–7.09× over the same algorithm on CPU (Tesla T4).
-- Branch-and-cut proves optimality on the smaller MIPLIB instances; on several it
-  does not prove, the *solution* is already the published optimum.
-- QP solves 35 of the 40 smallest Maros–Meszaros instances.
+Every number below has the command that produces it in `docs/RESULTS.md`.
+Machine: Apple Silicon arm64, macOS, Release build. GPU numbers are from a
+rented NVIDIA Tesla T4.
 
-## 21. The benchmark to be judged against
+**Reader.** Matches HiGHS on all 88 Netlib instances, 1.4–1.5× faster.
+
+**Simplex.** All 88 Netlib instances with published optima, 60 s each:
+
+| | count |
+|---|---|
+| reach the published optimum | **82** |
+| **return a wrong answer** | **0** |
+| stop visibly (time, iteration limit, numerical error) | 6 |
+
+Seeding the simplex from a first-order point is what takes that from 79 to 82 —
+`modszk1`, `stocfor2` and `woodw` go from a numerical error, a time limit and an
+iteration limit respectively to the published optimum. It is on by default
+because a seeded solve that does not reach an optimum falls back to the cold
+one, so it can save pivots or do nothing but cannot cost an answer.
+
+**Crossover.** Over the whole Netlib set the simplex takes roughly half the
+pivots — `degen3` 89,640 → 25,027, `d2q06c` 25,012 → 3,952, `czprob` 5,261 →
+1,130. Handed its own optimum it returns in **zero** iterations. One instance,
+`scsd6`, costs pivots rather than saving them, and the mechanism is understood:
+the seeded basis is near-optimal but *primal infeasible*, so the simplex has a
+phase one to run that a cold start does not.
+
+**Presolve.** Removes **23.3%** of Netlib rows and **20.9%** of its columns, and
+**29.7%** of the refinery model's columns where it previously removed none.
+1.36× fewer simplex iterations, without changing an answer, and it recovers
+duals as well as primals.
+
+**Threads.** Bit-identical to serial at every thread count — 88/88 instances
+identical on objective, iterations and status. Speedup peaks at **1.41× on five
+threads** and is a loss from eight.
+
+**GPU.** 2.70×–7.09× over the same algorithm on CPU (Tesla T4), accuracy
+$1.9\times10^{-8}$ to zero. Not re-verified since the device-side convergence
+check landed.
+
+**MILP.** On 70 MIPLIB instances at a 15 s limit: **46 end with a feasible
+solution, 7 prove optimality, 11 more land within 1%** of the published optimum,
+and **every instance claimed optimal matches it**. Twenty-four still find nothing
+at all, which is where the remaining work is.
+
+**QP.** 35 of the 40 smallest Maros–Meszaros instances. The five failures are
+one family, and Section 32.8 has the three fixes that did not work.
+
+**Tests.** Fourteen suites, and CI runs them on every push — build plus the
+suites on Linux and macOS, then all 88 Netlib instances against their published
+optima, which fails the build on a wrong answer.
+
+## 37. The benchmark to be judged against
 
 [Mittelmann's LPfeas benchmark](https://plato.asu.edu/ftp/lpfeas.html) is where
 cuPDLPx and HPR-LP — the two papers this method comes from — are actually scored.
@@ -1946,7 +2552,7 @@ method is not automatically good. The implementation is most of it.
 Eight of its forty public instances are already here. Reporting solved-or-not at
 $10^{-6}$ against that published table is a comparison a reader can check.
 
-## 22. What is next, in order
+## 38. What is next, in order
 
 1. **Verify on a GPU.** Nothing built since the last run has been tested on
    hardware, and the CPU hides a class of bug that only appears on the device.
@@ -1964,7 +2570,7 @@ Deliberately **not** on that list, each for a measured reason in Part IV:
 interior point, hypersparsity, Forrest–Tomlin, bound-flipping ratio test,
 parallel columns, coefficient tightening.
 
-## 23. The one thing worth taking away
+## 39. The one thing worth taking away
 
 The algorithms were not the hard part. They are in papers and they work.
 
@@ -1975,4 +2581,91 @@ A slow solver tells you it is slow. A wrong one tells you nothing: it hands back
 a confident number with a matching bound and no complaint. On `fiber` it was
 wrong by 60% and looked completely healthy.
 
-Every checking tool in Section 18 exists because something got through.
+Every checking tool in Section 34 exists because something got through.
+\newpage
+
+# Part X — Reference
+
+## 40. The repository, file by file
+
+| file | lines | what |
+|---|---|---|
+| `src/sankhya/simplex.cpp` | 1,283 | primal and dual, basis, pricing, ratio test |
+| `src/sankhya/branch_and_bound.cpp` | ~1,500 | the MILP tree, heuristics, node management |
+| `src/sankhya/presolve.cpp` | ~1,300 | twelve reductions plus postsolve |
+| `src/sankhya/pdhg.cpp` | ~1,200 | the first-order method, restarts, polishing |
+| `src/sankhya/mps_reader.cpp` | 728 | the file format |
+| `src/sankhya/cuda_backend.cu` | ~900 | device kernels |
+| `src/sankhya/qp.cpp` | 608 | ADMM |
+| `src/sankhya/cuts.cpp` | 538 | cover, MIR, Gomory separation |
+| `src/sankhya/lu.cpp` | 318 | Markowitz LU with product-form updates |
+| `src/sankhya/threaded_backend.cpp` | ~330 | the threaded vector layer |
+| `src/sankhya/crossover.cpp` | ~200 | first-order point → simplex basis |
+| `src/sankhya/ldl.cpp` | 144 | sparse $LDL^\top$ for the QP's KKT system |
+
+C++20, no dependency outside the standard library. CUDA is optional and compiles
+out when absent.
+
+## 41. Running it
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j8
+ctest --test-dir build                    # 14 suites
+
+python3 scripts/fetch_netlib.py           # 88 LP instances
+python3 scripts/fetch_miplib.py           # 103 MILP instances
+```
+
+```bash
+# LP through the simplex — exact, with a certificate. Crossover is on by default.
+build/sankhya simplex data/netlib/25fv47.mps --presolve
+
+# LP through the first-order method — this is the path the GPU accelerates
+build/sankhya solve   data/netlib/25fv47.mps --tol=1e-8 --presolve --threads=5
+
+# MILP
+build/sankhya milp    data/miplib/flugpl.mps --time-limit=30
+
+# The refinery planning model the problem statement is about
+build/sankhya solve   data/refinery/refinery.mps --presolve
+```
+
+## 42. Reproducing any number in this document
+
+| script | what it checks |
+|---|---|
+| `bench/verify_simplex.py` | all 88 Netlib instances against published optima |
+| `bench/miplib_survey.py` | 103 MIPLIB instances against published optima |
+| `bench/verify_presolve.py` | presolve does not change any answer |
+| `bench/verify_reader.py` | the reader agrees with HiGHS on all 88 models |
+| `bench/crossover_sweep.py` | pivots saved by seeding the simplex |
+| `bench/milp_vs_highs.py` | this solver and HiGHS, same instances, same limit |
+| `bench/ablation.py` | every optional feature on and off |
+
+Instance sets are fetched, not vendored. The Netlib reference table carries
+**eight corrections** against the published README, in
+`data/reference/netlib_corrections.csv`, each with the value HiGHS returns and
+the reason — the README handles the objective row's constant differently from
+every solver that reads the file, and `e226` is off by exactly 7.113, which is
+that instance's own constant.
+
+## 43. The two conventions this codebase runs on
+
+Both are unusual and both are deliberate, and a reader who does not know them
+will misread the source.
+
+**Every tuned constant carries its measurement.** When you find a number in this
+codebase, the comment above it says what was tried and what happened — the
+refactorisation trigger, the dual stall window, the polish schedule, the unsafe
+pivot fraction, the crossover seed budget. A constant without a measurement is a
+guess, and guesses are labelled as guesses.
+
+**Failures are recorded, not deleted.** Approaches that were tried and lost stay
+in the source, switched off, with their numbers beside them. Part VII is the
+index of them. Each cost real time to disprove, and the point of writing them
+down is that the next person does not spend that time again.
+
+`git log` is the other half of this. The commit messages carry the reasoning
+rather than the change — what was measured, what it cost, and what did not
+survive.
+
