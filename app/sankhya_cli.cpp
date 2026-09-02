@@ -1079,22 +1079,35 @@ int command_solve(const std::vector<std::string>& args) {
 }
 
 int command_milp(const std::vector<std::string>& args) {
-  // Off by default, and that is a measurement rather than an oversight.
-  // Presolve is integrality-aware here - it rounds bounds on integer columns,
-  // refuses free-column-singleton and doubleton substitutions that would touch
-  // one, and tightens coefficients only where an integer column can carry the
-  // argument - and it does not change an answer on anything tried. What it does
-  // change is the tree, in both directions and by a lot:
+  // Off by default, and that is a measurement rather than an oversight - but a
+  // different measurement from the one that used to be written here, and the
+  // difference is worth keeping.
+  //
+  // The old note recorded gt2 going from 500 nodes to 8,320 with presolve on,
+  // which is a sixteen-fold regression and settled the question. That was
+  // measured against a depth-first tree with no RINS. On the tree that exists
+  // now - best-estimate node selection with plunging, RINS, a cut budget - the
+  // catastrophe is gone:
   //
   //                nodes off   nodes on
-  //     flugpl           246        247
-  //     gt2              500      8,320
-  //     p0201          1,291        205
-  //     neos5          4,671      4,653
+  //     flugpl           274        262
+  //     gt2              307        399
+  //     p0201            989        358
+  //     neos5          4,408      4,214
   //
-  // Six times better on one instance and sixteen times worse on another is not
-  // a default, it is a per-instance decision nothing here is yet equipped to
-  // make. `--presolve` turns it on.
+  // Three better or level, one 30% worse rather than 1,600%. On four instances
+  // that reads like presolve should now be the default.
+  //
+  // It is not, because four instances are not a measurement - a lesson this
+  // codebase has had to learn more than once. Over the full 70-instance MIPLIB
+  // survey at a 15 s limit:
+  //
+  //     presolve off   46 feasible, 7 proved optimal, 11 more within 1%
+  //     presolve on    45 feasible, 7 proved optimal, 14 more within 1%
+  //
+  // One fewer instance finds anything at all, three more land close. That is a
+  // trade, not a win, and it does not justify changing what the solver does by
+  // default. `--presolve` turns it on.
   bool use_presolve = false;
   if (args.empty()) {
     std::fprintf(stderr, "milp: expected a file name\n");
