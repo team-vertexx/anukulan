@@ -99,20 +99,24 @@ void test_steps_are_bit_identical() {
   const std::vector<double> kxb = random_vector(m, 19), kx = random_vector(m, 23);
 
   auto run = [&](const LinAlgBackend& b, std::vector<double>* out) {
+    // Non-zero gamma and a Halpern anchor on both sides, so the reflection and
+    // the blend are exercised rather than skipped - those are the branches the
+    // fused update folded in, and a test that leaves them at their defaults
+    // would pass on a backend that got them wrong.
     std::vector<double> xn(sz(n)), dx(sz(n)), xb(sz(n));
-    b.primal_step(n, 0.37, x.data(), c.data(), kt_y.data(), lower.data(),
-                  upper.data(), xn.data(), dx.data(), xb.data());
-    std::vector<double> yn(sz(m)), dy(sz(m)), kdx(sz(m));
-    b.dual_step(m, 1201, 0.61, yv.data(), q.data(), kxb.data(), kx.data(),
-                yn.data(), dy.data(), kdx.data());
-    std::vector<double> acc = kt_y, scaled(sz(n)), blended = x, kxc = kx;
+    b.primal_update(n, 0.37, 0.83, 0.71, x.data(), c.data(), kt_y.data(),
+                    lower.data(), upper.data(), c.data(), xn.data(), dx.data(),
+                    xb.data());
+    std::vector<double> yn(sz(m)), dy(sz(m)), kdx(sz(m)), kxc(sz(m));
+    b.dual_update(m, 1201, 0.61, 0.83, 0.71, yv.data(), q.data(), kxb.data(),
+                  kx.data(), q.data(), kx.data(), yn.data(), dy.data(),
+                  kxc.data(), kdx.data());
+    std::vector<double> acc = kt_y, scaled(sz(n));
     b.accumulate(n, 0.25, dx.data(), acc.data());
     b.scale_into(n, 1.75, acc.data(), scaled.data());
-    b.blend(n, 0.4, blended.data(), 0.6, c.data());
-    b.advance_kx(m, kxb.data(), kxc.data());
 
     out->clear();
-    for (const std::vector<double>* v : {&xn, &dx, &xb, &scaled, &blended}) {
+    for (const std::vector<double>* v : {&xn, &dx, &xb, &scaled}) {
       out->insert(out->end(), v->begin(), v->end());
     }
     for (const std::vector<double>* v : {&yn, &dy, &kdx, &kxc}) {

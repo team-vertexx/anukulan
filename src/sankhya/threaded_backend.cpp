@@ -214,44 +214,69 @@ class ThreadedCpuBackend final : public LinAlgBackend {
     return m;
   }
 
-  void primal_step(Int n, double tau, const double* x, const double* c,
-                   const double* kt_y, const double* lower, const double* upper,
-                   double* x_next, double* dx, double* x_bar) const override {
-    const Scope scope(this, "primal_step", threads_each(n));
+  // The fused primal step. Same arithmetic as the reference backend, split
+  // across the pool - the reflection and the Halpern blend fold into the same
+  // pass rather than costing another sweep over the vector.
+  void primal_update(Int n, double tau, double gamma, double halpern,
+                     const double* x, const double* c, const double* kt_y,
+                     const double* lower, const double* upper,
+                     const double* anchor, double* x_out, double* dx,
+                     double* x_bar) const override {
+    const Scope scope(this, "primal_update", threads_each(n));
     each(n, [&](Int lo, Int hi) {
       for (Int j = lo; j < hi; ++j) {
         const std::size_t sj = sz(j);
-        double v = x[sj] - tau * (c[sj] - kt_y[sj]);
+        const double x_j = x[sj];
+        double v = x_j - tau * (c[sj] - kt_y[sj]);
         if (v < lower[sj]) v = lower[sj];
         if (v > upper[sj]) v = upper[sj];
-        x_next[sj] = v;
-        const double d = v - x[sj];
+        const double d = v - x_j;
         dx[sj] = d;
         x_bar[sj] = v + d;
+        double next = v;
+        if (gamma != 0.0) next += gamma * d;
+        if (anchor != nullptr) next = halpern * next + (1.0 - halpern) * anchor[sj];
+        x_out[sj] = next;
       }
     });
   }
 
-  void dual_step(Int m, Int num_equalities, double sigma, const double* y,
-                 const double* q, const double* k_x_bar, const double* k_x,
-                 double* y_next, double* dy, double* k_dx) const override {
-    const Scope scope(this, "dual_step", threads_each(m));
+  // The dual half, including K applied to the point it produces. Both K x_pdhg
+  // and K dx fall out of vectors the step already holds, so the whole thing is
+  // one pass and no sparse product.
+  void dual_update(Int m, Int num_equalities, double sigma, double gamma,
+                   double halpern, const double* y, const double* q,
+                   const double* k_x_bar, const double* k_x,
+                   const double* anchor_y, const double* anchor_kx,
+                   double* y_out, double* dy, double* k_out,
+                   double* k_dx) const override {
+    const Scope scope(this, "dual_update", threads_each(m));
     each(m, [&](Int lo, Int hi) {
       for (Int i = lo; i < hi; ++i) {
         const std::size_t si = sz(i);
-        double v = y[si] + sigma * (q[si] - k_x_bar[si]);
+        const double y_i = y[si];
+        const double bar = k_x_bar[si];
+        const double kx = k_x[si];
+        double v = y_i + sigma * (q[si] - bar);
         if (i >= num_equalities && v < 0.0) v = 0.0;
-        y_next[si] = v;
-        dy[si] = v - y[si];
-        k_dx[si] = 0.5 * (k_x_bar[si] - k_x[si]);
-      }
-    });
-  }
+        const double d = v - y_i;
+        dy[si] = d;
+        const double kd = 0.5 * (bar - kx);
+        k_dx[si] = kd;
 
-  void advance_kx(Int m, const double* k_x_bar, double* k_x) const override {
-    const Scope scope(this, "advance_kx", threads_each(m));
-    each(m, [&](Int lo, Int hi) {
-      for (Int i = lo; i < hi; ++i) k_x[sz(i)] = 0.5 * (k_x_bar[sz(i)] + k_x[sz(i)]);
+        double next_y = v;
+        double next_k = 0.5 * (bar + kx);
+        if (gamma != 0.0) {
+          next_y += gamma * d;
+          next_k += gamma * kd;
+        }
+        if (anchor_y != nullptr) {
+          next_y = halpern * next_y + (1.0 - halpern) * anchor_y[si];
+          next_k = halpern * next_k + (1.0 - halpern) * anchor_kx[si];
+        }
+        y_out[si] = next_y;
+        k_out[si] = next_k;
+      }
     });
   }
 
@@ -266,13 +291,6 @@ class ThreadedCpuBackend final : public LinAlgBackend {
     const Scope scope(this, "scale_into", threads_each(n));
     each(n, [&](Int lo, Int hi) {
       for (Int i = lo; i < hi; ++i) out[sz(i)] = sum[sz(i)] / weight;
-    });
-  }
-
-  void blend(Int n, double a, double* z, double b, const double* anchor) const override {
-    const Scope scope(this, "blend", threads_each(n));
-    each(n, [&](Int lo, Int hi) {
-      for (Int i = lo; i < hi; ++i) z[sz(i)] = a * z[sz(i)] + b * anchor[sz(i)];
     });
   }
 
