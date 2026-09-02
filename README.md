@@ -11,7 +11,7 @@ HiGHS appears in this repository exactly once: as the thing we benchmark
 *against*.
 
 ```
-13,651 lines of solver and CLI     12 test suites, all passing
+13,651 lines of solver and CLI     13 test suites, all passing
 88 Netlib instances verified against published optima — 0 wrong answers
 ```
 
@@ -26,7 +26,7 @@ HiGHS appears in this repository exactly once: as the thing we benchmark
 | **First-order LP** | PDHG / PDLP with restarts, Halpern, feasibility polishing | `src/sankhya/pdhg.cpp` |
 | **GPU** | CUDA backend for the first-order method | `src/sankhya/cuda_backend.cu` |
 | **Simplex** | revised primal *and* dual, sparse LU, Devex, steepest edge | `src/sankhya/simplex.cpp` |
-| **MILP** | branch and cut — cover, c-MIR, Gomory; pseudocost; diving | `src/sankhya/branch_and_bound.cpp` |
+| **MILP** | branch and cut — cover, c-MIR, Gomory; reliability branching; best-estimate node selection; pump, diving, RINS | `src/sankhya/branch_and_bound.cpp` |
 | **QP** | OSQP-style ADMM with a sparse LDL' of the KKT system | `src/sankhya/qp.cpp` |
 | **Crossover** | turns a first-order point into a simplex basis | `src/sankhya/crossover.cpp` |
 
@@ -46,14 +46,15 @@ estimated.
 - **First-order** — 76/88 Netlib published optima at `--tol=1e-8`
 - **Presolve** — removes ~19% of rows and ~12% of columns, without changing an
   answer, and recovers duals as well as primals
-- **MILP** — 4 of the 7 tuning instances proved optimal; on the other three the
-  *solution* is already the published optimum and what is missing is the proof
+- **MILP** — on 70 MIPLIB instances at a 15 s limit, **45 end with a feasible
+  solution and 7 prove optimality**, against 41 and 5 before this work. Twenty-five
+  still find nothing at all, which is where the remaining work is
 - **QP** — 35 of the 40 smallest Maros–Meszaros instances
 - **GPU (Tesla T4)** — 2.70×–7.09× on solve time over the same algorithm on CPU
 
 Read [docs/RESULTS.md](docs/RESULTS.md) for the full tables and the honest
-assessment of where this sits against a production solver — about **60% of
-HiGHS**, with MILP the weak leg at roughly 30. That is not modesty; it is in the
+assessment of where this sits against a production solver — about **62% of
+HiGHS**, with MILP still the weak leg at roughly 40. That is not modesty; it is in the
 results document with a component-by-component breakdown and the reasoning for
 each number.
 

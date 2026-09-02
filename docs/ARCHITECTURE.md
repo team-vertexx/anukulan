@@ -340,6 +340,60 @@ Gomory cuts are **off by default**, and that is measured: they give better root
 bounds on all seven test instances and a worse tree on three. They are limited
 to two rounds with a bound-monotonicity rollback when enabled.
 
+### What the tree spends its budget on
+
+Three things sit between reading the file and exploring the first node: the root
+relaxation, the root cut loop, and the heuristics. On the seven instances the
+defaults were fitted against, all three are cheap. On the wider MIPLIB set they
+are not, and the order in which they spend the budget decides whether a node is
+ever explored — thirteen of the twenty-nine instances that found nothing never
+got past the root.
+
+Each now answers to the clock rather than to a count:
+
+- **the budget is read immediately before each solve.** It used to be read once
+  per node, before a first-order seed and a cold retry that were each then
+  entitled to the whole of it.
+- **a cut round is only started if it fits.** A round is three relaxations, not
+  one — separate, append, re-solve to check the bound did not fall, and a final
+  solve to decide whether it paid.
+- **a round that cannot re-solve its own relaxation quickly is taken back off.**
+  What that measures is what the cuts did to the relaxation, since it is the same
+  relaxation plus their rows.
+- **a root that will not solve with cuts drops them and tries once more.**
+
+None of these turn cuts off. They stop cuts from consuming a run that then
+explores nothing.
+
+### Node order: plunge, then jump
+
+Depth first is right inside a plunge and wrong between plunges. A child differs
+from its parent in one bound, so the parent's basis re-optimises it in a few
+pivots — but the bound this solver reports is the smallest bound over its open
+nodes, and under depth first the open list always holds the root's own second
+child, waiting for its sibling's whole subtree. The reported bound is the root
+bound for nearly the whole run.
+
+So the search plunges to a fixed depth and then takes the open node with the best
+Forrest estimate of what lies below it, priced by the pseudocosts the tree already
+keeps. That is SCIP's default node selector. The estimate is a guess, never a
+bound, and nothing prunes on it.
+
+### Heuristics, in two families
+
+**Start heuristics** find a first solution: rounding, fix-and-propagate diving,
+and the feasibility pump. All three work forwards from the relaxation.
+
+**Improvement heuristics** need one and make it better. There is one, RINS: fix
+the integer columns where the incumbent and the node relaxation agree, and hand
+what is left to this same solver as a MIP with a node limit. Recursion stops by
+switching RINS off in the child.
+
+A third dive exists and is **off**: LP-guided diving, which re-solves after every
+decision rather than reading them all off one relaxation. On the instances that
+end with nothing it finds the same five whether on or off. The measurement is
+next to the option.
+
 The cover cut separator had a bug worth remembering: it inferred whether an item
 was complemented from `slack == x[j]`, which is true for *everything* at
 `x = 0.5`. The flag is now recorded explicitly. It was only visible at simplex

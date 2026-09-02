@@ -30,6 +30,32 @@ Generate:
     python3 scripts/refinery_model.py --periods=12 --crudes=8 \
         --out=data/refinery/refinery.mps
 
+**The LP above has no integer columns.** `refinery.mps` is exactly that: 1,380
+rows, 4,368 columns, zero integer and zero binary. The mixed-integer version is a
+separate `--milp` invocation and is a separate file:
+
+    python3 scripts/refinery_model.py --periods=4 --crudes=4 --milp \
+        --out=data/refinery/small_milp.mps
+
+276 rows, 760 columns, 24 integer and 8 binary, reproduced byte for byte by that
+command - which is why it is not tracked. It is the only refinery instance the
+MILP side of this solver can be measured on, and `data/reference/refinery.csv`
+holds its optimum. Worth stating because it is easy to read "the refinery model"
+as covering both and it does not: every MILP number in this repository other than
+that one is against MIPLIB.
+
+The two discrete decisions are physical rather than modelling conveniences: crude
+arrives in cargoes, so you charter a vessel or you do not; and a conversion unit
+either runs above its minimum throughput or is down, because below that the
+catalyst circulation and heat balance do not hold.
+
+It is also the instance that catches a numerical bug MIPLIB cannot. Its
+activities reach 1e9 because it is stated in barrels and rupees, so an absolute
+tolerance anywhere in an activity or bound comparison sits below the rounding
+noise. That cost the branch-and-bound tree a proved-optimal answer that was 1.23%
+wrong until 7a1a8b6; MIPLIB's 0/+-1 instances never come near the noise floor and
+had shown nothing.
+
 Sizes, and agreement with HiGHS at a relative tolerance of 1e-8:
 
     periods  crudes    rows    cols     nonzeros   agreement

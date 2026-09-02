@@ -13,7 +13,7 @@ cmake --build build -j8
 ctest --test-dir build --output-on-failure
 ```
 
-Eleven suites, all should pass. No dependencies beyond a C++17 compiler and
+Thirteen suites, all should pass. No dependencies beyond a C++17 compiler and
 CMake — no Boost, no Eigen, nothing to install. That is deliberate: the problem
 statement asks for an indigenous solver, and a dependency is a thing you have to
 explain.
@@ -99,7 +99,7 @@ test for it, because without it an ablation table means nothing.
 src/sankhya/     the solver. One header per component, and the reasoning
                  lives in the headers.
 app/             the CLI, one function per command
-tests/           11 suites, no framework — just CHECK macros
+tests/           13 suites, no framework — just CHECK macros
 bench/           measurement harnesses (Python), and their recorded results
 scripts/         data fetching, CUDA syntax check, GPU test, packaging
 data/            reference optima tracked; instance sets fetched
