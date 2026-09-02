@@ -578,18 +578,36 @@ branch-and-bound constant in the code was fitted against them. The wider set —
 
 | | before | after |
 |---|---|---|
-| ended with a feasible solution | 38 | **47** |
-| proved optimality | 5 | **6** |
+| ended with a feasible solution | 41 | **45** |
+| proved optimality | 5 | **7** |
 
-Ten instances newly found a solution, one lost it, seventeen ended closer to the
+Six instances newly found a solution, two lost it, nineteen ended closer to the
 published optimum and six further. Every instance claimed optimal matches the
 published value, on both sides.
 
-The before column moves between runs — 38, 41, 42, 43 on four runs of the same
-binary — because the build it measures does not enforce its own time limit, so
-how much work it gets done in fifteen seconds depends on the machine. The after
-column moves much less: 45, 46, 46, 47. Which instances sit on the feasibility
-boundary is not stable; the shape is.
+That is one run, and one run is not the number. The same comparison was made five
+times over the course of this work:
+
+| | before | after |
+|---|---|---|
+| ended with a feasible solution | 38, 41, 41, 42, 43 | 45, 45, 46, 46, 47 |
+| proved optimality | 5 every time | 6, 6, 6, 7, and 4 |
+
+The before column moves because the build it measures does not enforce its own
+time limit, so how much work it gets done in fifteen seconds depends on what else
+the machine is doing. The after column moves less. Which instances sit on the
+feasibility boundary is not stable between runs; the separation between the two
+columns is.
+
+The 4 in that last row is not noise and is worth keeping: it is the run taken
+with root cut filtering switched off, which costs the proofs of `gt2` and `fiber`
+outright. See the end of this section for why that switch went off and came back.
+
+The final figure — 7 proved — is from the run after the propagation tolerance fix
+below, which is the only configuration that is both correct on the refinery MILP
+and current. Earlier runs in the table were taken before that fix. Their
+claimed-optimal check passed on both sides every time, because MIPLIB's 0/±1
+instances never reach the noise floor where the bug lives.
 
 **Twenty-nine of the seventy ended with no feasible solution at all** — not a
 poor gap, nothing. A tree with no incumbent has nothing to prune against, so it

@@ -46,8 +46,8 @@ estimated.
 - **First-order** — 76/88 Netlib published optima at `--tol=1e-8`
 - **Presolve** — removes ~19% of rows and ~12% of columns, without changing an
   answer, and recovers duals as well as primals
-- **MILP** — on 70 MIPLIB instances at a 15 s limit, **47 end with a feasible
-  solution and 6 prove optimality**, against 38 and 5 before this work. Twenty-three
+- **MILP** — on 70 MIPLIB instances at a 15 s limit, **45 end with a feasible
+  solution and 7 prove optimality**, against 41 and 5 before this work. Twenty-five
   still find nothing at all, which is where the remaining work is
 - **QP** — 35 of the 40 smallest Maros–Meszaros instances
 - **GPU (Tesla T4)** — 2.70×–7.09× on solve time over the same algorithm on CPU
