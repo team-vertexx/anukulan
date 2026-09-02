@@ -355,7 +355,9 @@ def main() -> int:
     ap.add_argument("--crudes", type=int, default=8)
     ap.add_argument("--capacity", type=float, default=1.5e6,
                     help="CDU throughput per period, in barrels")
-    ap.add_argument("--out", default="data/refinery/refinery.mps")
+    ap.add_argument("--out", default="data/refinery/refinery.mps",
+                    help="with --milp, use data/refinery/refinery_milp.mps so the "
+                         "LP and the MILP can both be kept")
     ap.add_argument("--milp", action="store_true",
                     help="add cargo sizing and unit on/off decisions")
     args = ap.parse_args()

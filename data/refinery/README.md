@@ -69,3 +69,46 @@ The 12-period solution runs the CDU at 100% of capacity and the hydrotreater at
 economic trade in refinery planning. The sourest and cheapest crudes stay out of
 the slate because hydrotreater capacity, not crude price, is the binding
 constraint. That is the kind of conclusion a planning model exists to produce.
+
+
+## The MILP variant
+
+`refinery.mps` is a pure LP: 1,380 rows, 4,368 columns, **zero integer
+variables**. That is the right model for the blending and production planning
+half of the problem statement, and it is what the LP and first-order results are
+measured on.
+
+It is the wrong model for the MILP half, and for a while that half had no
+instance from the problem statement at all — every MILP number in this
+repository was against MIPLIB, which is a set of adversarial combinatorial
+instances and not a refinery.
+
+`refinery_milp.mps` closes that. Generate it with:
+
+```bash
+python3 scripts/refinery_model.py --periods=12 --crudes=8 --milp \
+    --out=data/refinery/refinery_milp.mps
+```
+
+1,500 rows, 4,488 columns, **120 integer of which 24 binary**. The integers are
+the decisions that actually make refinery planning discrete: whether a unit runs
+in a period at all, and whether a crude cargo is bought, with the minimum-charge
+constraints that go with them.
+
+Measured at a 120 s limit, single threaded, against HiGHS 1.15 on the same
+machine:
+
+| | objective | gap |
+|---|---|---|
+| this solver | 23,482,320,674 | 4.09% |
+| HiGHS | 24,074,365,430 | 0.33% |
+
+**2.5% apart on the objective.** That is a much closer result than the same
+comparison on MIPLIB, where HiGHS finds a solution on 37 of 40 against 27 and
+proves optimality on 13 against 4 — and the difference is what the two sets are.
+MIPLIB is selected for being hard in ways that defeat weak implementations;
+this model is a refinery.
+
+Both numbers belong in any honest report. The MIPLIB one says how far the tree
+is from a production implementation. This one says what that distance costs on
+the problem the statement is about.
