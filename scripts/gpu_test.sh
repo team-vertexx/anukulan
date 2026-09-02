@@ -41,7 +41,21 @@ cmake --build "$build" -j"$(nproc 2>/dev/null || echo 4)" 2>&1 | tail -3
 "./$build/sankhya" backends
 
 step "3. backend operations against the CPU reference"
-if ctest --test-dir "$build" --output-on-failure 2>&1 | tail -6; then :; else fail=1; fi
+# Not `ctest ... | tail`: the exit status of a pipeline is the status of its
+# last command, so piping through tail discards ctest's result entirely. That
+# is how a failing backend test reached the summary as "GPU backend is
+# correct" - the check ran, the failure was real, and nothing carried it. Write
+# to a file, test ctest itself, and show more of the output when it fails,
+# because six lines of a failure is not enough to act on.
+ctest_log="$(mktemp)"
+if ctest --test-dir "$build" --output-on-failure > "$ctest_log" 2>&1; then
+  tail -6 "$ctest_log"
+else
+  fail=1
+  echo "--- backend tests FAILED; last 40 lines:"
+  tail -40 "$ctest_log"
+fi
+rm -f "$ctest_log"
 
 step "4. solver on GPU against published Netlib optima"
 if [ ! -d data/netlib ]; then
@@ -80,7 +94,7 @@ for n in names:
 print(f"\n{'PASS' if bad == 0 else 'FAIL'}: {bad} instance(s) off the published optimum")
 sys.exit(1 if bad else 0)
 PY
-[ $? -ne 0 ] && fail=1
+if [ $? -ne 0 ]; then fail=1; fi
 
 step "5. CPU against GPU by size"
 echo "The Netlib set is too small for a GPU to pay. Pull the large instances"
@@ -214,7 +228,8 @@ python3 bench/verify_presolve.py --binary "./$build/sankhya" --abs-tol=1e-8 \
 
 printf '\n=== summary\n'
 if [ "$fail" -eq 0 ]; then
-  echo "GPU backend is correct. Timing table above is the headline number."
+  echo "Everything above passed, including the backend contract tests. The"
+  echo "timing table is the headline number."
 else
   echo "Something failed above. The build and the backend tests come first;"
   echo "a timing number from an incorrect backend is worth nothing."

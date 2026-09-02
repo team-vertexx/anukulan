@@ -5,6 +5,14 @@
 
 namespace sankhya {
 
+// Monotonic within the process. Not thread-safe by construction because matrices
+// are built before any parallel section here; make it atomic if that changes.
+std::uint64_t SparseMatrix::next_id() {
+  static std::uint64_t counter = 0;
+  return ++counter;
+}
+
+
 SparseMatrix SparseMatrix::from_triplets(Int rows, Int cols,
                                          std::vector<Triplet> entries) {
   SparseMatrix a;

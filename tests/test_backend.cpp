@@ -1,4 +1,5 @@
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <exception>
 #include <random>
@@ -181,6 +182,44 @@ void test_multiply_across_row_length_regimes(const LinAlgBackend& b) {
     const std::vector<double> got = dy.host();
     for (Int i = 0; i < rows; ++i) {
       CHECK_NEAR(got[sz(i)], want[sz(i)], 1e-13);
+    }
+  }
+}
+
+// Two different matrices at the same address, which is what a loop-local
+// matrix does every iteration. The CUDA backend used to cache its device copy
+// keyed on that address and return the first matrix's data for the second one -
+// no error, just the wrong answer. Nothing in a solve reuses an address, so
+// this is the only place it can be caught.
+void test_a_second_matrix_at_the_same_address(const LinAlgBackend& b) {
+  const Int rows = 40, cols = 12;
+  std::uintptr_t first_address = 0;
+  for (int round = 0; round < 2; ++round) {
+    std::vector<Triplet> t;
+    // Deliberately different contents, and different nonzero counts, so a stale
+    // cache cannot accidentally produce the right answer.
+    for (Int i = 0; i < rows; ++i)
+      for (Int k = 0; k <= round; ++k)
+        t.push_back(Triplet{i, static_cast<Int>((i + 3 * k) % cols),
+                            1.0 + round + 0.5 * static_cast<double>(i)});
+    const SparseMatrix a = SparseMatrix::from_triplets(rows, cols, std::move(t));
+    if (round == 0) first_address = reinterpret_cast<std::uintptr_t>(&a);
+
+    std::vector<double> x(sz(cols));
+    for (Int j = 0; j < cols; ++j) x[sz(j)] = 1.0 + 0.25 * static_cast<double>(j);
+    Vec dx(b, x), dy(b, rows);
+    b.fill(dy.data(), rows, -12345.0);
+    b.multiply(a, dx.data(), dy.data());
+
+    const std::vector<double> want = longhand_multiply(a, x);
+    const std::vector<double> got = dy.host();
+    for (Int i = 0; i < rows; ++i) CHECK_NEAR(got[sz(i)], want[sz(i)], 1e-13);
+
+    // If the second matrix did not land on the first one's address the test has
+    // not exercised what it is for, and should say so rather than pass quietly.
+    if (round == 1 && reinterpret_cast<std::uintptr_t>(&a) != first_address) {
+      std::printf("     note: the two matrices did not share an address, so the "
+                  "cache-reuse path was not exercised\n");
     }
   }
 }
@@ -677,6 +716,7 @@ void run_contract(const LinAlgBackend& b) {
   test_upload_download_fill_copy(b);
   test_multiply_matches_longhand(b);
   test_multiply_across_row_length_regimes(b);
+  test_a_second_matrix_at_the_same_address(b);
   test_reductions(b);
   test_reductions_past_the_block_cap(b);
   test_primal_update_matches_the_steps_it_replaced(b);

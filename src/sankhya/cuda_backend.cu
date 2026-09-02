@@ -559,7 +559,13 @@ class CudaBackend final : public LinAlgBackend {
   }
 
   void prepare(const SparseMatrix& a) const override {
-    if (matrices_.count(&a)) return;
+    // Keyed on the matrix's own identity, not on where it lives. A stack-local
+    // matrix reuses the address of the one before it, and keying on the address
+    // meant the second matrix silently got the first one's device data - no
+    // error, no warning, just the wrong answer. Nothing in a solve reuses an
+    // address, so it took a test that builds five matrices in a loop to show it.
+    const auto found = matrices_.find(a.id());
+    if (found != matrices_.end()) return;
     DeviceMatrix d;
     d.rows = a.rows();
     d.nnz = a.nnz();
@@ -578,7 +584,7 @@ class CudaBackend final : public LinAlgBackend {
       cuda_check(cudaMemcpy(d.value, a.value().data(), nnz_bytes_d,
                             cudaMemcpyHostToDevice), "copy value");
     }
-    matrices_[&a] = d;
+    matrices_[a.id()] = d;
   }
 
   void release() const override {
@@ -825,7 +831,7 @@ class CudaBackend final : public LinAlgBackend {
 
   void spmv(const SparseMatrix& a, const double* x, double* y, const char* label) const {
     prepare(a);
-    const DeviceMatrix& d = matrices_.at(&a);
+    const DeviceMatrix& d = matrices_.at(a.id());
     const int vectors_per_block = kBlock / d.vector_width;
     Int grid = (d.rows + vectors_per_block - 1) / vectors_per_block;
     if (grid < 1) grid = 1;
@@ -869,7 +875,7 @@ class CudaBackend final : public LinAlgBackend {
     return acc;
   }
 
-  mutable std::unordered_map<const SparseMatrix*, DeviceMatrix> matrices_;
+  mutable std::unordered_map<std::uint64_t, DeviceMatrix> matrices_;
   double* partial_ = nullptr;
   mutable std::vector<double> host_partial_;
   double* terms_partial_ = nullptr;  // 3 x kMaxBlocks block sums

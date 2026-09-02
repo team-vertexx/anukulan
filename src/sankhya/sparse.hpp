@@ -38,6 +38,18 @@ class SparseMatrix {
  public:
   SparseMatrix() = default;
 
+  // A value that changes whenever this object's contents could have. It exists
+  // because the CUDA backend caches the device-side copy of a matrix, and it
+  // used to key that cache on the host address - which a stack-local matrix
+  // reuses the moment the previous one goes out of scope. The backend then
+  // returned the *previous* matrix's data with no error at all.
+  //
+  // Nothing in a solve reuses an address, so this was invisible until a test
+  // built five matrices in a loop and every one after the first got the first
+  // one's values back. Identity has to come from the object, not from where it
+  // happens to live.
+  std::uint64_t id() const { return id_; }
+
   // Builds from triplets. Duplicate (row, col) pairs are summed. Entries that are
   // exactly zero after summing are dropped.
   static SparseMatrix from_triplets(Int rows, Int cols, std::vector<Triplet> entries);
@@ -76,6 +88,11 @@ class SparseMatrix {
   bool validate(std::string* error) const;
 
  private:
+  // Assigned at construction and on every assignment, from a counter that never
+  // repeats within a process.
+  static std::uint64_t next_id();
+  std::uint64_t id_ = next_id();
+
   Int rows_ = 0;
   Int cols_ = 0;
   std::vector<Int> start_{0};
