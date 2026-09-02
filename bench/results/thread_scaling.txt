@@ -1,4 +1,4 @@
-# binary   ~/sankhya-parallel/build/sankhya
+# binary   build/sankhya
 # extra    --no-polish
 # repeats  3, minimum kept
 # load average at start 3.57
