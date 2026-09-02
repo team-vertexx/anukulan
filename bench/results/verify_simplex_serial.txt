@@ -3,10 +3,12 @@
   degen3       time limit
   dfl001       time limit
   pilot87      time limit
+  scsd8        iteration limit
 
-88 instances: 83 correct, 0 WRONG, 5 did not finish
+88 instances: 82 correct, 0 WRONG, 6 did not finish
   did not finish: cycle (numerical error)
   did not finish: d6cube (time limit)
   did not finish: degen3 (time limit)
   did not finish: dfl001 (time limit)
   did not finish: pilot87 (time limit)
+  did not finish: scsd8 (iteration limit)

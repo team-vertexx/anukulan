@@ -729,14 +729,35 @@ crossover seed, run serially and at six threads:
 
 | | serial | 6 threads |
 |---|---|---|
-| correct against the published optimum | **83/88** | **83/88** |
+| correct against the published optimum | **82/88** | **82/88** |
 | wrong | **0** | **0** |
-| did not finish | 5 | 5 |
+| did not finish | 6 | 6 |
 
-The two output files are identical, down to which five instances did not finish
-and why — `cycle` on a numerical error, `d6cube`, `degen3`, `dfl001` and
-`pilot87` on the time limit. That the same five stopped in the same way under a
-*time* limit, on a shared machine, is a stronger result than it looks.
+The same six instances do not finish in both runs. **One line differs between
+the two files**, and it is worth following because it looks like a determinism
+failure and is not: `d6cube` stops on the *time* limit serially and on the
+*iteration* limit at six threads.
+
+The cause is the harness's 45-second wall clock, not the backend. This command
+caps its crossover seed by iterations and never by time, so the seed is
+identical either way and hands the simplex an identical starting basis; the
+simplex itself is serial and walks an identical pivot path. What differs is how
+much of the 45 seconds is left when it gets there — the threaded seed finishes
+sooner, so the simplex gets further along the *same* path before something stops
+it, and what stops it is a different limit.
+
+Take the clock out of it and the difference disappears:
+
+```bash
+build/sankhya simplex data/netlib/d6cube.mps --presolve --crossover \
+    --time-limit=600 --threads=1   # iteration limit, 200000, 342.62521929824584
+build/sankhya simplex data/netlib/d6cube.mps --presolve --crossover \
+    --time-limit=600 --threads=6   # iteration limit, 200000, 342.62521929824584
+```
+
+Same status, same iteration count, same objective to every digit. This is the
+same effect §10.1's last paragraph describes for `miplib_survey.py`, and it is
+the reason the third check below caps by iterations rather than by seconds.
 
 **The whole Netlib set through the first-order method**, which is the path that
 is actually threaded rather than one that merely touches it.
