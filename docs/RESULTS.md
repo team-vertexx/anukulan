@@ -750,6 +750,75 @@ build/sankhya milp data/miplib/fiber.mps --no-objective-integrality --solution=f
 build/sankhya milp data/miplib/fiber.mps --debug-solution=fiber.sol
 ```
 
+### The refinery MILP, and the wrong answer it caught
+
+Every MILP number above is against MIPLIB. The problem statement is about
+refinery scheduling, and `data/refinery/refinery.mps` — the model named for it —
+**has no integer columns at all**. The refinery MILP is a separate `--milp`
+invocation of the same generator:
+
+```bash
+python3 scripts/refinery_model.py --periods=4 --crudes=4 --milp     --out=data/refinery/small_milp.mps
+build/sankhya milp data/refinery/small_milp.mps --time-limit=60
+```
+
+276 rows, 760 columns, 24 integer and 8 binary. HiGHS 1.15.1 at a forced 0% gap
+proves its optimum at 7,246,146,141.83 in **26 nodes**;
+`data/reference/refinery.csv` records it.
+
+This tree returned **7,156,892,194.84 and called it optimal** — 1.23% low on a
+maximisation, with a matching dual bound and no violation anywhere.
+
+The cause was an absolute tolerance. `propagate_bounds` tested row activities
+against `q - 1e-9`, and this model's activities reach 1e9 because it is stated in
+barrels and rupees: roughly 1e-7 of rounding per term in double precision, a few
+hundred terms, and a row that is exactly tight computes as violated. The child
+was declared infeasible by interval arithmetic and the subtree holding the
+optimum was discarded without its relaxation ever being solved.
+
+`provably_infeasible`, thirty lines below in the same file, already scaled its
+tolerances, and its comment says *"the two tests have to agree about what an empty
+box is"* and *"an absolute tolerance on a quantity whose scale the caller chooses
+is always this bug waiting"*. That one was fixed after `fiber`. This one was not.
+
+**MIPLIB could not have caught it.** Those instances are 0/±1 and their
+activities never come near the noise floor. Only a model stated in real
+engineering units does — which is the argument for having one.
+
+After the fix: 7,246,146,141.826, matching the published value to six decimal
+places of relative error, in 167 nodes. It does not prove optimality inside sixty
+seconds where HiGHS needs 26, so the honest problem is now a slow answer rather
+than a wrong one.
+
+Found by the debug-solution tracker in one command: solve once with a prune
+disabled to get a point, hand it back with `--debug-solution`, and every prune
+reports whether it discards it. It printed *"propagation declared the child
+infeasible"* on the first run. That is the second time in this repository it has
+named a bug that manual elimination had not found.
+
+### MILP presolve, re-measured
+
+`command_milp` has presolve off by default, and the numbers that justified it —
+`gt2` 500 nodes to 8,320 — were taken under depth-first search. Under
+best-estimate node selection the blow-up does not happen:
+
+| instance | presolve off | on |
+|---|---|---|
+| flugpl | 274 | 262 |
+| gt2 | 307 | 399 |
+| khb05250 | 55 | 158 |
+| p0201 | 989 | **358** |
+| small_milp | 167 | 157 |
+
+Two better, two worse, one neutral. The honest statement is that MILP presolve
+**was a net loss under depth-first search and is roughly neutral under
+best-estimate**, not that the tree does not want it. It stays off by default
+because roughly neutral is not a reason to turn something on, and because these
+five instances are not a sample.
+
+Depth-first on the same binary gives `gt2` 847 → 1,388, which is what says the
+difference is the search order rather than the reduction.
+
 ### Two things that were built and do not pay
 
 **LP-guided diving.** A dive that re-solves the relaxation after every decision
