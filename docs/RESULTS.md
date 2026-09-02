@@ -27,9 +27,9 @@ of one:
 | First-order LP | ~64 | strongest piece; multithreading is no longer missing, though §10 measures the gain at 1.41x on five threads and shows the memory bus is what caps it. Some cuPDLPx tuning still missing |
 | GPU | ~55 | real 2.7–7× measured, but not cuPDLP-C level |
 | QP | ~50 | OSQP's core is here; no AMD ordering, thin regularisation strategy |
-| Simplex | ~55 | 78/88 Netlib correct and none wrong, and it now takes a basis from the first-order method. Still no Forrest–Tomlin, no bound-flipping ratio test, no hypersparsity |
+| Simplex | ~58 | 78/88 Netlib correct and none wrong, and it now takes a basis from the first-order method. Still no Forrest–Tomlin, no bound-flipping ratio test, no hypersparsity |
 | Presolve | ~50 | 12 reductions, and every fast explorer PaPILO and PSLP list bar one |
-| Infrastructure | ~70 | good tests, no CI, no packaging |
+| Infrastructure | ~78 | good tests, and CI now runs them on every push — build and the twelve suites on Linux and macOS, then all 88 Netlib instances against their published optima, which fails the build on a wrong answer. It found two things on its first two runs: the project had never compiled on Linux, and the fetch script silently undid the reference corrections. No packaging |
 | **MILP** | **~40** | **still the weak leg — see below.** Time limits are now actually enforced, a cut round has to pay for itself before it starts, node selection is best-estimate with plunging rather than depth first, and RINS is in. Missing: conflict analysis, restarts, clique tables, symmetry detection, node presolve, a real cut pool |
 
 Weighted, that is about **62/100** as of 2026-09-01, up from 50. Most of that
@@ -471,9 +471,9 @@ python3 bench/pid_sweep.py
 
 | | count |
 |---|---|
-| reach the published optimum | **78** |
+| reach the published optimum | **82** |
 | return a wrong answer | **0** |
-| do not finish (time, iteration limit, or numerical error) | 10 |
+| do not finish (time, iteration limit, or numerical error) | 6 |
 
 ```bash
 python3 -u bench/verify_simplex.py 60

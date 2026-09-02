@@ -73,7 +73,7 @@ void print_usage() {
       "  --polish-factor=F    polish budget as a fraction of iterations so far\n"
       "  --no-primal-weight   keep the primal weight at one\n"
       "  --presolve           reduce the model first, then map the answer back\n"
-      "  --crossover          seed the simplex basis from a first-order solve\n"
+      "  --no-crossover       do not seed the simplex basis from a first-order solve\n"
       "  --crossover-tol=T    how far that seed solve is taken (default 1e-4)\n"
       "  --profile            report where the device time went, kernel by kernel\n"
       "  --verbose            print progress\n"
@@ -379,7 +379,17 @@ int command_simplex(const std::vector<std::string>& args) {
   // first-order method's relative one moves when presolve changes what it
   // divides by.
   sankhya::PresolveOptions presolve_options;
-  bool use_crossover = false;
+  // On by default, and that is a measurement. Over all 88 Netlib instances at a
+  // 60 s limit, seeding the simplex from a first-order point takes it from 79
+  // correct to 82 - modszk1, stocfor2 and woodw go from a numerical error, a
+  // time limit and an iteration limit respectively to the published optimum -
+  // with zero wrong answers either way. The seed costs iterations on small
+  // instances, which is why this was opt-in until the whole set was measured.
+  //
+  // It is safe to default because a seeded solve that does not reach an optimum
+  // falls back to the cold one: crossover can save pivots or do nothing, but it
+  // cannot cost an answer. --no-crossover turns it off.
+  bool use_crossover = true;
   // Threads for the crossover seed, which is a first-order solve and so the one
   // part of this command that has any. The simplex itself is serial.
   const sankhya::LinAlgBackend* backend = nullptr;
@@ -437,6 +447,8 @@ int command_simplex(const std::vector<std::string>& args) {
     } else if (value_of(a, "--crossover-dual-weight=", &v)) {
       crossover_dual_weight = v;
       use_crossover = true;
+    } else if (a == "--no-crossover") {
+      use_crossover = false;
     } else if (a == "--crossover") {
       use_crossover = true;
     } else if (value_of(a, "--max-iter=", &v)) {

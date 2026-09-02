@@ -37,8 +37,8 @@ command next to it in [docs/RESULTS.md](docs/RESULTS.md). None of it is
 estimated.
 
 - **Reader** — matches HiGHS on all 88 Netlib instances, 1.4–1.5× faster
-- **Simplex** — **77 of 88** Netlib instances reach the published optimum and
-  **none returns a wrong answer**; the rest stop visibly with a time limit,
+- **Simplex** — **82 of 88** Netlib instances reach the published optimum and
+  **none returns a wrong answer**; the other six stop visibly with a time limit,
   iteration limit or numerical error
 - **Crossover** — seeding the simplex from a first-order point cuts pivots
   substantially and turns six instances that returned no answer at all
