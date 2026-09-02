@@ -2156,15 +2156,19 @@ the implementation.
 
 Same algorithm, same interface, different backend.
 
-| instance | speedup over the same algorithm on CPU |
-|---|---|
-| supportcase10 | **7.09×** |
-| graph40-40 | 3.00× |
-| datt256_lp | 2.82× |
-| qap15 | 2.70× |
+| instance | CPU solve | GPU solve | speedup | agreement |
+|---|---|---|---|---|
+| supportcase10 | 88.23 s | 7.31 s | **12.07×** | 1.3e-16 |
+| qap15 | 0.86 s | 0.15 s | **5.68×** | 8.7e-16 |
+| datt256_lp | 4.93 s | 1.06 s | **4.64×** | 5.6e-16 |
+| graph40-40 | 2.29 s | 0.73 s | **3.14×** | 0.0e+00 |
 
-Measured on a rented **NVIDIA Tesla T4**. Accuracy against the CPU answer:
-$1.9\times10^{-8}$ to exactly zero.
+Measured on a rented **NVIDIA Tesla T4**, CUDA 12.8, and **verified on hardware**
+— all fourteen suites pass on the device, including the backend contract tests.
+Agreement is CPU against GPU on the objective, at or below machine precision on
+all four and exactly zero on one. On fourteen Netlib instances CPU and GPU take
+the *same number of iterations*, which is what says the device runs the same
+algorithm rather than an approximation of it.
 
 **Setup time is excluded and is identical on both sides** — it is MPS parsing,
 which is serial and unrelated to the algorithm. Reporting end-to-end wall clock
@@ -2187,13 +2191,33 @@ value-initialises. A missing upload of the dual iterate was therefore completely
 invisible on CPU — everything started at zero anyway — and silently fatal on the
 device for any warm start, which read whatever was in the allocation.
 
-**What is honestly unverified.** The development machine is Apple Silicon and
-has no NVIDIA GPU, so every GPU number requires rented hardware. A substantial
-amount has landed since the last T4 run — the device-side convergence check
-among it. `scripts/check_cuda_syntax.sh` type-checks the kernels without a GPU
-and `scripts/gpu_test.sh` runs the full sequence on a CUDA box, with step 3 (the
-backend contract tests) as the gating check. **Until that runs, the numbers in
-this section describe an earlier build.**
+**And the bug the verification run found, which is the reason it was worth
+running rather than assuming.** `prepare()` caches a matrix's device-side copy
+and keyed that cache on the **host address**. A stack-local matrix reuses the
+address of the one before it the moment it goes out of scope, so the second
+matrix silently received the first one's rows, nonzeros, vector width and
+values — no error, no warning, just the wrong answer.
+
+Nothing inside a solve reuses an address: a matrix and its transpose live for the
+whole run. That is why fourteen Netlib instances pass on the device with
+objectives *and iteration counts* identical to the CPU while the backend was
+wrong, and why it took a contract test that builds five matrices in a loop to
+expose it. 2,344 comparisons wrong, in a regime no real instance reaches.
+
+The same run exposed why it nearly went unnoticed. The harness did
+
+```bash
+if ctest ... 2>&1 | tail -6; then :; else fail=1; fi
+```
+
+and a pipeline's exit status is its last command's — so `tail` succeeding
+discarded `ctest` failing, and the summary read "GPU backend is correct" while
+the gating test was red. **A check that cannot fail is not a check**, and this
+one had been in the harness the whole time.
+
+Both are fixed: identity comes from the object rather than from where it lives,
+and the harness tests `ctest` itself and prints forty lines rather than six when
+it fails.
 
 ## 31. Numerics: the rules this codebase follows
 

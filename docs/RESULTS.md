@@ -25,7 +25,7 @@ of one:
 |---|---|---|
 | MPS reader | ~95 | genuinely at parity, and faster |
 | First-order LP | ~64 | strongest piece; multithreading is no longer missing, though §10 measures the gain at 1.41x on five threads and shows the memory bus is what caps it. Some cuPDLPx tuning still missing |
-| GPU | ~55 | real 2.7–7× measured, but not cuPDLP-C level |
+| GPU | ~65 | 3.1×–12.1× measured and now verified on hardware, contract tests included; still not cuPDLP-C level |
 | QP | ~50 | OSQP's core is here; no AMD ordering, thin regularisation strategy |
 | Simplex | ~58 | 78/88 Netlib correct and none wrong, and it now takes a basis from the first-order method. Still no Forrest–Tomlin, no bound-flipping ratio test, no hypersparsity |
 | Presolve | ~50 | 12 reductions, and every fast explorer PaPILO and PSLP list bar one |
@@ -1125,31 +1125,85 @@ build/sankhya qp data/maros/HS21.QPS
 
 ## 8. GPU (Tesla T4)
 
-Solve-time speedup, same algorithm, CPU against GPU:
+**Verified on hardware 2026-09-02**, on a Kaggle Tesla T4, CUDA 12.8. All 14
+test suites pass on the device, including the backend contract tests — which is
+the gating check and which **failed** on the run before this one, on a real bug
+(§8.4).
 
-| instance | speedup |
+### 8.1 Speedup on the solve
+
+| instance | CPU solve | GPU solve | speedup | CPU/GPU agreement |
+|---|---|---|---|---|
+| supportcase10 | 88.23 s | 7.31 s | **12.07×** | 1.3e-16 |
+| qap15 | 0.86 s | 0.15 s | **5.68×** | 8.7e-16 |
+| datt256_lp | 4.93 s | 1.06 s | **4.64×** | 5.6e-16 |
+| graph40-40 | 2.29 s | 0.73 s | **3.14×** | 0.0e+00 |
+
+Agreement is CPU against GPU on the objective — at or below machine precision on
+all four, and exactly zero on one.
+
+**Setup is excluded and is identical on both sides** — reading the MPS file and
+building the standard form, which runs on the host. Counting it dilutes the
+comparison by a constant that has nothing to do with the GPU. The end-to-end
+wall clock is in `results/gpu_matrix.csv` for anyone who wants it.
+
+These replace an earlier 2.70×–7.09×, measured before the device-side
+convergence check, the fused updates and the adaptive SpMV width landed.
+
+### 8.2 Correctness on the device
+
+Fourteen Netlib instances solved on both backends against published optima:
+**0 instances off the published optimum**, and CPU and GPU take the *same
+number of iterations* on every one — 45,040/45,040 on 25fv47, 25,360/25,360 on
+fit1p. Identical iteration counts mean the device is running the same algorithm,
+not an approximation of it.
+
+### 8.3 Where the time actually goes
+
+The backend carries its own per-kernel timing, so this needs no external
+profiler. On `qap15`, which runs 2,600 iterations:
+
+| | share |
 |---|---|
-| supportcase10 | **7.09×** |
-| graph40-40 | **3.00×** |
-| datt256_lp | **2.82×** |
-| qap15 | **2.70×** |
+| iterating | 79.5% |
+| **off the device** | **11.8%** |
 
-Accuracy 1.9e-08 to 0.0 against the CPU answer. `spmv K x` went 0.207 s → 0.042 s
-from the adaptive vector width.
+and within the kernels, `spmv Kt y` 36.2% and `spmv K x` 30.3% — two thirds in
+the sparse products, which is the shape this algorithm should have.
 
-**Setup time is not in these numbers and is identical on both sides** — it is
-MPS parsing, which is serial. Reporting end-to-end wall clock instead would be
-Amdahl's law quietly eating the result.
+`graph40-40` is the opposite case and worth keeping for it: 200 iterations, and
+**35.4% off the device** — 43.9% of the solve is polishing and 25.5% is scaling,
+neither of which a faster GPU helps with. An instance that runs 200 iterations
+cannot be made fast by a better kernel, and this is what that looks like rather
+than an argument that it is true.
+
+### 8.4 The bug this run found
+
+The run before this one failed the backend contract test with 2,344 wrong
+comparisons. `prepare()` caches a matrix's device-side copy and keyed that cache
+on the **host address**. A stack-local matrix reuses the address of the one
+before it, so the second matrix silently received the first one's rows,
+nonzeros, vector width and values — no error, no warning.
+
+Nothing inside a solve reuses an address, which is why the fourteen instances in
+§8.2 passed with identical iteration counts while the backend was wrong. It took
+a test that builds five matrices in a loop to expose it. Identity now comes from
+the object rather than from where it lives.
+
+The same run also showed why it nearly went unnoticed:
+
+```bash
+if ctest ... 2>&1 | tail -6; then :; else fail=1; fi
+```
+
+A pipeline's exit status is its last command's, so `tail` succeeding discarded
+`ctest` failing, and the script's summary read "GPU backend is correct" while the
+gating test was red.
 
 ```bash
 bash scripts/gpu_test.sh          # on a CUDA box; see docs/KAGGLE.md
 bash scripts/check_cuda_syntax.sh # type-check the kernels with no GPU
 ```
-
-**Not yet verified on hardware:** the dual-iterate upload fix, sparse LDL',
-direct QP solve, polishing, the dual simplex fix, and the cuPDLPx additions have
-all landed since the last T4 run. Step 3 of `gpu_test.sh` (the backend contract
-tests) is the gating check.
 
 ---
 

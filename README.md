@@ -52,7 +52,9 @@ estimated.
   solution and 7 prove optimality**, against 41 and 5 before this work. Twenty-five
   still find nothing at all, which is where the remaining work is
 - **QP** — 35 of the 40 smallest Maros–Meszaros instances
-- **GPU (Tesla T4)** — 2.70×–7.09× on solve time over the same algorithm on CPU
+- **GPU (Tesla T4)** — **3.14×–12.07×** on solve time over the same algorithm on
+  CPU, verified on hardware with the backend contract tests passing and CPU/GPU
+  agreement at machine precision
 
 Read [docs/RESULTS.md](docs/RESULTS.md) for the full tables and the honest
 assessment of where this sits against a production solver — about **62% of
