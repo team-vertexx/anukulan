@@ -290,6 +290,11 @@ int command_presolve(const std::vector<std::string>& args) {
       options.forcing_rows = false;
     } else if (a == "--no-column-singletons") {
       options.free_column_singletons = false;
+      options.slack_column_singletons = false;
+    } else if (a == "--no-slack-singletons") {
+      options.slack_column_singletons = false;
+    } else if (a == "--no-inequality-singletons") {
+      options.inequality_column_singletons = false;
     } else if (a == "--no-dual-fixing") {
       options.dual_fixing = false;
     } else if (a == "--no-coeff-tightening") {
@@ -300,6 +305,8 @@ int command_presolve(const std::vector<std::string>& args) {
       options.fixed_columns = false;
       options.empty_columns = false;
       options.free_column_singletons = false;
+      options.slack_column_singletons = false;
+      options.inequality_column_singletons = false;
     } else if (a != "--format=human") {
       std::fprintf(stderr, "presolve: unknown option \"%s\"\n", a.c_str());
       return 2;
@@ -337,6 +344,9 @@ int command_presolve(const std::vector<std::string>& args) {
         << "\"fixed_columns\":" << c.fixed_columns << ","
         << "\"empty_columns\":" << c.empty_columns << ","
         << "\"free_column_singletons\":" << c.free_column_singletons << ","
+        << "\"slack_column_singletons\":" << c.slack_column_singletons << ","
+        << "\"slack_singletons_declined\":" << c.slack_singletons_declined << ","
+        << "\"inequality_column_singletons\":" << c.inequality_column_singletons << ","
         << "\"doubleton_equations\":" << c.doubleton_equations << ","
         << "\"dual_fixed_columns\":" << c.dual_fixed_columns << ","
         << "\"coefficients_tightened\":" << c.coefficients_tightened << ","
@@ -728,6 +738,8 @@ int command_solve(const std::vector<std::string>& args) {
       presolve_options.fixed_columns = false;
       presolve_options.empty_columns = false;
       presolve_options.free_column_singletons = false;
+      presolve_options.slack_column_singletons = false;
+      presolve_options.inequality_column_singletons = false;
     } else if (a == "--presolve-no-dual-fixing") {
       use_presolve = true;
       presolve_options.dual_fixing = false;
@@ -737,6 +749,12 @@ int command_solve(const std::vector<std::string>& args) {
     } else if (a == "--presolve-no-doubletons") {
       use_presolve = true;
       presolve_options.doubleton_equations = false;
+    } else if (a == "--presolve-no-slack-singletons") {
+      use_presolve = true;
+      presolve_options.slack_column_singletons = false;
+    } else if (a == "--presolve-no-inequality-singletons") {
+      use_presolve = true;
+      presolve_options.inequality_column_singletons = false;
     } else if (a == "--presolve-no-forcing") {
       use_presolve = true;
       presolve_options.forcing_rows = false;

@@ -107,6 +107,16 @@ void PostsolveStack::record_row_from_doubleton(Int row, Int column,
   row_entries_.push_back(std::move(e));
 }
 
+void PostsolveStack::record_row_from_slack_singleton(Int row, Int column,
+                                                     double coefficient) {
+  RowEntry e;
+  e.kind = RowKind::kSlackSingleton;
+  e.row = row;
+  e.column = column;
+  e.coefficient = coefficient;
+  row_entries_.push_back(e);
+}
+
 void PostsolveStack::record_unrecoverable_row(Int row) {
   RowEntry e;
   e.kind = RowKind::kUnrecoverable;
@@ -184,6 +194,23 @@ std::vector<double> PostsolveStack::apply_dual(
         y[sz(entry.row)] =
             std::fabs(entry.coefficient) > 1e-12 ? (c - rest) / entry.coefficient
                                                  : 0.0;
+        break;
+      }
+      case RowKind::kSlackSingleton: {
+        // The row survived; only the column alone in it went. Stationarity on
+        // every other column k of that row differs between the two models by
+        // exactly the objective term the substitution moved onto it,
+        //     c_k  ->  c_k - c_j * a_rk / a
+        // and that is absorbed by moving this row's dual, leaving every other
+        // row's alone:  y_r = y'_r + c_j / a.
+        //
+        // Accumulated rather than assigned, because the row may itself have
+        // been removed by a later reduction whose own recovery has already run
+        // by the time this does. Composing the two is what that costs.
+        const std::size_t j = sz(entry.column);
+        const double c = j < original_cost.size() ? original_cost[j] : 0.0;
+        if (std::fabs(entry.coefficient) > 1e-12)
+          y[sz(entry.row)] += c / entry.coefficient;
         break;
       }
       case RowKind::kSingleton: {
@@ -654,7 +681,8 @@ bool scan_columns(Workspace& w, const PresolveOptions& opt, bool allow_removal) 
       continue;
     }
 
-    if (w.col_count[sz(j)] == 1 && opt.free_column_singletons && !w.integral[sz(j)]) {
+    if (w.col_count[sz(j)] == 1 && !w.integral[sz(j)] &&
+        (opt.free_column_singletons || opt.slack_column_singletons)) {
       Int row = -1;
       double a = 0.0;
       for (Int e = w.at.row_begin(j); e < w.at.row_end(j); ++e) {
@@ -667,34 +695,116 @@ bool scan_columns(Workspace& w, const PresolveOptions& opt, bool allow_removal) 
       if (row < 0) continue;
       const double lo = w.rlo[sz(row)];
       const double hi = w.rup[sz(row)];
-      if (std::isinf(lo) || std::isinf(hi)) continue;
-      if (std::fabs(hi - lo) > w.tol * scale_of(hi)) continue;  // not an equality
 
       const Activity act = row_activity(w, row);
+      // Everything downstream divides by a: the row's bounds, and the objective
+      // term this moves onto every other column of the row. A pivot small
+      // against the rest of the row turns a well-scaled model into a badly
+      // scaled one, which is a real risk on a model like the refinery one whose
+      // coefficients already span 4e5.
       if (std::fabs(a) < 1e-7 * act.max_abs_coeff || std::fabs(a) < 1e-10) continue;
 
-      // The column is substitutable when its own bounds cannot bind: whatever the
-      // rest of the row does, the value the equality forces on x_j already lies
-      // inside them. A genuinely free column passes this trivially.
-      const bool free_below = std::isinf(w.clo[sz(j)]);
-      const bool free_above = std::isinf(w.cup[sz(j)]);
-      if (!(free_below && free_above)) {
-        // Both activity ends have to be finite for the implied interval to
-        // exist. That also makes this column's own contribution finite, since
-        // it is one of the terms being summed.
-        if (act.min_infinite > 0 || act.max_infinite > 0) continue;
+      // What the row itself says x_j can be, given where the other columns can
+      // go. Each finite row bound gives one side of this, and which side it
+      // gives flips with the sign of a.
+      //
+      // Both of the things below are read off it. A bound of x_j's own that
+      // lies outside this interval can never be reached, so it cannot bind -
+      // and a column whose bounds both fail to bind is implied free.
+      double row_gives_lo = -kInf, row_gives_hi = kInf;
+      {
         const double own_min = (a > 0.0) ? w.clo[sz(j)] : w.cup[sz(j)];
         const double own_max = (a > 0.0) ? w.cup[sz(j)] : w.clo[sz(j)];
-        const double rest_min = act.min_value - a * own_min;
-        const double rest_max = act.max_value - a * own_max;
-        const double e1 = (lo - rest_max) / a;
-        const double e2 = (lo - rest_min) / a;
-        const double implied_lo = std::fmin(e1, e2);
-        const double implied_hi = std::fmax(e1, e2);
-        const double slack = w.tol * scale_of(implied_hi);
-        if (!(implied_lo >= w.clo[sz(j)] - slack && implied_hi <= w.cup[sz(j)] + slack))
-          continue;
+        // The rest of the row, which is the activity less this column's own
+        // share of it. Only finite when the infinities in the activity are this
+        // column's and no one else's.
+        const bool rest_min_finite =
+            act.min_infinite == 0 || (act.min_infinite == 1 && std::isinf(own_min));
+        const bool rest_max_finite =
+            act.max_infinite == 0 || (act.max_infinite == 1 && std::isinf(own_max));
+        const double rest_min =
+            act.min_infinite == 0 ? act.min_value - a * own_min : act.min_value;
+        const double rest_max =
+            act.max_infinite == 0 ? act.max_value - a * own_max : act.max_value;
+        if (std::isfinite(hi) && rest_min_finite) {
+          const double t = (hi - rest_min) / a;
+          if (a > 0.0) row_gives_hi = t; else row_gives_lo = t;
+        }
+        if (std::isfinite(lo) && rest_max_finite) {
+          const double t = (lo - rest_max) / a;
+          if (a > 0.0) row_gives_lo = t; else row_gives_hi = t;
+        }
       }
+      // A bound that the row already keeps x_j away from is not a bound at all.
+      // Each side is judged against its own bound's scale: taking one tolerance
+      // for both lets an infinite row_gives_hi make the tolerance infinite and
+      // every bound look open, which is a wrong answer rather than a missed
+      // reduction.
+      const bool open_above =
+          std::isinf(w.cup[sz(j)]) ||
+          row_gives_hi <= w.cup[sz(j)] + w.tol * scale_of(w.cup[sz(j)]);
+      const bool open_below =
+          std::isinf(w.clo[sz(j)]) ||
+          row_gives_lo >= w.clo[sz(j)] - w.tol * scale_of(w.clo[sz(j)]);
+
+      // Which of the row's bounds the substitution can stand on. An equality
+      // hands one over; an inequality has to earn it by the dual argument in
+      // the header, which holds when the objective's push on x_j is blocked by
+      // this row and by nothing else.
+      double rhs = 0.0;
+      bool have_rhs = false;
+      bool from_inequality = false;
+      if (std::isfinite(lo) && std::isfinite(hi) &&
+          std::fabs(hi - lo) <= w.tol * scale_of(hi)) {
+        rhs = lo;
+        have_rhs = true;
+      } else if (opt.inequality_column_singletons && w.cost[sz(j)] != 0.0) {
+        // Minimising: a negative cost pushes x_j up, a positive one down. The
+        // row's activity follows that push when a > 0 and opposes it when
+        // a < 0, so those two signs together pick the side that goes tight.
+        const bool push_up = w.cost[sz(j)] < 0.0;
+        const double side = (push_up == (a > 0.0)) ? hi : lo;
+        if ((push_up ? open_above : open_below) && std::isfinite(side)) {
+          rhs = side;
+          have_rhs = true;
+          from_inequality = true;
+        }
+      }
+      if (!have_rhs) continue;
+
+      const bool implied_free = open_above && open_below;
+
+      // Where the column's bounds go once it is not there to carry them.
+      // cl <= (b - rest)/a <= cu becomes a pair of bounds on the rest of the
+      // row, and which of the two is the lower swaps with the sign of a - which
+      // is why they are sorted rather than assigned.
+      double new_lo = -kInf, new_hi = kInf;
+      if (!implied_free) {
+        const double from_upper = std::isinf(w.cup[sz(j)])
+                                      ? (a > 0.0 ? -kInf : kInf)
+                                      : rhs - a * w.cup[sz(j)];
+        const double from_lower = std::isinf(w.clo[sz(j)])
+                                      ? (a > 0.0 ? kInf : -kInf)
+                                      : rhs - a * w.clo[sz(j)];
+        new_lo = std::fmin(from_upper, from_lower);
+        new_hi = std::fmax(from_upper, from_lower);
+        // A bound this large is not information, it is arithmetic noise - the
+        // same argument max_new_finite_bound already makes about a column's
+        // bounds, applied to the row bound this creates. It also caps how much
+        // precision lo - a*cu can lose to cancellation, and the amount lost is
+        // what a solve of the reduced model would then hand back as a column
+        // bound violation after postsolve. Declining is the only safe answer:
+        // widening the row instead would let x_j out of its own bounds.
+        if ((std::isfinite(new_lo) && std::fabs(new_lo) > w.max_new_finite) ||
+            (std::isfinite(new_hi) && std::fabs(new_hi) > w.max_new_finite)) {
+          ++w.counts->slack_singletons_declined;
+          continue;
+        }
+      }
+
+      if (implied_free ? !opt.free_column_singletons
+                       : !opt.slack_column_singletons)
+        continue;
 
       std::vector<PostsolveStack::Term> terms;
       for (Int e = w.a->row_begin(row); e < w.a->row_end(row); ++e) {
@@ -703,18 +813,33 @@ bool scan_columns(Workspace& w, const PresolveOptions& opt, bool allow_removal) 
         terms.push_back({k, w.a->value()[sz(e)]});
       }
       // x_j = (b - sum_k a_k x_k) / a, so the objective loses c_j x_j and gains
-      // a constant plus a correction on every other column of the row.
+      // a constant plus a correction on every other column of the row. That
+      // part is the same whether the row goes or stays - the substitution is
+      // one substitution, and only what it leaves behind differs.
       const double cj = w.cost[sz(j)];
       if (cj != 0.0) {
-        w.cost_offset += cj * lo / a;
+        w.cost_offset += cj * rhs / a;
         for (const PostsolveStack::Term& t : terms)
           w.cost[sz(t.col)] -= cj * t.coefficient / a;
       }
-      w.stack->record_singleton(j, a, lo, std::move(terms));
-      w.stack->record_row_from_free_singleton(row, j, a);
-      ++w.counts->free_column_singletons;
-      kill_col(w, j);
-      kill_row(w, row);
+      w.stack->record_singleton(j, a, rhs, std::move(terms));
+      if (from_inequality) ++w.counts->inequality_column_singletons;
+
+      if (implied_free) {
+        // The new row bounds could not bind, so the row carries nothing and
+        // goes with the column.
+        w.stack->record_row_from_free_singleton(row, j, a);
+        ++w.counts->free_column_singletons;
+        kill_col(w, j);
+        kill_row(w, row);
+      } else {
+        // The row stays and takes over the column's bounds.
+        w.stack->record_row_from_slack_singleton(row, j, a);
+        ++w.counts->slack_column_singletons;
+        kill_col(w, j);
+        w.rlo[sz(row)] = new_lo;
+        w.rup[sz(row)] = new_hi;
+      }
       changed = true;
       continue;
     }
@@ -1208,13 +1333,16 @@ std::string format_presolve(const PresolveResult& result) {
       "removed by    empty row %d, singleton row %d, redundant row %d,\n"
       "              forcing row %d, duplicate row %d,\n"
       "              fixed column %d, empty column %d, free singleton %d,\n"
+      "              slack singleton %d (%d from an inequality),\n"
       "              doubleton equation %d, dual fixing %d\n"
       "bounds cut    %d  (%d were infinite before, largest now %.3e)\n",
       to_string(result.status).c_str(), result.original_rows, rows,
       result.original_cols, cols, result.original_nnz, nnz, c.rounds,
       result.seconds, c.empty_rows, c.singleton_rows, c.redundant_rows,
       c.forcing_rows, c.duplicate_rows, c.fixed_columns, c.empty_columns,
-      c.free_column_singletons, c.doubleton_equations, c.dual_fixed_columns,
+      c.free_column_singletons, c.slack_column_singletons,
+      c.inequality_column_singletons,
+      c.doubleton_equations, c.dual_fixed_columns,
       c.bounds_tightened,
       c.bounds_made_finite,
       c.largest_new_finite_bound);

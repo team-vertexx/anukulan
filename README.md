@@ -21,7 +21,7 @@ HiGHS appears in this repository exactly once: as the thing we benchmark
 | | what | where |
 |---|---|---|
 | **Reader** | MPS free and fixed format, LP and QP (Maros–Meszaros QPS) | `src/sankhya/mps_reader.cpp` |
-| **Presolve** | 10 reductions + postsolve, including the dual | `src/sankhya/presolve.cpp` |
+| **Presolve** | 12 reductions + postsolve, including the dual | `src/sankhya/presolve.cpp` |
 | **First-order LP** | PDHG / PDLP with restarts, Halpern, feasibility polishing | `src/sankhya/pdhg.cpp` |
 | **GPU** | CUDA backend for the first-order method | `src/sankhya/cuda_backend.cu` |
 | **Simplex** | revised primal *and* dual, sparse LU, Devex, steepest edge | `src/sankhya/simplex.cpp` |
@@ -37,7 +37,9 @@ estimated.
 - **Reader** — matches HiGHS on all 88 Netlib instances, 1.4–1.5× faster
 - **Simplex** — primal 16/16 and dual 16/16 against published Netlib optima
 - **First-order** — 76/88 Netlib published optima at `--tol=1e-8`
-- **Presolve** — removes 14.0% of rows, 15.4% of columns; 1.56× geomean speedup
+- **Presolve** — removes 23.3% of Netlib rows and 20.9% of its columns, and
+  29.7% of the refinery model's columns, where it previously removed none.
+  1.36× fewer simplex iterations; the MILP tree is a separate story
 - **MILP** — 5 of 7 MIPLIB instances exact; `gen-ip054` 0.330%, `mas76` 0.562%
 - **QP** — 21 of the 24 smallest Maros–Meszaros instances
 - **GPU (Tesla T4)** — 2.70×–7.09× on solve time over the same algorithm on CPU
