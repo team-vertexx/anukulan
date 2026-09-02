@@ -1,17 +1,12 @@
-# sankhya simplex data/netlib/degen3.mps --presolve
-# 200,000 iterations (limit), 145.5 s, 3,991 refactorizations
-# 22391 samples at top of stack, 30 s window
- 66.4%   14862  sankhya::LuFactor::factorize(sankhya::SparseMatrix const&, std::vector<int> const&, sankhya:
-  6.7%    1506  sankhya::solve_simplex(sankhya::StandardLp const&, sankhya::SimplexOptions const&)  (in sank
-  4.9%    1086  sankhya::LuFactor::btran(std::vector<double>*) const  (in sankhya)
-  4.6%    1021  sankhya::LuFactor::ftran(std::vector<double>*) const  (in sankhya)
-  3.2%     711  _platform_memmove  (in libsystem_platform.dylib)
-  2.6%     583  sankhya::SimplexBasis::compute_primal(sankhya::LogicalForm const&, std::vector<double>*) con
-  2.1%     465  sankhya::SimplexBasis::pivot_row(sankhya::LogicalForm const&, int, std::vector<double>*) con
-  2.0%     452  sankhya::SimplexBasis::compute_duals(sankhya::LogicalForm const&, std::vector<double>*, std:
-  1.3%     292  sankhya::LuFactor::factorize(sankhya::SparseMatrix const&, std::vector<int> const&, sankhya:
-  1.3%     292  std::__introsort<std::_ClassicAlgPolicy, sankhya::solve_simplex(sankhya::StandardLp const&, 
-  0.9%     194  _xzm_xzone_malloc_tiny  (in libsystem_malloc.dylib)
-  0.7%     159  _xzm_free  (in libsystem_malloc.dylib)
-  0.6%     144  sankhya::SimplexBasis::ftran_column(sankhya::LogicalForm const&, int, std::vector<double>*) 
-  0.6%     142  sankhya::SimplexBasis::pivot(sankhya::LogicalForm const&, int, int, sankhya::VarStatus, std:
+# degen3 --presolve, WITH the ratio-test fix: optimal, 105,433 iters, 108.1 s, 2,089 refactorizations
+# 24437 samples, 30 s window
+ 65.7%   16052  sankhya::LuFactor::factorize(sankhya::SparseMatrix const&, std::vector<int> const&, sank
+  6.0%    1469  sankhya::solve_simplex(sankhya::StandardLp const&, sankhya::SimplexOptions const&)  (in 
+  5.7%    1381  sankhya::LuFactor::btran(std::vector<double>*) const  (in sankhya)
+  4.5%    1110  sankhya::LuFactor::ftran(std::vector<double>*) const  (in sankhya)
+  3.2%     794  _platform_memmove  (in libsystem_platform.dylib)
+  2.8%     675  sankhya::SimplexBasis::compute_primal(sankhya::LogicalForm const&, std::vector<double>*)
+  2.5%     607  sankhya::SimplexBasis::compute_duals(sankhya::LogicalForm const&, std::vector<double>*, 
+  1.9%     468  sankhya::SimplexBasis::pivot_row(sankhya::LogicalForm const&, int, std::vector<double>*)
+  1.6%     403  std::__introsort<std::_ClassicAlgPolicy, sankhya::solve_simplex(sankhya::StandardLp cons
+  1.1%     263  sankhya::LuFactor::factorize(sankhya::SparseMatrix const&, std::vector<int> const&, sank

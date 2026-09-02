@@ -1025,12 +1025,12 @@ repository has been making.
 
 **Pricing is not where the time is.** The obvious thing to thread in a simplex
 is the pricing pass, since it walks every nonbasic column. On `degen3` — the
-slowest Netlib instance here — `compute_duals` is **2.0%** of samples. Threading
-2.0% perfectly and paying a barrier for it is a loss, not a win.
+slowest Netlib instance here — `compute_duals` is **2.5%** of samples. Threading
+2.5% perfectly and paying a barrier for it is a loss, not a win.
 
 **The time is in the factorisation, which does not thread.** A sampling profile
-of `degen3 --presolve` puts **66.4%** of samples in `LuFactor::factorize`, and
-67.7% counting both of the symbols it compiles to.
+of `degen3 --presolve` puts **65.7%** of samples in `LuFactor::factorize`,
+66.8% counting both of the symbols it compiles to.
 Markowitz-ordered sparse LU with threshold pivoting is a sequential algorithm:
 each elimination step chooses its pivot from what the previous step left behind.
 Parallelising it is a research problem, not an afternoon.
@@ -1044,12 +1044,17 @@ than left standing — and re-argued in the direction of *doing* it, since a
 refactorisation every fifty pivots is 3,991 of them here and two thirds of the
 run. `bench/results/profile_degen3.txt` is the profile.
 
-Recorded alongside: on this baseline `degen3 --presolve` reaches the 200,000
-iteration limit in 145.5 s and refactorises 3,991 times, where §5 documents
-105,433 iterations and 66.2 s. The simplex is another stream's file and the
-discrepancy may already be fixed there; it is written down because both numbers
-above were measured on the same run and the second one is only meaningful with
-the first beside it.
+**Re-taken after the ratio-test fix, and the conclusion survives it.** The first
+version of this measurement was made before that fix, where `degen3` reached the
+200,000 iteration limit in 145.5 s and refactorised 3,991 times — a run that
+disagreed with §5 and made the profile alongside it hard to trust. On the fixed
+base the instance solves: **optimal, 105,433 iterations, 108.1 s, 2,089
+refactorisations**, and 105,433 is exactly what §5 documents. So the
+disagreement was the bug, and it is gone.
+
+What matters here is that the profile did not move with it. `factorize` was
+66.4% before and is 65.7% now; the fix changed how many iterations the instance
+takes, not where the time inside one goes.
 
 ### 10.8 The branch and bound tree, measured and not attempted
 
