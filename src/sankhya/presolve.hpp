@@ -67,6 +67,122 @@ struct PresolveOptions {
   bool free_column_singletons = true;  // in one equality row, bounds not binding
   bool bound_tightening = true;    // interval arithmetic on each row
 
+  // The same column singleton when its bounds DO bind. free_column_singletons
+  // above needs the column to be implied free before it will substitute, and
+  // that requirement is why it almost never fires: over the three instance sets
+  // here, 36,771 columns sit alone in an equality row and only 700 of them are
+  // implied free. The other 36,071 were being declined.
+  //
+  // They do not have to be. A column alone in one row is that row's slack, and
+  // the substitution is exact whether or not its bounds bind - what changes is
+  // only what is left behind. For a*x_j + rest = b with x_j in [cl, cu]:
+  //
+  //     x_j = (b - rest) / a                        exactly, always
+  //     cl <= (b - rest)/a <= cu   <=>   b - a*cu <= rest <= b - a*cl   (a > 0)
+  //
+  // so the column's bounds become the row's, the column goes, and the row
+  // stays. This is a change of variables, not a claim that some solutions can
+  // be discarded, which puts it in a different risk class from every reduction
+  // that fixes a column: there is no case it can get wrong and still look
+  // right, because the map between the two feasible sets is a bijection.
+  //
+  // free_column_singletons is the special case where the new row bounds cannot
+  // bind, and it is worth more - it takes the row as well - so it is still
+  // tried first and this one only picks up what it declines.
+  //
+  // The dual inverts exactly. Writing y for the original row dual and y' for
+  // the reduced one, stationarity on any other column k of the row reads
+  //     c_k - c_j*a_rk/a - sum_i A_ki y'_i  =  c_k - sum_i A_ki y_i
+  // which holds for y_r = y'_r + c_j/a and y unchanged elsewhere. So this does
+  // not trip dual_is_exact(), and the recovery is an accumulate rather than an
+  // assignment, which is what lets it compose with a later removal of the same
+  // row.
+  //
+  // On, measured against the same run with it off. This rule removes no rows
+  // itself, so the row column below is what removing columns then exposes:
+  //
+  //                    rows removed      columns removed    nonzeros removed
+  //   Netlib           21.58 -> 22.54     12.98 -> 20.54     16.16 -> 17.67
+  //   MIPLIB            6.78 ->  6.93      4.41 ->  6.15      6.70 ->  7.18
+  //   refinery          0.00 ->  0.00      0.00 -> 29.67      0.00 -> 11.90
+  //
+  // The refinery line is the reason this was built. Presolve removed nothing at
+  // all from that model before - not one row, not one column, not one nonzero -
+  // because its 1,296 equality rows leave no slack for a forcing or redundant
+  // rule to find, it has no doubleton equations at all, and every one of its
+  // 1,304 column singletons has a finite lower bound and so failed the
+  // implied-free test. The whole of that model's reduction is this one rule.
+  //
+  // Netlib's row figure moves for a second reason worth separating out. The
+  // implied-free test that decides between this rule and the one above was
+  // rewritten to read the row's implied bounds on the column directly, which
+  // also lets it fire when the row's activity is infinite in one direction and
+  // that direction is the column's own. That alone - with this rule still off -
+  // takes free column singletons on Netlib from 1,052 to 2,761 and rows removed
+  // from 19.45% to 21.58%, because a free singleton takes its row with it. With
+  // this rule on as well the free count reaches 3,385, the extra 624 being
+  // singletons that only come free once a substitution has shortened their row.
+  // MIPLIB is unmoved by the test alone: 6.78% either way.
+  bool slack_column_singletons = true;
+
+  // The same column singleton again, now in a row that is not an equality.
+  //
+  // Both rules above need an equality to stand on, because that is what pins
+  // x_j to a value the objective can be rewritten around. An inequality does
+  // not pin it - but a dual argument often does. x_j is in this row and nowhere
+  // else, so the only two things that can stop the objective pushing it are
+  // this row and its own bound in the direction of the push. If that own bound
+  // is infinite, the row is the only obstacle left, and so the row is tight at
+  // every optimal solution: were it slack, x_j could move another step and the
+  // objective would improve. A row that is tight at every optimum can be read
+  // as an equality, and then the substitution above applies unchanged.
+  //
+  // Which side it is tight at follows the sign of the push. Minimising, a
+  // negative cost pushes x_j up and a positive one down, and the row's activity
+  // follows or opposes that according to the sign of a - so it is the row's
+  // upper bound that binds when those agree and the lower when they do not.
+  //
+  // This is the one rule here whose conclusion is about optimality rather than
+  // feasibility, so it is worth being explicit that nothing is discarded: the
+  // row is tight at *every* optimal solution, not merely at one of them, so the
+  // whole optimal face survives. In the language of Cederberg and Boyd (2026)
+  // this is weak dual exploration, and it is the second of the two fast rules
+  // in their table that were not here.
+  //
+  // The recovered dual keeps the sign an inequality requires, which is not
+  // obvious and is the reason this is safe to combine with the rule above. For
+  // a <= row pushed at its upper bound with a > 0 and c_j < 0, the reduced row
+  // is still a <= row, so the reduced model's own dual feasibility gives
+  // y'_r <= 0, and y_r = y'_r + c_j/a <= c_j/a < 0. The mirror cases follow the
+  // same way.
+  //
+  // On, and the measurement is the reason it is worth being explicit that this
+  // is the smallest of the three changes rather than the cleverest:
+  //
+  //                    rows removed      columns removed    nonzeros removed
+  //   Netlib           22.54 -> 23.30     20.54 -> 20.91     17.67 -> 18.73
+  //   MIPLIB            6.93 ->  7.04      6.15 ->  6.30      7.18 ->  7.24
+  //   refinery          0.00 ->  0.00     29.67 -> 29.67     11.90 -> 11.90
+  //
+  // 644 columns on Netlib and 116 on MIPLIB, and nothing at all on the refinery
+  // model, whose column singletons are already in equality rows and so never
+  // reach this path.
+  //
+  // Two things hold the count down, and both are the rule working rather than
+  // failing. Dual fixing already takes the case where the objective pushes the
+  // column *away* from the row, since that is a column with no lock in the
+  // direction it wants to go. And an integer column cannot use this argument at
+  // all - the step that proves the row tight is an arbitrarily small one, and a
+  // whole number cannot take it - which is most of why MIPLIB, with 86,511
+  // binary columns out of 152,174, gets so little from it.
+  //
+  // The static count says 3,421 column singletons sit in Netlib inequality rows
+  // and 17,551 in MIPLIB ones, so 644 and 116 look like a poor conversion. They
+  // are not: those two exclusions account for nearly all of the difference, and
+  // what is left is the rule declining rows where the push is blocked by the
+  // column's own bound instead.
+  bool inequality_column_singletons = true;
+
   // Dual fixing. Count, for each column, the constraints that moving it in each
   // direction could break - its "locks". A column that can be pushed down
   // without breaking anything, and whose objective does not object, belongs at
@@ -242,6 +358,11 @@ class PostsolveStack {
   // the row's own dual is recovered from.
   void record_row_from_doubleton(Int row, Int column, double coefficient,
                                  std::vector<Term> column_rows);
+  // A row that kept its place but lost the column that was alone in it. The
+  // row's dual moves by c_j/a and nothing else changes, so this adds to
+  // whatever the row's dual already is rather than replacing it - which is what
+  // makes it safe for the row to be removed by some later reduction as well.
+  void record_row_from_slack_singleton(Int row, Int column, double coefficient);
   void record_unrecoverable_row(Int row);
   void set_row_dimensions(Int original_rows, std::vector<Int> reduced_row_to_original);
 
@@ -287,7 +408,7 @@ class PostsolveStack {
 
   // How a removed row's dual is recovered.
   enum class RowKind { kZero, kFreeSingleton, kSingleton, kDoubleton,
-                       kUnrecoverable };
+                       kSlackSingleton, kUnrecoverable };
   struct RowEntry {
     RowKind kind = RowKind::kZero;
     Int row = 0;
@@ -321,6 +442,18 @@ struct PresolveCounts {
   Int fixed_columns = 0;
   Int empty_columns = 0;
   Int free_column_singletons = 0;
+  Int slack_column_singletons = 0;
+  // Of the slack singletons, those whose row was an inequality read as an
+  // equality by the dual argument rather than being one already.
+  Int inequality_column_singletons = 0;
+  // Column singletons the substitution turned down because the row bound it
+  // would have created was too large to trust. Counted rather than ignored so
+  // the cap can be seen to be doing something, or seen not to be - and on
+  // Netlib, MIPLIB and the refinery model it is zero, so on these three sets it
+  // costs nothing and has proved nothing. It stays because the case it guards
+  // against is a wrong answer rather than a missed reduction, and a guard whose
+  // absence is only noticed on the instance that breaks is not worth the trade.
+  Int slack_singletons_declined = 0;
   Int doubleton_equations = 0;
   Int dual_fixed_columns = 0;
   Int coefficients_tightened = 0;

@@ -22,7 +22,7 @@ HiGHS appears in this repository exactly once: as the thing we benchmark
 | | what | where |
 |---|---|---|
 | **Reader** | MPS free and fixed format, LP and QP (Maros–Meszaros QPS) | `src/sankhya/mps_reader.cpp` |
-| **Presolve** | 11 reductions + postsolve, including the dual | `src/sankhya/presolve.cpp` |
+| **Presolve** | 12 reductions + postsolve, including the dual | `src/sankhya/presolve.cpp` |
 | **First-order LP** | PDHG / PDLP with restarts, Halpern, feasibility polishing | `src/sankhya/pdhg.cpp` |
 | **GPU** | CUDA backend for the first-order method | `src/sankhya/cuda_backend.cu` |
 | **Simplex** | revised primal *and* dual, sparse LU, Devex, steepest edge | `src/sankhya/simplex.cpp` |
@@ -44,8 +44,10 @@ estimated.
   substantially and turns six instances that returned no answer at all
   (`degen3`, `stocfor2`, `woodw`, `scsd8`, `wood1p`, `modszk1`) into correct ones
 - **First-order** — 76/88 Netlib published optima at `--tol=1e-8`
-- **Presolve** — removes ~19% of rows and ~12% of columns, without changing an
-  answer, and recovers duals as well as primals
+- **Presolve** — removes 23.3% of Netlib rows and 20.9% of its columns, and
+  29.7% of the refinery model's columns, where it previously removed none.
+  1.36× fewer simplex iterations, without changing an answer, and it recovers
+  duals as well as primals
 - **MILP** — on 70 MIPLIB instances at a 15 s limit, **45 end with a feasible
   solution and 7 prove optimality**, against 41 and 5 before this work. Twenty-five
   still find nothing at all, which is where the remaining work is

@@ -28,7 +28,7 @@ of one:
 | GPU | ~55 | real 2.7–7× measured, but not cuPDLP-C level |
 | QP | ~50 | OSQP's core is here; no AMD ordering, thin regularisation strategy |
 | Simplex | ~55 | 78/88 Netlib correct and none wrong, and it now takes a basis from the first-order method. Still no Forrest–Tomlin, no bound-flipping ratio test, no hypersparsity |
-| Presolve | ~38 | 10 reductions; HiGHS/PaPILO have roughly 25 |
+| Presolve | ~50 | 12 reductions, and every fast explorer PaPILO and PSLP list bar one |
 | Infrastructure | ~70 | good tests, no CI, no packaging |
 | **MILP** | **~40** | **still the weak leg — see below.** Time limits are now actually enforced, a cut round has to pay for itself before it starts, node selection is best-estimate with plunging rather than depth first, and RINS is in. Missing: conflict analysis, restarts, clique tables, symmetry detection, node presolve, a real cut pool |
 
@@ -125,6 +125,214 @@ Round trip over all 88 instances, presolved answer against plain, `--tol=1e-6`:
 python3 bench/verify_presolve.py --tol=1e-6 --abs-tol=1e-6 --check-feasibility
 python3 bench/verify_presolve.py --tol=1e-6 --abs-tol=1e-6 --extra=--presolve-no-doubletons
 build/sankhya presolve data/netlib/80bau3b.mps --no-dual-fixing
+```
+
+### Column singletons: what the three rules removed
+
+A column alone in one row is the most common reducible structure in all three
+instance sets, and until this work only the narrowest version of it was taken -
+the one needing the column to be implied free. Three changes: a substitution
+that does not need implied-freeness (the column's bounds become the row's), a
+dual rule that reads an inequality as an equality when the objective's push on
+the column is blocked only by that row, and a rewritten implied-free test.
+
+Whole-set totals, removed over original, presolve before this work against after:
+
+| | rows | columns | nonzeros |
+|---|---|---|---|
+| **Netlib** (88) | 19.45% → **23.30%** | 11.61% → **20.91%** | 11.99% → **18.73%** |
+| **MIPLIB** (102) | 6.78% → **7.04%** | 4.41% → **6.30%** | 6.70% → **7.24%** |
+| **refinery** | 0.00% → 0.00% | 0.00% → **29.67%** | 0.00% → **11.90%** |
+
+```bash
+python3 bench/presolve_survey.py --set=netlib
+python3 bench/presolve_survey.py --set=refinery
+```
+
+**The refinery line is the result.** Presolve removed *nothing* from the problem
+statement's own model before this - not one row, not one column, not one
+nonzero. The cause was specific rather than general: its 1,296 equality rows
+leave no slack for a forcing or redundant rule to find, it has no doubleton
+equations at all, and all 1,304 of its column singletons have a finite lower
+bound, which failed the implied-free test every time.
+
+Attribution across the three changes, since they are separable:
+
+| | Netlib rows | Netlib cols | refinery cols |
+|---|---|---|---|
+| before | 19.45% | 11.61% | 0.00% |
+| + rewritten implied-free test | 21.58% | 12.98% | 0.00% |
+| + slack column singleton | 22.54% | 20.54% | **29.67%** |
+| + inequality column singleton | 23.30% | 20.91% | 29.67% |
+
+The third is the smallest and is recorded as such: 644 columns on Netlib, 116 on
+MIPLIB, none at all on the refinery model. Two things hold it down and both are
+the rule working rather than failing - dual fixing already takes the case where
+the objective pushes a column *away* from its row, and an integer column cannot
+use the argument at all, which is most of why MIPLIB with its 86,511 binaries
+gets so little.
+
+### Does the solve that follows get faster
+
+The reduction is the easy half. A presolve that removes more and solves slower
+is not an improvement.
+
+**Simplex, 88 Netlib instances, presolve off against on:**
+
+| | |
+|---|---|
+| geomean iterations saved | **1.36×** over 75 instances both sides finish |
+| fewer iterations | 52 |
+| more iterations | 9 |
+| unchanged | 14 |
+| best / worst | 30.94× / 0.13× |
+| solved only with presolve | 3 |
+| solved only without | 4 |
+
+```bash
+python3 bench/presolve_effect.py --mode=simplex --set=netlib
+```
+
+The spread is the finding, not the mean. `woodw` goes 200,000 iterations to
+1,485 and `stocfor2` 200,000 to 3,648 - both were hitting the iteration limit
+and now finish. `tuff` goes 5,933 to 44,939 the other way. Reporting 1.36× alone
+would hide both ends.
+
+That presolve loses four instances and gains three is worth stating plainly: on
+the simplex this is close to a wash in *count*, and a clear win in work done.
+
+**Branch and bound, nodes.** Measured on the tree as it stands - best-estimate
+node selection with plunging - with a thirty second limit, counting nodes so
+load does not matter:
+
+| instance | off | on | |
+|---|---|---|---|
+| p0201 | 989 | **358** | 2.76× better |
+| flugpl | 274 | 262 | 1.05× better |
+| small_milp | 167 | 161 | 1.04× better |
+| gt2 | 307 | **399** | 1.3× worse |
+| khb05250 | 55 | **158** | 2.9× worse |
+
+Geomean 0.94× over the four MIPLIB instances: **roughly neutral, two better, two
+worse, no blow-up.** On that evidence presolve still should not go on by default
+in `command_milp`, but "neutral and unpredictable per instance" is a different
+reason from the one recorded there.
+
+*Correcting an earlier measurement of my own.* I first took these against the
+depth-first tree and reported gt2 at 1,244 → 45,811 nodes, a 37× blow-up, and a
+geomean of 0.62×. That number is real but it is about depth-first search, not
+about presolve: depth first commits to a subtree and never revisits the choice,
+so a presolve that reshapes the branching order can send it somewhere bad and
+keep it there. Best estimate leaves and comes back. Forcing the old order back
+with `--depth-first` on the current binary reproduces the blow-up at 847 →
+1,388, which is what pins the cause on node selection rather than on the
+reduction. The 37× should not be quoted.
+
+```bash
+python3 bench/presolve_effect.py --mode=milp --set=miplib --limit=30 \
+    --instances flugpl gt2 khb05250 p0201
+```
+
+**A trap this instance set walked into.** Before `propagate_bounds` had its
+tolerances scaled, `small_milp` with presolve *off* returned 6,902,342,470.68
+and called it optimal, against a true optimum of 7,246,146,141.83 - a 4.7% error
+reported as a proof. With presolve *on* the same binary returned the optimum to
+5.8e-13. Presolve was not fixing anything; it was removing 212 columns and so
+changing what the faulty interval arithmetic ever looked at.
+
+Two things follow. A node count compared between a run that is right and a run
+that is wrong measures nothing, so any MILP presolve table taken before that fix
+is void - including the first version of the one above. And `small_milp` is the
+instance that catches this class of bug: its activities reach 1e9, so an
+absolute epsilon anywhere in a bound or activity comparison falls under the
+noise floor there. MIPLIB cannot catch it, because 0/±1 instances never get near
+it. Any presolve rule that compares an activity against a fixed tolerance should
+be run against this instance before it is believed.
+
+### The refinery model, end to end
+
+The one number the problem statement cares about, on `data/refinery/refinery.mps`
+through the simplex:
+
+| | objective | iterations |
+|---|---|---|
+| plain | 24260622668.873257 | 4,378 |
+| presolved | 24260622668.873268 | **3,202** |
+
+Same answer to 4.5e-16 relative, which is machine precision on a number of that
+size, and **1.37× fewer pivots**. Presolve removed nothing from this model
+before this work, so both halves of that line are new.
+
+```bash
+build/sankhya simplex data/refinery/refinery.mps --presolve
+```
+
+### A check that failed for the wrong reason, and what it taught
+
+Running the same on/off comparison over MIPLIB through the simplex reports four
+instances - `beasleyC1`, `beasleyC2`, `beasleyC3`, `beavma` - where the presolved
+objective differs from the plain one. On `beasleyC3` it is 40.43 against 152.05.
+That reads exactly like presolve cutting off the optimum, which is the failure
+this component is most able to produce.
+
+It is not. `beasleyC3` has 1,250 binary columns, and presolve is entitled to use
+that: it rounds integer bounds, and it rounds the implied bounds that tightening
+derives. The LP relaxation of the presolved model is therefore *legitimately*
+tighter than the relaxation of the original, and 152.05 is the better root bound
+rather than a wrong answer. `--presolve-no-bound-tightening` reproduces 40.43
+exactly, which is what pins it.
+
+The check was wrong, not the reduction. **An LP relaxation of a model with
+integer columns cannot be used to test that presolve preserves the answer**,
+because the two runs are not solving the same problem. `presolve_effect.py` now
+skips that comparison when the file declares any integer column and says how
+many it skipped. Recorded because the first version of that harness would have
+reported a correct presolve as having corrupted eight instances, and the number
+it printed on beasleyC3 - a 3.7× objective change - is alarming enough to have
+been believed.
+
+The fix needed fixing too, and the second bug is the more useful one. Detecting
+integrality by looking for a `MARKER`/`INTORG` block finds nothing in five of
+those eight: `beasleyC1`, `beasleyC2`, `beasleyC3`, `beavma` and `r50x360`
+declare their columns binary with `BV` in `BOUNDS` and have no `INTORG` anywhere
+in the file. A check that only knows about `INTORG` therefore still reports them
+as corrupted, having been written specifically to stop doing that.
+
+Over the whole set, LP relaxations through the simplex: **1.12× fewer iterations
+over 96 instances**, 33 fewer, 7 more, 56 unchanged, and no answer changed on any
+instance where the comparison is valid.
+
+```bash
+python3 bench/presolve_effect.py --mode=simplex --set=miplib --limit=30
+```
+
+### dfl001, and why a stronger presolve can stop a first-order solver early
+
+One instance converges plain and not presolved. `dfl001` at `--tol=1e-6` returns
+`status: optimal` with an objective 0.08% above the published optimum, and every
+violation is tiny - row 9.9e-07, bound 2.8e-07 - so the point is feasible and
+merely not optimal.
+
+**The reduction is not wrong.** At `--tol=1e-10` the same reduced model reaches
+11,266,394 against a published 11,266,400, a relative error of 5e-07. The right
+answer is in the reduced model; the solver stops before it gets there.
+
+The cause is the one already written up in `sankhya_cli.cpp` for rows, now
+reaching through columns. Presolve changes the quantities the *relative*
+convergence test divides by, so the same `--tol` is a weaker requirement on the
+reduced model than on the original - and this work removes 1,390 columns from
+dfl001 where the old presolve removed 51, which moves that normaliser much
+further. It is a first-order-method problem specifically: the simplex terminates
+on an exact optimality test and is not exposed.
+
+Over all 88 instances the count is unchanged at **78/88** reaching the published
+optimum with presolve on. On the twelve instances either version flags, the new
+presolve is better on five, worse on one (dfl001), and the same on six; the rest
+hit the 1,000,000 iteration limit on both sides and are first-order convergence
+failures rather than presolve results.
+
+```bash
+python3 bench/verify_presolve.py --tol=1e-6 --abs-tol=1e-6 --check-feasibility
 ```
 
 ### Shadow prices

@@ -83,7 +83,7 @@ sends it to −∞. Default matches HiGHS.
 
 ## 4. Presolve (`presolve.cpp`, `presolve.hpp`)
 
-Ten reductions, applied in rounds until nothing fires:
+Twelve reductions, applied in rounds until nothing fires:
 
 | reduction | what it does |
 |---|---|
@@ -95,6 +95,8 @@ Ten reductions, applied in rounds until nothing fires:
 | fixed column | `lower == upper` — substitute the value out |
 | empty column | in no row, so the objective decides it |
 | free column singleton | in one equality row, bounds not binding — solve for it |
+| **slack column singleton** | in one equality row, bounds binding — its bounds become the row's |
+| **inequality column singleton** | alone in a row the objective pushes it against, which makes that row tight |
 | bound tightening | interval arithmetic on each row |
 | **doubleton equation** | `a·xi + b·xj = c` — substitute one column out |
 
@@ -118,12 +120,49 @@ records how its dual is recovered:
 - `kDoubleton` — the eliminated column was implied free, so
   `y_r = (c_i − Σ_{k≠r} A_ki y_k) / a`, and the other rows' duals are unchanged
   by the substitution (proved in the header)
+- `kSlackSingleton` — the row kept its place and lost the column that was alone
+  in it, so `y_r = y'_r + c_j / a`. This one **accumulates** rather than
+  assigning, which is what lets the same row also be removed by a later
+  reduction: that recovery has already run by the time this one does, and the
+  two compose
 - `kUnrecoverable` — forcing and duplicate rows; the dual is set to zero and
   `dual_is_exact()` returns false
 
 `dual_is_exact()` is the honesty valve. Bound tightening also trips it, because
 a tightened bound that turns out active changes the dual. The CLI prints
 `# duals exact` or `# duals approximate` accordingly.
+
+### The three column-singleton rules, and why there are three
+
+A column alone in one row is the most common reducible structure in every
+instance set here — 34,159 of Netlib's 180,296 columns, and 1,304 of the
+refinery model's 4,368. What can be done with one depends on what stops it
+moving.
+
+**Free column singleton** needs the column *implied free*: the row and the other
+columns' bounds already confine it strictly inside its own. Then it has no
+active bound and no reduced cost, and substituting it out takes the row with it.
+Best case, and rare — 69 of Netlib's 30,738 column singletons in equality rows
+pass this on the original model.
+
+**Slack column singleton** drops that requirement. `a·x_j + rest = b` gives
+`x_j = (b − rest)/a` whatever the bounds are, and `cl ≤ x_j ≤ cu` becomes
+`b − a·cu ≤ rest ≤ b − a·cl`. The column's bounds move onto the row, the column
+goes, the row stays. This is a change of variables, not a claim that solutions
+can be discarded — the map between the two feasible sets is a bijection, which
+puts it in a different risk class from any reduction that fixes a column.
+
+**Inequality column singleton** covers a row that is not an equality, by a dual
+argument: if the objective's push on `x_j` is blocked only by this row, the row
+is tight at *every* optimal solution and can be read as an equality, after which
+the previous rule applies unchanged. The smallest of the three — 644 columns on
+Netlib, 116 on MIPLIB, none on the refinery model.
+
+The implied-free test choosing between the first two was rewritten to read the
+row's implied bounds on the column directly, which also lets it fire when the
+row's activity is infinite in one direction and that direction is the column's
+own. Worth 1,052 → 2,761 free singletons on Netlib by itself, and each takes a
+row with it.
 
 ### Why doubleton is special
 
