@@ -52,36 +52,62 @@ class CpuBackend final : public LinAlgBackend {
     return m;
   }
 
-  void primal_step(Int n, double tau, const double* x, const double* c,
-                   const double* kt_y, const double* lower, const double* upper,
-                   double* x_next, double* dx, double* x_bar) const override {
+  // The three lines that used to be three separate operations are written here
+  // in the order they used to run in - step, then reflection, then blend - and
+  // both are skipped when they are identity. That is not stylistic: it keeps
+  // this bit-identical to the sequence it replaces, so the iteration counts on
+  // the CPU do not move and the fusion can be judged on the GPU alone.
+  void primal_update(Int n, double tau, double gamma, double halpern,
+                     const double* x, const double* c, const double* kt_y,
+                     const double* lower, const double* upper,
+                     const double* anchor, double* x_out, double* dx,
+                     double* x_bar) const override {
     for (Int j = 0; j < n; ++j) {
       const std::size_t sj = sz(j);
-      double v = x[sj] - tau * (c[sj] - kt_y[sj]);
+      const double x_j = x[sj];
+      double v = x_j - tau * (c[sj] - kt_y[sj]);
       if (v < lower[sj]) v = lower[sj];
       if (v > upper[sj]) v = upper[sj];
-      x_next[sj] = v;
-      const double d = v - x[sj];
+      const double d = v - x_j;
       dx[sj] = d;
       x_bar[sj] = v + d;
+      double next = v;
+      if (gamma != 0.0) next += gamma * d;
+      if (anchor != nullptr) next = halpern * next + (1.0 - halpern) * anchor[sj];
+      x_out[sj] = next;
     }
   }
 
-  void dual_step(Int m, Int num_equalities, double sigma, const double* y,
-                 const double* q, const double* k_x_bar, const double* k_x,
-                 double* y_next, double* dy, double* k_dx) const override {
+  void dual_update(Int m, Int num_equalities, double sigma, double gamma,
+                   double halpern, const double* y, const double* q,
+                   const double* k_x_bar, const double* k_x, const double* anchor_y,
+                   const double* anchor_kx, double* y_out, double* dy, double* k_out,
+                   double* k_dx) const override {
     for (Int i = 0; i < m; ++i) {
       const std::size_t si = sz(i);
-      double v = y[si] + sigma * (q[si] - k_x_bar[si]);
+      const double y_i = y[si];
+      const double bar = k_x_bar[si];
+      const double kx = k_x[si];
+      double v = y_i + sigma * (q[si] - bar);
       if (i >= num_equalities && v < 0.0) v = 0.0;
-      y_next[si] = v;
-      dy[si] = v - y[si];
-      k_dx[si] = 0.5 * (k_x_bar[si] - k_x[si]);
-    }
-  }
+      const double d = v - y_i;
+      dy[si] = d;
+      const double kd = 0.5 * (bar - kx);
+      k_dx[si] = kd;
 
-  void advance_kx(Int m, const double* k_x_bar, double* k_x) const override {
-    for (Int i = 0; i < m; ++i) k_x[sz(i)] = 0.5 * (k_x_bar[sz(i)] + k_x[sz(i)]);
+      double next_y = v;
+      double next_k = 0.5 * (bar + kx);
+      if (gamma != 0.0) {
+        next_y += gamma * d;
+        next_k += gamma * kd;
+      }
+      if (anchor_y != nullptr) {
+        next_y = halpern * next_y + (1.0 - halpern) * anchor_y[si];
+        next_k = halpern * next_k + (1.0 - halpern) * anchor_kx[si];
+      }
+      y_out[si] = next_y;
+      k_out[si] = next_k;
+    }
   }
 
   void accumulate(Int n, double weight, const double* v,
@@ -92,11 +118,6 @@ class CpuBackend final : public LinAlgBackend {
   void scale_into(Int n, double weight, const double* sum,
                   double* out) const override {
     for (Int i = 0; i < n; ++i) out[sz(i)] = sum[sz(i)] / weight;
-  }
-
-  void blend(Int n, double a, double* z, double b,
-             const double* anchor) const override {
-    for (Int i = 0; i < n; ++i) z[sz(i)] = a * z[sz(i)] + b * anchor[sz(i)];
   }
 
   double weighted_norm_squared(Int n, Int m, const double* dx, const double* dy,
@@ -117,6 +138,67 @@ void LinAlgBackend::step_size_terms(Int n, Int m, const double* dx,
   // grow eta without bound.
   *interaction = std::fabs(dot(dy, k_dx, m));
   *movement = weighted_norm_squared(n, m, dx, dy, omega);
+}
+
+void LinAlgBackend::convergence_terms(Int n, Int m, const ConvergenceProblem& lp,
+                                      const double* x, const double* k_x,
+                                      const double* y, const double* kt_y,
+                                      ConvergenceTerms* out) const {
+  // The reference. Term for term and in the same order as evaluate_residual,
+  // because that is what makes the two agree exactly rather than nearly - and
+  // an unscaled residual that nearly agrees is a solver that stops in a
+  // different place on the two backends.
+  ConvergenceTerms t;
+
+  for (Int i = 0; i < m; ++i) {
+    const std::size_t si = sz(i);
+    const double scale = lp.row_scale[si];
+    const double row = scale != 0.0 ? k_x[si] / scale : k_x[si];
+    // Equality rows are violated in either direction; inequality rows only
+    // when the activity falls below the right-hand side.
+    const double violation =
+        (i < lp.num_equalities) ? (row - lp.q[si]) : std::fmin(row - lp.q[si], 0.0);
+    t.primal_sq += violation * violation;
+    t.primal_inf = std::fmax(t.primal_inf, std::fabs(violation));
+    t.q_dot_y += lp.q[si] * (scale * y[si]);
+  }
+
+  for (Int j = 0; j < n; ++j) {
+    const std::size_t sj = sz(j);
+    const double scale = lp.col_scale[sj];
+    const double product = scale != 0.0 ? kt_y[sj] / scale : kt_y[sj];
+    const double lambda = lp.c[sj] - product;
+
+    const bool has_lo = lp.lower[sj] > -kInf;
+    const bool has_hi = lp.upper[sj] < kInf;
+    double leftover = 0.0;
+    if (has_lo && has_hi) {
+      leftover = 0.0;  // a boxed variable absorbs any sign
+    } else if (has_lo) {
+      leftover = std::fmin(lambda, 0.0);
+    } else if (has_hi) {
+      leftover = std::fmax(lambda, 0.0);
+    } else {
+      leftover = lambda;  // free variables need a zero reduced cost
+    }
+    t.dual_sq += leftover * leftover;
+    t.dual_inf = std::fmax(t.dual_inf, std::fabs(leftover));
+
+    // Minimising lambda_j x_j over the variable's own interval picks whichever
+    // end the sign favours. The branch is on the sign and not on the bound
+    // because an absorbed value of zero against an infinite bound is the one
+    // combination that would produce a NaN.
+    const double absorbed = lambda - leftover;
+    if (absorbed > 0.0) {
+      t.bound_term += absorbed * lp.lower[sj];
+    } else if (absorbed < 0.0) {
+      t.bound_term += absorbed * lp.upper[sj];
+    }
+
+    t.c_dot_x += lp.c[sj] * (scale * x[sj]);
+  }
+
+  *out = t;
 }
 
 const LinAlgBackend& cpu_backend() {

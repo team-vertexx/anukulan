@@ -43,6 +43,49 @@ void reduced_costs(const StandardLp& lp, const std::vector<double>& y,
   for (std::size_t j = 0; j < lambda->size(); ++j) (*lambda)[j] = lp.c[j] - (*product)[j];
 }
 
+// The denominators of the relative convergence test: each residual is compared
+// against the natural scale of the data it is measured in, so a tolerance means
+// the same thing whether the numbers are barrels or fractions.
+//
+// They are properties of the problem and not of the iterate. evaluate_residual
+// recomputes all four on every call because it is also the public entry point
+// for checking a point this solver did not produce, and cannot assume a
+// problem it has seen before. Inside a solve it has, so they are computed once
+// - four passes over n + m saved per termination check.
+struct ResidualScales {
+  double q_two = 0.0;
+  double c_two = 0.0;
+  double q_inf = 0.0;
+  double c_inf = 0.0;
+
+  explicit ResidualScales(const StandardLp& lp)
+      : q_two(two_norm(lp.q)),
+        c_two(two_norm(lp.c)),
+        q_inf(inf_norm(lp.q)),
+        c_inf(inf_norm(lp.c)) {}
+};
+
+// The seven numbers the backend produced, assembled into the residual the
+// termination test reads. Nothing here touches a vector.
+PdhgResidual residual_from_terms(const LinAlgBackend::ConvergenceTerms& t,
+                                 const ResidualScales& s) {
+  PdhgResidual r;
+  r.primal_residual = std::sqrt(t.primal_sq);
+  r.primal_residual_inf = t.primal_inf;
+  r.dual_residual = std::sqrt(t.dual_sq);
+  r.dual_residual_inf = t.dual_inf;
+  r.primal_objective = t.c_dot_x;
+  r.dual_objective = t.q_dot_y + t.bound_term;
+  r.absolute_gap = std::fabs(r.primal_objective - r.dual_objective);
+  r.relative_primal = r.primal_residual / (1.0 + s.q_two);
+  r.relative_dual = r.dual_residual / (1.0 + s.c_two);
+  r.relative_primal_inf = r.primal_residual_inf / (1.0 + s.q_inf);
+  r.relative_dual_inf = r.dual_residual_inf / (1.0 + s.c_inf);
+  r.relative_gap = r.absolute_gap / (1.0 + std::fabs(r.primal_objective) +
+                                     std::fabs(r.dual_objective));
+  return r;
+}
+
 }  // namespace
 
 std::string to_string(PdhgStatus status) {
@@ -177,7 +220,8 @@ bool is_infeasibility_certificate(const StandardLp& lp, const std::vector<double
   return (rhs - support) / scale > tolerance;
 }
 
-double estimate_matrix_norm(const StandardLp& lp, int iterations, double tolerance) {
+double estimate_matrix_norm(const StandardLp& lp, int iterations, double tolerance,
+                            const LinAlgBackend* backend) {
   const Int n = lp.num_cols();
   const Int m = lp.num_rows();
   if (n == 0 || m == 0 || lp.k.nnz() == 0) return 0.0;
@@ -186,9 +230,37 @@ double estimate_matrix_norm(const StandardLp& lp, int iterations, double toleran
   // a vector that happens to be orthogonal to the leading singular vector.
   std::vector<double> v(sz(n));
   for (Int j = 0; j < n; ++j) v[sz(j)] = 1.0 + 0.1 * static_cast<double>(j % 7);
-  double norm = two_norm(v);
+  const double norm = two_norm(v);
   if (norm == 0.0) return 0.0;
   for (double& value : v) value /= norm;
+
+  if (backend != nullptr) {
+    // Two hundred iterations of two sparse products each. Run on the host with
+    // a CUDA backend that is up to four hundred matrix products on the wrong
+    // side of the bus, inside the measured solve, on the path the shipped
+    // defaults take - the constant step size needs ||K|| and the adaptive one
+    // does not.
+    //
+    // Every operation below is one the backend already has, and on a CPU
+    // backend they are the same loops in the same order as the branch after
+    // this one, so the estimate does not move.
+    BackendVector d_v(*backend, n), d_kv(*backend, m), d_ktkv(*backend, n);
+    d_v.upload(v);
+    double sigma = 0.0;
+    for (int iteration = 0; iteration < iterations; ++iteration) {
+      backend->multiply(lp.k, d_v.data(), d_kv.data());
+      backend->multiply_transpose(lp.kt, d_kv.data(), d_ktkv.data());
+      const double next = backend->two_norm(d_ktkv.data(), n);
+      if (next == 0.0) return 0.0;
+      backend->scale_into(n, next, d_ktkv.data(), d_v.data());
+      const double estimate = std::sqrt(next);
+      if (iteration > 0 && std::fabs(estimate - sigma) <= tolerance * estimate) {
+        return estimate;
+      }
+      sigma = estimate;
+    }
+    return sigma;
+  }
 
   std::vector<double> kv(sz(m));
   std::vector<double> ktkv(sz(n));
@@ -318,7 +390,21 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
   const LinAlgBackend& backend =
       options.backend ? *options.backend : default_backend();
   StandardLp lp = original;
+
+  // Where the time goes, phase by phase. The kernel profile cannot answer this
+  // - it serialises every launch to measure it, so its wall clock is not the
+  // one a real run has. This is measured on an ordinary run and costs a clock
+  // read per termination check.
+  auto phase_mark = std::chrono::steady_clock::now();
+  auto phase_end = [&phase_mark]() {
+    const auto now = std::chrono::steady_clock::now();
+    const double seconds = std::chrono::duration<double>(now - phase_mark).count();
+    phase_mark = now;
+    return seconds;
+  };
+
   result.scaling = scale_lp(&lp, options.scaling);
+  result.phases.scaling = phase_end();
 
   backend.prepare(lp.k);
   backend.prepare(lp.kt);
@@ -337,7 +423,8 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
   // same number.
   const double matrix_norm = options.known_matrix_norm > 0.0
                                  ? options.known_matrix_norm
-                                 : estimate_matrix_norm(lp, 200, 1e-8);
+                                 : estimate_matrix_norm(lp, 200, 1e-8, &backend);
+  result.phases.matrix_norm = phase_end();
   result.matrix_norm_estimate = matrix_norm;
   if (matrix_norm <= 0.0) {
     // No constraint matrix content: the answer is whatever the bounds and the
@@ -435,6 +522,11 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
   BackendVector avg_x(backend, n);
   BackendVector d_y(backend, m), y_next(backend, m), k_x_bar(backend, m);
   BackendVector k_x(backend, m), dy(backend, m), k_dx(backend, m);
+  // K applied to the point the step produces. Out of place, and swapped in
+  // after the step is accepted, for the same reason x_next and y_next are: the
+  // adaptive rule may reject a trial, and the retry has to start from the k_x
+  // the rejected one read.
+  BackendVector k_next(backend, m);
   BackendVector sum_y(backend, m), avg_y(backend, m);
 
   // Problem data the kernels read, uploaded once and left alone.
@@ -455,6 +547,39 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
   // at zero rather than at whatever the allocator returned.
   backend.fill(sum_x.data(), n, 0.0);
   backend.fill(sum_y.data(), m, 0.0);
+
+  // The unscaled problem, for the convergence test. The loop runs on the scaled
+  // copy and stops on the original, and until now that meant pulling the
+  // iterate back and doing the unscaling on the host every check. These six
+  // vectors are what it takes to do it where the iterate already is: the
+  // original c, bounds and q, plus the two scaling diagonals that map between
+  // the two problems.
+  //
+  // Uploaded once, like the scaled data above. Six vectors against the thirteen
+  // the loop already holds, for five downloads and ten host passes per check.
+  const std::vector<double>& row_scale = result.scaling.scaling.row_scale;
+  const std::vector<double>& col_scale = result.scaling.scaling.col_scale;
+  BackendVector orig_c(backend, n), orig_lower(backend, n), orig_upper(backend, n);
+  BackendVector orig_q(backend, m), d_row_scale(backend, m), d_col_scale(backend, n);
+  orig_c.upload(original.c);
+  orig_lower.upload(original.lower);
+  orig_upper.upload(original.upper);
+  orig_q.upload(original.q);
+  d_row_scale.upload(row_scale);
+  d_col_scale.upload(col_scale);
+
+  LinAlgBackend::ConvergenceProblem device_lp;
+  device_lp.c = orig_c.data();
+  device_lp.lower = orig_lower.data();
+  device_lp.upper = orig_upper.data();
+  device_lp.q = orig_q.data();
+  device_lp.row_scale = d_row_scale.data();
+  device_lp.col_scale = d_col_scale.data();
+  device_lp.num_equalities = original.num_equalities;
+
+  // Constant across the whole solve, so computed once rather than four times a
+  // check.
+  const ResidualScales residual_scales(original);
 
   backend.multiply(lp.k, d_x.data(), k_x.data());
 
@@ -493,16 +618,10 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
   double weight_error_sum = 0.0;
   double weight_error_previous = 0.0;
 
+  // Only the fallback check path unscales on the host now, so these two are all
+  // that is left of the four host mirrors the check used to keep.
   std::vector<double> unscaled_x;
   std::vector<double> unscaled_y;
-  // K x and K' y for the unscaled problem, recovered from the products the
-  // iteration already holds rather than recomputed. K x is sitting in k_x at
-  // the end of every step; K' y costs one product, and it is the one the next
-  // iteration would have made anyway.
-  std::vector<double> host_kx;
-  std::vector<double> host_kty;
-  std::vector<double> unscaled_kx;
-  std::vector<double> unscaled_kty;
   std::vector<double> infeasibility_work;
 
   const double tolerance = options.tolerance;
@@ -635,7 +754,29 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
   Int iterations_since_restart = 0;
   PdhgStatus status = PdhgStatus::kIterationLimit;
 
+  result.phases.setup = phase_end();
+
   for (; iteration < options.max_iterations; ++iteration) {
+    const bool check = ((iteration + 1) % options.termination_check_frequency == 0);
+
+    // The Halpern weight is now decided before the step rather than applied
+    // after it, because the step and the blend are one operation. It is the
+    // same weight either way: an epoch's first step takes no blend at all - the
+    // point it lands on becomes the anchor - and every step after it pulls
+    // toward that anchor with (k+1)/(k+2).
+    const bool blend = halpern && !anchor_needs_reset;
+    const double halpern_weight =
+        blend ? static_cast<double>(halpern_k + 1) / static_cast<double>(halpern_k + 2)
+              : 1.0;
+
+    // Whether anything reads the fixed-point residual this iteration. The
+    // adaptive rule needs it to size the step; Halpern's own restart test needs
+    // it every iteration when it is on, which it is not by default; and the
+    // termination check reads it to decide a restart. Nothing else does, so on
+    // the shipped defaults it is one reduction every fortieth iteration rather
+    // than one on every iteration.
+    const bool need_movement = adaptive || options.halpern_restart || check;
+
     backend.multiply_transpose(lp.kt, d_y.data(), kt_y.data());
 
     // One PDHG step, retried at a smaller step size if the adaptive rule rejects
@@ -644,20 +785,36 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
       const double tau = eta / omega;
       const double sigma = eta * omega;
 
-      backend.primal_step(n, tau, d_x.data(), d_c.data(), kt_y.data(),
-                          d_lower.data(), d_upper.data(), x_next.data(),
-                          dx.data(), x_bar.data());
+      // The step, the reflection and the Halpern blend, in one operation per
+      // side. They used to be five: two steps, three accumulates for the
+      // reflection, three blends for the anchor and an advance_kx - ten kernels
+      // over the vectors for arithmetic that is a few flops an element. The
+      // three outputs of each are the ones something downstream actually reads.
+      backend.primal_update(n, tau, reflection, halpern_weight, d_x.data(),
+                            d_c.data(), kt_y.data(), d_lower.data(), d_upper.data(),
+                            blend ? anchor_x.data() : nullptr, x_next.data(),
+                            dx.data(), x_bar.data());
 
       backend.multiply(lp.k, x_bar.data(), k_x_bar.data());
 
-      backend.dual_step(m, lp.num_equalities, sigma, d_y.data(), d_q.data(),
-                        k_x_bar.data(), k_x.data(), y_next.data(), dy.data(),
-                        k_dx.data());
+      backend.dual_update(m, lp.num_equalities, sigma, reflection, halpern_weight,
+                          d_y.data(), d_q.data(), k_x_bar.data(), k_x.data(),
+                          blend ? anchor_y.data() : nullptr,
+                          blend ? anchor_kx.data() : nullptr, y_next.data(),
+                          dy.data(), k_next.data(), k_dx.data());
 
       if (!adaptive) {
-        // ||z - T(z)||^2, which the adaptive rule computes as a side effect and
-        // the restart tests below need either way.
-        movement = backend.weighted_norm_squared(n, m, dx.data(), dy.data(), omega);
+        // ||z - T(z)||^2. Only computed when something reads it, which at the
+        // shipped defaults is the termination check and nothing else.
+        //
+        // This is one reduction and, on a GPU, one blocking copy: the pipeline
+        // drains and the host waits. Doing it unconditionally meant paying that
+        // on every iteration and throwing away thirty-nine of every forty, on
+        // the configuration the solver ships with. cuPDLPx's inner loop has no
+        // device-to-host copy in it at all, and this is most of the difference.
+        if (need_movement) {
+          movement = backend.weighted_norm_squared(n, m, dx.data(), dy.data(), omega);
+        }
         break;
       }
 
@@ -691,27 +848,20 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
       if (attempt > 60) break;  // give up rejecting and take the step
     }
 
-    backend.advance_kx(m, k_x_bar.data(), k_x.data());
-
-    // Reflection: R(z) = T(z) + gamma (T(z) - z). T(z) - z is dx and dy, and
-    // K R(z) = K T(z) + gamma K dx with K T(z) sitting in k_x after the line
-    // above and K dx in k_dx from the dual step. No product, three updates.
-    if (reflection > 0.0) {
-      const double g = reflection;
-      backend.accumulate(n, g, dx.data(), x_next.data());
-      backend.accumulate(m, g, dy.data(), y_next.data());
-      backend.accumulate(m, g, k_dx.data(), k_x.data());
-    }
-
+    // The step wrote its outputs beside the iterate rather than over it, so
+    // that a rejected adaptive trial leaves the iterate it started from intact.
+    // Accepting one is three pointer swaps.
     std::swap(d_x, x_next);
     std::swap(d_y, y_next);
+    std::swap(k_x, k_next);
     ++iterations_since_restart;
 
     if (halpern) {
       if (anchor_needs_reset) {
         // z <- T(z), and that point becomes the anchor. This is Algorithm 1's
         // line 6: an epoch begins one plain PDHG step past where the last one
-        // ended, and the Halpern counter starts from there.
+        // ended, and the Halpern counter starts from there. The step above took
+        // no blend, which is what makes that point the plain one.
         backend.copy(d_x.data(), anchor_x.data(), n);
         backend.copy(d_y.data(), anchor_y.data(), m);
         backend.copy(k_x.data(), anchor_kx.data(), m);
@@ -719,14 +869,6 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
         halpern_k = 0;
         epoch_start_movement = movement;
       } else {
-        const double w = static_cast<double>(halpern_k + 1) /
-                         static_cast<double>(halpern_k + 2);
-        backend.blend(n, w, d_x.data(), 1.0 - w, anchor_x.data());
-        backend.blend(m, w, d_y.data(), 1.0 - w, anchor_y.data());
-        // K z follows z by the same combination, since K is linear. Recomputing
-        // it instead costs a sparse product per iteration, which on this set
-        // was the whole difference between Halpern winning and losing.
-        backend.blend(m, w, k_x.data(), 1.0 - w, anchor_kx.data());
         ++halpern_k;
       }
     }
@@ -753,23 +895,43 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
       }
     }
 
-    const bool check = ((iteration + 1) % options.termination_check_frequency == 0);
     if (!check) continue;
 
-    // Everything from here to the end of the iteration runs on the host, so
-    // this is where the data comes back - twice per check, not ten times per
-    // iteration.
-    d_x.download(&host_x);
-    d_y.download(&host_y);
-    dy.download(&host_dy);
+    result.phases.iterating += phase_end();
+    // Closes the check out however it ends - converged, restarted, or fallen
+    // through to the next iteration - without a clock read on every exit path.
+    struct CheckTimer {
+      std::chrono::steady_clock::time_point* mark;
+      double* into;
+      ~CheckTimer() {
+        const auto now = std::chrono::steady_clock::now();
+        *into += std::chrono::duration<double>(now - *mark).count();
+        *mark = now;
+      }
+    } check_timer{&phase_mark, &result.phases.checks};
 
-    if (options.detect_infeasibility &&
-        is_infeasibility_certificate(lp, host_dy, options.infeasibility_tolerance,
-                                     &infeasibility_work)) {
-      status = PdhgStatus::kPrimalInfeasible;
-      result.message = "Farkas certificate found in the dual iterate difference";
-      ++iteration;
-      break;
+    // The iterate comes back only when something actually reads it. At the
+    // shipped defaults that is a restart, a polish attempt, or the end of the
+    // solve - none of which is every check. It used to be unconditional, and it
+    // was two of the five vectors a check dragged across the bus for seven
+    // numbers the device could have produced itself.
+    bool host_iterate_valid = false;
+    auto pull_iterate = [&]() {
+      if (host_iterate_valid) return;
+      d_x.download(&host_x);
+      d_y.download(&host_y);
+      host_iterate_valid = true;
+    };
+
+    if (options.detect_infeasibility) {
+      dy.download(&host_dy);
+      if (is_infeasibility_certificate(lp, host_dy, options.infeasibility_tolerance,
+                                       &infeasibility_work)) {
+        status = PdhgStatus::kPrimalInfeasible;
+        result.message = "Farkas certificate found in the dual iterate difference";
+        ++iteration;
+        break;
+      }
     }
 
     // The candidate is whichever of the current iterate and the running average
@@ -784,11 +946,13 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
     const bool need_kkt = (options.restarts && !halpern) ||
                           (options.restarts && !options.restart_on_fixed_point) ||
                           options.verbose;
+    const bool need_average = options.restarts && !halpern && sum_weight > 0.0;
+    if (need_kkt || need_average) pull_iterate();
     const double current_kkt =
         need_kkt ? weighted_kkt_error(lp, host_x, host_y, omega, &kkt_work) : 0.0;
     bool use_average = false;
     double candidate_kkt = current_kkt;
-    if (options.restarts && !halpern && sum_weight > 0.0) {
+    if (need_average) {
       backend.scale_into(n, sum_weight, sum_x.data(), avg_x.data());
       backend.scale_into(m, sum_weight, sum_y.data(), avg_y.data());
       avg_x.download(&host_avg_x);
@@ -800,8 +964,18 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
         candidate_kkt = average_kkt;
       }
     }
-    const std::vector<double>& cand_x = use_average ? host_avg_x : host_x;
-    const std::vector<double>& cand_y = use_average ? host_avg_y : host_y;
+
+    // The candidate as host vectors, for the two things that genuinely need it
+    // there: a polish attempt and a restart. Everything else now reads it
+    // where it lives.
+    auto candidate_primal = [&]() -> const std::vector<double>& {
+      pull_iterate();
+      return use_average ? host_avg_x : host_x;
+    };
+    auto candidate_dual = [&]() -> const std::vector<double>& {
+      pull_iterate();
+      return use_average ? host_avg_y : host_y;
+    };
 
     // Adopting the candidate has to move it on the device too, not only on the
     // host mirror the checks were computed from.
@@ -813,34 +987,32 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
       host_y = host_avg_y;
     };
 
-    result.scaling.scaling.unscale_primal(cand_x, &unscaled_x);
-    result.scaling.scaling.unscale_dual(cand_y, &unscaled_y);
-
+    PdhgResidual r;
     // The averaged candidate is a different point from the one k_x belongs to,
     // so the shortcut only applies when the current iterate is the candidate.
-    const std::vector<double>* kx_ptr = nullptr;
-    const std::vector<double>* kty_ptr = nullptr;
     if (options.reuse_products && !use_average) {
-      // K x = (K~ x~) / D1 and K' y = (K~' y~) / D2, since K~ = D1 K D2 with
-      // x = D2 x~ and y = D1 y~.
-      k_x.download(&host_kx);
+      // K' y is the product the next iteration was going to make anyway, and
+      // K x is sitting in k_x at the end of every step. From those two, the
+      // whole test is elementwise arithmetic and a reduction - so it runs on
+      // the backend, and on CUDA that means the iterate never moves.
+      //
+      // What this replaces: five vectors downloaded, unscaled on the host, and
+      // walked ten times. What it costs: two kernels and 56 bytes.
       backend.multiply_transpose(lp.kt, d_y.data(), kt_y.data());
-      kt_y.download(&host_kty);
-      const auto& rs = result.scaling.scaling.row_scale;
-      const auto& cs = result.scaling.scaling.col_scale;
-      unscaled_kx.resize(host_kx.size());
-      for (std::size_t i = 0; i < host_kx.size(); ++i) {
-        unscaled_kx[i] = rs[i] != 0.0 ? host_kx[i] / rs[i] : host_kx[i];
-      }
-      unscaled_kty.resize(host_kty.size());
-      for (std::size_t j = 0; j < host_kty.size(); ++j) {
-        unscaled_kty[j] = cs[j] != 0.0 ? host_kty[j] / cs[j] : host_kty[j];
-      }
-      kx_ptr = &unscaled_kx;
-      kty_ptr = &unscaled_kty;
+      LinAlgBackend::ConvergenceTerms terms;
+      backend.convergence_terms(n, m, device_lp, d_x.data(), k_x.data(),
+                                d_y.data(), kt_y.data(), &terms);
+      r = residual_from_terms(terms, residual_scales);
+    } else {
+      // --no-reuse-products, and the averaged candidate, still go the long way
+      // round: unscale on the host and recompute both products there. That is
+      // what the ablation is for, and the averaged point has no product to
+      // reuse.
+      pull_iterate();
+      result.scaling.scaling.unscale_primal(candidate_primal(), &unscaled_x);
+      result.scaling.scaling.unscale_dual(candidate_dual(), &unscaled_y);
+      r = evaluate_residual(original, unscaled_x, unscaled_y, nullptr, nullptr);
     }
-    const PdhgResidual r =
-        evaluate_residual(original, unscaled_x, unscaled_y, kx_ptr, kty_ptr);
 
     if (!std::isfinite(r.primal_residual) || !std::isfinite(r.dual_residual)) {
       status = PdhgStatus::kNumericalError;
@@ -876,7 +1048,14 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
         std::vector<double> try_y;
         PdhgResidual try_r;
         Int spent = 0;
-        run_polish(cand_x, cand_y, budget, &try_x, &try_y, &try_r, &spent);
+        const std::vector<double>& polish_from_x = candidate_primal();
+        const std::vector<double>& polish_from_y = candidate_dual();
+        // A polishing sub-solve is a whole solve of its own, so it is timed as
+        // one rather than charged to the check that triggered it.
+        result.phases.checks += phase_end();
+        run_polish(polish_from_x, polish_from_y, budget, &try_x, &try_y, &try_r,
+                   &spent);
+        result.phases.polishing += phase_end();
         ++result.polish_attempts;
         result.polish_iterations += spent;
         if (try_r.converged(tolerance, options.absolute_tolerance,
@@ -934,6 +1113,14 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
 
     adopt_candidate();
     backend.multiply(lp.k, d_x.data(), k_x.data());
+
+    // A restart is one of the two things that genuinely wants the iterate on
+    // the host: the primal weight is updated from how far each side moved
+    // since the last one, and the anchors it measures against are kept here
+    // rather than occupying device memory. Restarts are rare - a few dozen in
+    // a solve of tens of thousands of iterations - so this is a download per
+    // restart rather than a download per check.
+    pull_iterate();
 
     if (options.primal_weight_updates && have_previous_restart) {
       // How far each side moved. The smoothing rule measures that over the last

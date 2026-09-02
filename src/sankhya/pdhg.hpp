@@ -506,6 +506,28 @@ struct PdhgResult {
   double final_step_size = 0.0;
   double final_primal_weight = 0.0;
 
+  // Where the solve time went. Always collected - it is a handful of clock
+  // reads per termination check, not per iteration - and reported by
+  // `--profile`.
+  //
+  // The kernel profile answers "which kernel owns the device", and it cannot
+  // answer "does the device own the run", because a serialised profiling run
+  // has a different wall clock from a real one. This does: it is measured on
+  // an ordinary run, and `scaling + matrix_norm + setup + checks` is the part
+  // of the solve that a faster GPU cannot help with.
+  struct Phases {
+    double scaling = 0.0;      // Ruiz and Pock-Chambolle
+    double matrix_norm = 0.0;  // power iteration for ||K||
+    double setup = 0.0;        // allocation, uploads, the first K x
+    double iterating = 0.0;    // the loop, less the checks
+    double checks = 0.0;       // termination checks and restarts
+    double polishing = 0.0;    // feasibility polishing sub-solves
+    double total() const {
+      return scaling + matrix_norm + setup + iterating + checks + polishing;
+    }
+  };
+  Phases phases;
+
   PdhgResidual residual;
   ScalingReport scaling;
   std::string message;
@@ -534,6 +556,21 @@ PdhgResidual evaluate_residual(const StandardLp& lp, const std::vector<double>& 
 
 // Largest singular value of K, by power iteration on K'K. Returns 0 for an empty
 // matrix.
-double estimate_matrix_norm(const StandardLp& lp, int iterations, double tolerance);
+//
+// Every iteration is two sparse products, and there can be two hundred of them.
+// With a backend the whole thing runs where the matrix already is; without one
+// it runs on the host. It takes a backend at all because on the GPU this was
+// four hundred host matrix products inside the measured solve time, on the path
+// the shipped defaults take, for a number the device could have produced.
+//
+// The two paths are the same arithmetic in the same order and they still differ
+// in the last bit: the summation is compiled twice, once here and once in the
+// backend, and the two contract FMA differently. It is one ULP on ||K||, which
+// is the whole of the difference this change makes to a CPU solve - with the
+// norm pinned, 24 of 24 Netlib checkpoints come out bit-identical, and across
+// all 88 instances every iteration count is unchanged and no objective moves by
+// more than 3e-11 relative.
+double estimate_matrix_norm(const StandardLp& lp, int iterations, double tolerance,
+                            const LinAlgBackend* backend = nullptr);
 
 }  // namespace sankhya

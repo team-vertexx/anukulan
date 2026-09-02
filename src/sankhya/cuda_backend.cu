@@ -89,56 +89,93 @@ __global__ void spmv_kernel(Int rows, const Int* __restrict__ start,
   }
 }
 
-__global__ void primal_step_kernel(Int n, double tau, const double* __restrict__ x,
-                                   const double* __restrict__ c,
-                                   const double* __restrict__ kt_y,
-                                   const double* __restrict__ lower,
-                                   const double* __restrict__ upper,
-                                   double* __restrict__ x_next,
-                                   double* __restrict__ dx,
-                                   double* __restrict__ x_bar) {
+// The whole primal side of a reflected Halpern step, in one kernel.
+//
+// The step, the reflection and the Halpern blend used to be three launches over
+// the same vector: three reads and three writes of n doubles for arithmetic
+// that is a handful of flops. This reads x, c, K'y, the two bounds and the
+// anchor once and writes three vectors once. cuPDLPx does exactly this - its
+// compute_next_primal_solution_kernel is the same fusion - and it is why its
+// inner loop is two kernels per iteration where this one was ten.
+//
+// kBlend is a template parameter rather than a branch because the no-anchor
+// case is the first step of every epoch and the anchor pointer is null there;
+// a runtime branch on a null pointer would be fine, but the compiler drops the
+// two loads entirely this way.
+template <bool kReflect, bool kBlend>
+__global__ void primal_update_kernel(Int n, double tau, double gamma, double halpern,
+                                     const double* __restrict__ x,
+                                     const double* __restrict__ c,
+                                     const double* __restrict__ kt_y,
+                                     const double* __restrict__ lower,
+                                     const double* __restrict__ upper,
+                                     const double* __restrict__ anchor,
+                                     double* __restrict__ x_out,
+                                     double* __restrict__ dx,
+                                     double* __restrict__ x_bar) {
   const Int j = blockIdx.x * blockDim.x + threadIdx.x;
   if (j >= n) return;
-  double v = x[j] - tau * (c[j] - kt_y[j]);
+  // Read before write, so x_out may alias x.
+  const double x_j = x[j];
+  double v = x_j - tau * (c[j] - kt_y[j]);
   v = fmin(fmax(v, lower[j]), upper[j]);
-  const double d = v - x[j];
-  x_next[j] = v;
+  const double d = v - x_j;
   dx[j] = d;
   x_bar[j] = v + d;
+  double next = v;
+  if (kReflect) next += gamma * d;
+  if (kBlend) next = halpern * next + (1.0 - halpern) * anchor[j];
+  x_out[j] = next;
 }
 
-__global__ void dual_step_kernel(Int m, Int num_equalities, double sigma,
-                                 const double* __restrict__ y,
-                                 const double* __restrict__ q,
-                                 const double* __restrict__ k_x_bar,
-                                 const double* __restrict__ k_x,
-                                 double* __restrict__ y_next,
-                                 double* __restrict__ dy,
-                                 double* __restrict__ k_dx) {
+// The dual side, and K applied to the point it produces, in one kernel.
+//
+// k_out folds three of the old launches together on its own: advance_kx, the
+// reflection's accumulate and the Halpern blend. All three are linear in K, so
+// they can be applied to K z instead of z, which is what saves a sparse product
+// every iteration.
+template <bool kReflect, bool kBlend>
+__global__ void dual_update_kernel(Int m, Int num_equalities, double sigma,
+                                   double gamma, double halpern,
+                                   const double* __restrict__ y,
+                                   const double* __restrict__ q,
+                                   const double* __restrict__ k_x_bar,
+                                   const double* __restrict__ k_x,
+                                   const double* __restrict__ anchor_y,
+                                   const double* __restrict__ anchor_kx,
+                                   double* __restrict__ y_out,
+                                   double* __restrict__ dy,
+                                   double* __restrict__ k_out,
+                                   double* __restrict__ k_dx) {
   const Int i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i >= m) return;
-  double v = y[i] + sigma * (q[i] - k_x_bar[i]);
+  const double y_i = y[i];
+  const double bar = k_x_bar[i];
+  const double kx = k_x[i];
+  double v = y_i + sigma * (q[i] - bar);
   if (i >= num_equalities) v = fmax(v, 0.0);
-  y_next[i] = v;
-  dy[i] = v - y[i];
-  k_dx[i] = 0.5 * (k_x_bar[i] - k_x[i]);
+  const double d = v - y_i;
+  dy[i] = d;
+  const double kd = 0.5 * (bar - kx);
+  k_dx[i] = kd;
+
+  double next_y = v;
+  double next_k = 0.5 * (bar + kx);
+  if (kReflect) {
+    next_y += gamma * d;
+    next_k += gamma * kd;
+  }
+  if (kBlend) {
+    next_y = halpern * next_y + (1.0 - halpern) * anchor_y[i];
+    next_k = halpern * next_k + (1.0 - halpern) * anchor_kx[i];
+  }
+  y_out[i] = next_y;
+  k_out[i] = next_k;
 }
 
 __global__ void fill_kernel(Int n, double value, double* __restrict__ target) {
   const Int i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i < n) target[i] = value;
-}
-
-__global__ void advance_kx_kernel(Int m, const double* __restrict__ k_x_bar,
-                                  double* __restrict__ k_x) {
-  const Int i = blockIdx.x * blockDim.x + threadIdx.x;
-  if (i < m) k_x[i] = 0.5 * (k_x_bar[i] + k_x[i]);
-}
-
-__global__ void blend_kernel(Int n, double a, double* __restrict__ z, double b,
-                             const double* __restrict__ anchor) {
-  const Int i = blockIdx.x * blockDim.x + threadIdx.x;
-  if (i < n) z[i] = a * z[i] + b * anchor[i];
 }
 
 __global__ void accumulate_kernel(Int n, double weight, const double* __restrict__ v,
@@ -196,6 +233,11 @@ __global__ void reduce_kernel(Int n, const double* __restrict__ a,
 // build already sees from FMA contraction, and it is why iteration counts are
 // never used as a correctness gate here - objectives against published optima
 // are.
+// kInteraction is false for the plain weighted norm, which is what the constant
+// step size path asks for. That path is the shipped default and it was going
+// through two separate reductions - two kernels and two blocking copies - for a
+// number this kernel produces in one.
+template <bool kInteraction>
 __global__ void step_terms_kernel(Int n, Int m, const double* __restrict__ dx,
                                   const double* __restrict__ dy,
                                   const double* __restrict__ k_dx,
@@ -207,7 +249,7 @@ __global__ void step_terms_kernel(Int n, Int m, const double* __restrict__ dx,
   double interaction = 0.0, dy_dy = 0.0, dx_dx = 0.0;
   for (Int i = start; i < m; i += stride) {
     const double v = dy[i];
-    interaction += v * k_dx[i];
+    if (kInteraction) interaction += v * k_dx[i];
     dy_dy += v * v;
   }
   for (Int i = start; i < n; i += stride) {
@@ -252,6 +294,131 @@ __global__ void finish_terms_kernel(int grid, const double* __restrict__ partial
   if (threadIdx.x == 0) out[which] = shared[0];
 }
 
+// The seven numbers the convergence test is built from, in one pass over each
+// side of the problem.
+//
+// Every quantity here is measured on the *unscaled* problem, from the scaled
+// iterate and the two scaling diagonals, because the tolerance the caller asked
+// for is a statement about the model they handed in. Doing that on the host
+// meant five vectors coming back across the bus and ten passes over them; here
+// it is two kernels and 56 bytes.
+//
+// The arithmetic is written to match backend.cpp term for term, including the
+// order of the multiplications, so the two backends stop in the same place.
+constexpr int kTermCount = 7;
+constexpr int kPrimalInfSlot = 1;
+constexpr int kDualInfSlot = 4;
+
+__global__ void convergence_terms_kernel(
+    Int n, Int m, Int num_equalities, const double* __restrict__ x,
+    const double* __restrict__ k_x, const double* __restrict__ y,
+    const double* __restrict__ kt_y, const double* __restrict__ c,
+    const double* __restrict__ lower, const double* __restrict__ upper,
+    const double* __restrict__ q, const double* __restrict__ row_scale,
+    const double* __restrict__ col_scale, double* __restrict__ partial, int grid) {
+  __shared__ double shared[kTermCount][kBlock];
+  const Int stride = blockDim.x * gridDim.x;
+  const Int start = blockIdx.x * blockDim.x + threadIdx.x;
+
+  double primal_sq = 0.0, primal_inf = 0.0, q_dot_y = 0.0;
+  for (Int i = start; i < m; i += stride) {
+    const double scale = row_scale[i];
+    const double row = scale != 0.0 ? k_x[i] / scale : k_x[i];
+    const double slack = row - q[i];
+    // Equality rows are violated in either direction; inequality rows only when
+    // the activity falls below the right-hand side.
+    const double violation = (i < num_equalities) ? slack : fmin(slack, 0.0);
+    primal_sq += violation * violation;
+    primal_inf = fmax(primal_inf, fabs(violation));
+    q_dot_y += q[i] * (scale * y[i]);
+  }
+
+  double dual_sq = 0.0, dual_inf = 0.0, bound_term = 0.0, c_dot_x = 0.0;
+  for (Int j = start; j < n; j += stride) {
+    const double scale = col_scale[j];
+    const double product = scale != 0.0 ? kt_y[j] / scale : kt_y[j];
+    const double lo = lower[j];
+    const double hi = upper[j];
+    const double lambda = c[j] - product;
+
+    const bool has_lo = lo > -INFINITY;
+    const bool has_hi = hi < INFINITY;
+    double leftover = 0.0;
+    if (has_lo && has_hi) {
+      leftover = 0.0;  // a boxed variable absorbs any sign
+    } else if (has_lo) {
+      leftover = fmin(lambda, 0.0);
+    } else if (has_hi) {
+      leftover = fmax(lambda, 0.0);
+    } else {
+      leftover = lambda;  // free variables need a zero reduced cost
+    }
+    dual_sq += leftover * leftover;
+    dual_inf = fmax(dual_inf, fabs(leftover));
+
+    // Branch on the sign, not on the bound: an absorbed value of zero against
+    // an infinite bound is the one combination that would produce a NaN, and
+    // the sign test excludes it - absorbed is only nonzero where the bound it
+    // reaches for is finite.
+    const double absorbed = lambda - leftover;
+    if (absorbed > 0.0) {
+      bound_term += absorbed * lo;
+    } else if (absorbed < 0.0) {
+      bound_term += absorbed * hi;
+    }
+
+    c_dot_x += c[j] * (scale * x[j]);
+  }
+
+  shared[0][threadIdx.x] = primal_sq;
+  shared[1][threadIdx.x] = primal_inf;
+  shared[2][threadIdx.x] = q_dot_y;
+  shared[3][threadIdx.x] = dual_sq;
+  shared[4][threadIdx.x] = dual_inf;
+  shared[5][threadIdx.x] = bound_term;
+  shared[6][threadIdx.x] = c_dot_x;
+  __syncthreads();
+  for (int s = blockDim.x / 2; s > 0; s >>= 1) {
+    if (threadIdx.x < s) {
+      for (int t = 0; t < kTermCount; ++t) {
+        shared[t][threadIdx.x] =
+            (t == kPrimalInfSlot || t == kDualInfSlot)
+                ? fmax(shared[t][threadIdx.x], shared[t][threadIdx.x + s])
+                : shared[t][threadIdx.x] + shared[t][threadIdx.x + s];
+      }
+    }
+    __syncthreads();
+  }
+  if (threadIdx.x == 0) {
+    for (int t = 0; t < kTermCount; ++t) partial[t * grid + blockIdx.x] = shared[t][0];
+  }
+}
+
+// One block per quantity, so the finish is a single launch and the result never
+// leaves the device until it is seven doubles.
+__global__ void finish_convergence_kernel(int grid,
+                                          const double* __restrict__ partial,
+                                          double* __restrict__ out) {
+  __shared__ double shared[kBlock];
+  const int which = blockIdx.x;
+  const bool is_max = (which == kPrimalInfSlot || which == kDualInfSlot);
+  double acc = 0.0;
+  for (int i = threadIdx.x; i < grid; i += blockDim.x) {
+    const double v = partial[which * grid + i];
+    acc = is_max ? fmax(acc, v) : acc + v;
+  }
+  shared[threadIdx.x] = acc;
+  __syncthreads();
+  for (int s = blockDim.x / 2; s > 0; s >>= 1) {
+    if (threadIdx.x < s) {
+      shared[threadIdx.x] = is_max ? fmax(shared[threadIdx.x], shared[threadIdx.x + s])
+                                   : shared[threadIdx.x] + shared[threadIdx.x + s];
+    }
+    __syncthreads();
+  }
+  if (threadIdx.x == 0) out[which] = shared[0];
+}
+
 struct DeviceMatrix {
   Int rows = 0;
   Int nnz = 0;
@@ -277,6 +444,11 @@ class CudaBackend final : public LinAlgBackend {
     cuda_check(cudaMalloc(&terms_partial_, sizeof(double) * 3 * kMaxBlocks),
                "step term partials");
     cuda_check(cudaMalloc(&terms_, sizeof(double) * 3), "step terms");
+    cuda_check(cudaMalloc(&convergence_partial_,
+                          sizeof(double) * kTermCount * kMaxBlocks),
+               "convergence partials");
+    cuda_check(cudaMalloc(&convergence_, sizeof(double) * kTermCount),
+               "convergence terms");
   }
 
   void set_profiling(bool on) const override {
@@ -337,6 +509,8 @@ class CudaBackend final : public LinAlgBackend {
     if (partial_) cudaFree(partial_);
     if (terms_partial_) cudaFree(terms_partial_);
     if (terms_) cudaFree(terms_);
+    if (convergence_partial_) cudaFree(convergence_partial_);
+    if (convergence_) cudaFree(convergence_);
   }
 
   std::string name() const override { return "cuda"; }
@@ -371,7 +545,11 @@ class CudaBackend final : public LinAlgBackend {
       cuda_check(cudaMemset(target, 0, sizeof(double) * sz(n)), "fill zero");
       return;
     }
-    { Scope timer(this, "fill"); fill_kernel<<<blocks(n), kBlock>>>(n, value, target); }
+    {
+      Scope timer(this, "fill");
+      fill_kernel<<<blocks(n), kBlock>>>(n, value, target);
+      check_launch("fill");
+    }
   }
 
   void copy(const double* source, double* target, Int n) const override {
@@ -433,35 +611,67 @@ class CudaBackend final : public LinAlgBackend {
     return n > 0 ? reduce<true>(a, nullptr, n) : 0.0;
   }
 
-  void primal_step(Int n, double tau, const double* x, const double* c,
-                   const double* kt_y, const double* lower, const double* upper,
-                   double* x_next, double* dx, double* x_bar) const override {
+  void primal_update(Int n, double tau, double gamma, double halpern,
+                     const double* x, const double* c, const double* kt_y,
+                     const double* lower, const double* upper, const double* anchor,
+                     double* x_out, double* dx, double* x_bar) const override {
     if (n <= 0) return;
-    Scope timer(this, "primal step");
-    primal_step_kernel<<<blocks(n), kBlock>>>(n, tau, x, c, kt_y, lower, upper,
-                                              x_next, dx, x_bar);
-  }
-
-  void dual_step(Int m, Int num_equalities, double sigma, const double* y,
-                 const double* q, const double* k_x_bar, const double* k_x,
-                 double* y_next, double* dy, double* k_dx) const override {
-    if (m <= 0) return;
-    Scope timer(this, "dual step");
-    dual_step_kernel<<<blocks(m), kBlock>>>(m, num_equalities, sigma, y, q, k_x_bar,
-                                            k_x, y_next, dy, k_dx);
-  }
-
-  void advance_kx(Int m, const double* k_x_bar, double* k_x) const override {
-    if (m > 0) {
-      Scope timer(this, "advance Kx");
-      advance_kx_kernel<<<blocks(m), kBlock>>>(m, k_x_bar, k_x);
+    Scope timer(this, "primal update");
+    const bool reflect = gamma != 0.0;
+    const bool blend = anchor != nullptr;
+    // Four instantiations rather than two runtime branches inside the loop.
+    // Each is a handful of flops per element, so the loads it avoids matter
+    // more than the branch would have cost.
+    if (reflect && blend) {
+      primal_update_kernel<true, true><<<blocks(n), kBlock>>>(
+          n, tau, gamma, halpern, x, c, kt_y, lower, upper, anchor, x_out, dx, x_bar);
+    } else if (reflect) {
+      primal_update_kernel<true, false><<<blocks(n), kBlock>>>(
+          n, tau, gamma, halpern, x, c, kt_y, lower, upper, anchor, x_out, dx, x_bar);
+    } else if (blend) {
+      primal_update_kernel<false, true><<<blocks(n), kBlock>>>(
+          n, tau, gamma, halpern, x, c, kt_y, lower, upper, anchor, x_out, dx, x_bar);
+    } else {
+      primal_update_kernel<false, false><<<blocks(n), kBlock>>>(
+          n, tau, gamma, halpern, x, c, kt_y, lower, upper, anchor, x_out, dx, x_bar);
     }
+    check_launch("primal update");
+  }
+
+  void dual_update(Int m, Int num_equalities, double sigma, double gamma,
+                   double halpern, const double* y, const double* q,
+                   const double* k_x_bar, const double* k_x, const double* anchor_y,
+                   const double* anchor_kx, double* y_out, double* dy, double* k_out,
+                   double* k_dx) const override {
+    if (m <= 0) return;
+    Scope timer(this, "dual update");
+    const bool reflect = gamma != 0.0;
+    const bool blend = anchor_y != nullptr;
+    if (reflect && blend) {
+      dual_update_kernel<true, true><<<blocks(m), kBlock>>>(
+          m, num_equalities, sigma, gamma, halpern, y, q, k_x_bar, k_x, anchor_y,
+          anchor_kx, y_out, dy, k_out, k_dx);
+    } else if (reflect) {
+      dual_update_kernel<true, false><<<blocks(m), kBlock>>>(
+          m, num_equalities, sigma, gamma, halpern, y, q, k_x_bar, k_x, anchor_y,
+          anchor_kx, y_out, dy, k_out, k_dx);
+    } else if (blend) {
+      dual_update_kernel<false, true><<<blocks(m), kBlock>>>(
+          m, num_equalities, sigma, gamma, halpern, y, q, k_x_bar, k_x, anchor_y,
+          anchor_kx, y_out, dy, k_out, k_dx);
+    } else {
+      dual_update_kernel<false, false><<<blocks(m), kBlock>>>(
+          m, num_equalities, sigma, gamma, halpern, y, q, k_x_bar, k_x, anchor_y,
+          anchor_kx, y_out, dy, k_out, k_dx);
+    }
+    check_launch("dual update");
   }
 
   void accumulate(Int n, double weight, const double* v, double* sum) const override {
     if (n > 0) {
       Scope timer(this, "accumulate");
       accumulate_kernel<<<blocks(n), kBlock>>>(n, weight, v, sum);
+      check_launch("accumulate");
     }
   }
 
@@ -469,25 +679,79 @@ class CudaBackend final : public LinAlgBackend {
     if (n > 0) {
       Scope timer(this, "scale into");
       scale_into_kernel<<<blocks(n), kBlock>>>(n, 1.0 / weight, sum, out);
+      check_launch("scale into");
     }
   }
 
-  void blend(Int n, double a, double* z, double b,
-             const double* anchor) const override {
-    if (n > 0) {
-      Scope timer(this, "halpern blend");
-      blend_kernel<<<blocks(n), kBlock>>>(n, a, z, b, anchor);
-    }
-  }
-
+  // Two separate reductions, each with its own blocking copy, for a number the
+  // fused kernel already produces. The constant step size path is the shipped
+  // default and it asks for this every iteration, so those were two pipeline
+  // drains per iteration on the most common configuration in the solver.
   double weighted_norm_squared(Int n, Int m, const double* dx, const double* dy,
                                double omega) const override {
-    return omega * dot(dx, dx, n) + dot(dy, dy, m) / omega;
+    double interaction = 0.0;
+    double movement = 0.0;
+    fused_terms<false>(n, m, dx, dy, nullptr, omega, &interaction, &movement);
+    return movement;
   }
 
   void step_size_terms(Int n, Int m, const double* dx, const double* dy,
                        const double* k_dx, double omega, double* interaction,
                        double* movement) const override {
+    fused_terms<true>(n, m, dx, dy, k_dx, omega, interaction, movement);
+  }
+
+  void convergence_terms(Int n, Int m, const ConvergenceProblem& lp, const double* x,
+                         const double* k_x, const double* y, const double* kt_y,
+                         ConvergenceTerms* out) const override {
+    const Int longest = n > m ? n : m;
+    if (longest <= 0) {
+      *out = ConvergenceTerms{};
+      return;
+    }
+    const int grid = static_cast<int>(std::min<Int>(kMaxBlocks, blocks(longest)));
+    {
+      Scope timer(this, "convergence terms");
+      convergence_terms_kernel<<<grid, kBlock>>>(
+          n, m, lp.num_equalities, x, k_x, y, kt_y, lp.c, lp.lower, lp.upper, lp.q,
+          lp.row_scale, lp.col_scale, convergence_partial_, grid);
+      check_launch("convergence terms");
+      finish_convergence_kernel<<<kTermCount, kBlock>>>(grid, convergence_partial_,
+                                                        convergence_);
+      check_launch("finish convergence");
+    }
+    double host[kTermCount] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+    {
+      Scope timer(this, "convergence copy back");
+      cuda_check(cudaMemcpy(host, convergence_, sizeof(double) * kTermCount,
+                            cudaMemcpyDeviceToHost),
+                 "convergence terms");
+    }
+    out->primal_sq = host[0];
+    out->primal_inf = host[1];
+    out->q_dot_y = host[2];
+    out->dual_sq = host[3];
+    out->dual_inf = host[4];
+    out->bound_term = host[5];
+    out->c_dot_x = host[6];
+  }
+
+ private:
+  // A launch that fails - too much shared memory, a bad grid - sets the sticky
+  // error flag and then reports itself at the next synchronising call, which is
+  // somewhere else entirely and blames the wrong kernel. This reads the flag on
+  // the host and costs no synchronisation.
+  void check_launch(const char* what) const {
+    cuda_check(cudaGetLastError(), what);
+  }
+
+  // Both reductions the step needs, in one kernel and one copy. kInteraction
+  // is false when only the weighted norm is wanted, which is what the constant
+  // step size asks for - and it is the default.
+  template <bool kInteraction>
+  void fused_terms(Int n, Int m, const double* dx, const double* dy,
+                   const double* k_dx, double omega, double* interaction,
+                   double* movement) const {
     const Int longest = n > m ? n : m;
     if (longest <= 0) {
       *interaction = 0.0;
@@ -496,9 +760,12 @@ class CudaBackend final : public LinAlgBackend {
     }
     const int grid = static_cast<int>(std::min<Int>(kMaxBlocks, blocks(longest)));
     {
-      Scope timer(this, "step-size terms");
-      step_terms_kernel<<<grid, kBlock>>>(n, m, dx, dy, k_dx, terms_partial_, grid);
+      Scope timer(this, kInteraction ? "step-size terms" : "weighted norm");
+      step_terms_kernel<kInteraction>
+          <<<grid, kBlock>>>(n, m, dx, dy, k_dx, terms_partial_, grid);
+      check_launch("step terms");
       finish_terms_kernel<<<3, kBlock>>>(grid, terms_partial_, terms_);
+      check_launch("finish terms");
     }
     double host[3] = {0.0, 0.0, 0.0};
     {
@@ -508,11 +775,10 @@ class CudaBackend final : public LinAlgBackend {
     }
     // The absolute value matches the reference implementation exactly; see the
     // comment on LinAlgBackend::step_size_terms for why it belongs here.
-    *interaction = std::fabs(host[0]);
+    *interaction = kInteraction ? std::fabs(host[0]) : 0.0;
     *movement = omega * host[1] + host[2] / omega;
   }
 
- private:
   struct Timing {
     double seconds = 0.0;
     long long calls = 0;
@@ -582,6 +848,7 @@ class CudaBackend final : public LinAlgBackend {
         spmv_kernel<32><<<grid, kBlock>>>(d.rows, d.start, d.index, d.value, x, y);
         break;
     }
+    check_launch(label);
   }
 
   template <bool kMaximum>
@@ -590,6 +857,7 @@ class CudaBackend final : public LinAlgBackend {
     {
       Scope timer(this, kMaximum ? "reduce max" : "reduce sum");
       reduce_kernel<kMaximum><<<grid, kBlock>>>(n, a, b, partial_);
+      check_launch("reduce");
       cuda_check(cudaMemcpy(host_partial_.data(), partial_, sizeof(double) * sz(grid),
                             cudaMemcpyDeviceToHost), "reduce");
     }
@@ -606,6 +874,8 @@ class CudaBackend final : public LinAlgBackend {
   mutable std::vector<double> host_partial_;
   double* terms_partial_ = nullptr;  // 3 x kMaxBlocks block sums
   double* terms_ = nullptr;          // the three finished values
+  double* convergence_partial_ = nullptr;  // kTermCount x kMaxBlocks block sums
+  double* convergence_ = nullptr;          // the seven finished values
 
   mutable bool profiling_ = false;
   mutable cudaEvent_t ev_start_ = nullptr;

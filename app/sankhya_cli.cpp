@@ -909,6 +909,12 @@ int command_solve(const std::vector<std::string>& args) {
         << "\"polish_iterations\":" << r.polish_iterations << ","
         << "\"polished\":" << (r.polished ? "true" : "false") << ","
         << "\"seconds\":" << r.solve_seconds << ","
+        << "\"phase_scaling\":" << r.phases.scaling << ","
+        << "\"phase_matrix_norm\":" << r.phases.matrix_norm << ","
+        << "\"phase_setup\":" << r.phases.setup << ","
+        << "\"phase_iterating\":" << r.phases.iterating << ","
+        << "\"phase_checks\":" << r.phases.checks << ","
+        << "\"phase_polishing\":" << r.phases.polishing << ","
         << "\"rel_primal\":" << r.residual.relative_primal << ","
         << "\"rel_dual\":" << r.residual.relative_dual << ","
         << "\"rel_gap\":" << r.residual.relative_gap << ","
@@ -949,6 +955,38 @@ int command_solve(const std::vector<std::string>& args) {
       r.residual.primal_residual_inf, r.residual.dual_residual_inf,
       r.matrix_norm_estimate, r.scaling.row_spread_before,
       r.scaling.row_spread_after, violation_line.c_str());
+  if (profile) {
+    // Where the solve went, phase by phase. This is measured on the ordinary
+    // run - a handful of clock reads, no serialisation - so unlike the kernel
+    // table below it can be read as wall clock.
+    //
+    // The line that matters on a GPU is the last one: scaling, the matrix norm
+    // and the termination checks are host work that a faster device cannot
+    // help with, and if they dominate then the kernels are not the thing to
+    // optimise. On graph40-40 they were 79% of the solve.
+    const sankhya::PdhgResult::Phases& p = r.phases;
+    const double total = p.total();
+    auto share = [total](double v) { return total > 0.0 ? 100.0 * v / total : 0.0; };
+    std::printf(
+        "\nwhere the solve time went\n"
+        "  %-16s %8.4f s  %5.1f%%\n"
+        "  %-16s %8.4f s  %5.1f%%\n"
+        "  %-16s %8.4f s  %5.1f%%\n"
+        "  %-16s %8.4f s  %5.1f%%\n"
+        "  %-16s %8.4f s  %5.1f%%\n"
+        "  %-16s %8.4f s  %5.1f%%\n"
+        "  %-16s %8.4f s\n"
+        "  %-16s %8.4f s  %5.1f%%   <- what a faster device cannot help with\n",
+        "scaling", p.scaling, share(p.scaling),
+        "matrix norm", p.matrix_norm, share(p.matrix_norm),
+        "setup", p.setup, share(p.setup),
+        "iterating", p.iterating, share(p.iterating),
+        "checks", p.checks, share(p.checks),
+        "polishing", p.polishing, share(p.polishing),
+        "accounted", total,
+        "off the device", p.scaling + p.matrix_norm + p.setup + p.checks,
+        share(p.scaling + p.matrix_norm + p.setup + p.checks));
+  }
   if (!kernel_report.empty()) {
     std::printf(
         "\nwhere the device time went. Timing serialises the launches it\n"
