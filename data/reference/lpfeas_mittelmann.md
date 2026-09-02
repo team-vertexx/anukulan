@@ -105,3 +105,45 @@ Run our solver on the eight we have at `--tol=1e-6`, and report solved/not-solve
 against the table above, stating the hardware plainly. That is a comparison a
 reader can check, and it is worth more than any score computed against a rubric
 we wrote ourselves.
+
+
+## Our run, 2026-09-02
+
+Tolerance 1e-6, presolve on, 300 s limit, single threaded, on the machine at the
+top of `docs/RESULTS.md` — an M-series laptop, not the i7-11700K the CPU
+reference times were taken on, and certainly not the B200 the GPU ones were.
+**The machine was shared with other work for this run, so the times are
+pessimistic.** What is comparable is which instances get solved.
+
+| instance | this solver | HiGHS | OR-Tools PDLP | cuPDLPx |
+|---|---|---|---|---|
+| graph40-40 | **1.5 s** | 13 | 2 | 1 |
+| datt256_lp | **2.3 s** | 7 | 2 | 1 |
+| qap15 | **4.8 s** | 7 | 3 | 1 |
+| supportcase10 | **102 s** | 19 | 8 | 1 |
+| cont1 | iteration limit | 6 | 256 | 22 |
+| cont11 | iteration limit | 14 | 1988 | 60 |
+| irish-electricity | iteration limit | 18 | t | 24 |
+| bdry2 | time limit | t | t | t |
+| brazil3 | **0.4 s** | — | — | — |
+| sgpf5y6 | numerical error | — | — | — |
+| watson_1 | time limit | — | — | — |
+
+**Five of eleven solved; four of the eight that are in the published table.**
+
+The useful comparison is not against HiGHS, which is a mature simplex and solves
+`cont1` in six seconds. It is against **OR-Tools PDLP** — the same algorithm
+family as this solver, implemented on CPU by the group that wrote the PDLP
+paper. The failure pattern is the same one: PDLP takes 256 s on `cont1`, 1,988 s
+on `cont11`, and times out on `irish-electricity`, which are exactly the three
+this solver cannot finish. On three of the four both solve, this solver's time
+is comparable or better; on `supportcase10` it is twelve times slower.
+
+`bdry2` is solved by nothing on this table except cuOpt.
+
+Two honest gaps this exposes. `sgpf5y6` ends in a **numerical error**, which is a
+failure of this implementation and not of the method. And `supportcase10` at 102
+seconds against PDLP's 8 says the constant factor is well behind even the CPU
+reference for this family — which is consistent with arXiv:2509.23903's finding
+that the remaining distance to the frontier is implementation rather than
+algorithm.
