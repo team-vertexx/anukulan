@@ -99,8 +99,34 @@ bool propagate_bounds(const StandardLp& lp, const std::vector<bool>& integral,
         if (std::isinf(hi)) ++max_infinite; else max_activity += a * hi;
       }
       const double q = lp.q[sz(i)];
-      if (max_infinite == 0 && max_activity < q - 1e-9) return false;
-      if (i < lp.num_equalities && min_infinite == 0 && min_activity > q + 1e-9)
+      // The tolerance has to scale with the row, for exactly the reason written
+      // out in provably_infeasible below - and this is the copy of that bug that
+      // was left behind when the other one was fixed.
+      //
+      // An absolute 1e-9 is under the noise floor of the arithmetic that made
+      // these numbers. A row whose activity is around 1e9 carries roughly 1e-7
+      // of rounding per term in double precision, and a few hundred terms put
+      // that far past 1e-9 - so a row that is exactly tight computes as
+      // violated, the child is declared infeasible, and the subtree under it is
+      // discarded with no relaxation ever solved.
+      //
+      // It cost an answer on this repository's own refinery MILP.
+      // data/refinery/small_milp.mps is a maximisation whose optimum HiGHS
+      // proves at 7,246,146,141.83 in 26 nodes; this tree returned
+      // 7,156,892,194.84 and called it optimal - 1.23% low, with a matching
+      // dual bound and no complaint. The debug-solution tracker named this line
+      // on the first run. Turning propagation off found the right answer, which
+      // is what says the search was fine and the arithmetic was not.
+      //
+      // provably_infeasible already scales, and the header there says the two
+      // tests have to agree about what an empty box is. They did not.
+      const double max_scale =
+          std::fmax(1.0, std::fmax(std::fabs(q), std::fabs(max_activity)));
+      if (max_infinite == 0 && max_activity < q - 1e-9 * max_scale) return false;
+      const double min_scale =
+          std::fmax(1.0, std::fmax(std::fabs(q), std::fabs(min_activity)));
+      if (i < lp.num_equalities && min_infinite == 0 &&
+          min_activity > q + 1e-9 * min_scale)
         return false;
 
       for (Int e = lp.k.row_begin(i); e < lp.k.row_end(i); ++e) {
@@ -109,6 +135,11 @@ bool propagate_bounds(const StandardLp& lp, const std::vector<bool>& integral,
         const std::size_t j = sz(lp.k.index()[sz(e)]);
         const double lo = (a > 0.0) ? (*lower)[j] : (*upper)[j];
         const double hi = (a > 0.0) ? (*upper)[j] : (*lower)[j];
+        // A tightening smaller than the rounding in the number it tightens is
+        // not a tightening; accepting one makes the loop churn and, worse, walks
+        // a bound into a crossing one ulp at a time.
+        const double step = 1e-9 * std::fmax(1.0, std::fmax(std::fabs((*lower)[j]),
+                                                            std::fabs((*upper)[j])));
 
         // a_ij x_j >= q - (largest the rest of the row can be)
         if (max_infinite == 0 || (max_infinite == 1 && std::isinf(hi))) {
@@ -117,11 +148,11 @@ bool propagate_bounds(const StandardLp& lp, const std::vector<bool>& integral,
           if (a > 0.0) {
             double v = limit;
             if (integral[j]) v = std::ceil(v - 1e-9);
-            if (v > (*lower)[j] + 1e-9) { (*lower)[j] = v; changed = true; }
+            if (v > (*lower)[j] + step) { (*lower)[j] = v; changed = true; }
           } else {
             double v = limit;
             if (integral[j]) v = std::floor(v + 1e-9);
-            if (v < (*upper)[j] - 1e-9) { (*upper)[j] = v; changed = true; }
+            if (v < (*upper)[j] - step) { (*upper)[j] = v; changed = true; }
           }
         }
         // Equalities bind from the other side too.
@@ -132,14 +163,19 @@ bool propagate_bounds(const StandardLp& lp, const std::vector<bool>& integral,
           if (a > 0.0) {
             double v = limit;
             if (integral[j]) v = std::floor(v + 1e-9);
-            if (v < (*upper)[j] - 1e-9) { (*upper)[j] = v; changed = true; }
+            if (v < (*upper)[j] - step) { (*upper)[j] = v; changed = true; }
           } else {
             double v = limit;
             if (integral[j]) v = std::ceil(v - 1e-9);
-            if (v > (*lower)[j] + 1e-9) { (*lower)[j] = v; changed = true; }
+            if (v > (*lower)[j] + step) { (*lower)[j] = v; changed = true; }
           }
         }
-        if ((*lower)[j] > (*upper)[j] + 1e-7) return false;
+        // The same scaling, and the same tolerance provably_infeasible uses, so
+        // that the two agree about when a box is empty rather than one of them
+        // discarding what the other would keep.
+        const double give = 1e-7 * std::fmax(1.0, std::fmax(std::fabs((*lower)[j]),
+                                                            std::fabs((*upper)[j])));
+        if ((*lower)[j] > (*upper)[j] + give) return false;
       }
     }
     if (!changed) break;
