@@ -195,37 +195,53 @@ would hide both ends.
 That presolve loses four instances and gains three is worth stating plainly: on
 the simplex this is close to a wash in *count*, and a clear win in work done.
 
-**Branch and bound, seven MIPLIB instances, nodes:**
-
-Only four of the seven finish inside the twenty-second limit. For the other
-three the node count measures the limit rather than the tree, and is not a
-comparison at all - the two sides ran at different moments under different load.
-They are listed separately for that reason rather than folded into a mean.
-
-Finished, so the counts mean something:
+**Branch and bound, nodes.** Measured on the tree as it stands - best-estimate
+node selection with plunging - with a thirty second limit, counting nodes so
+load does not matter:
 
 | instance | off | on | |
 |---|---|---|---|
-| p0201 | 831 | **195** | 4.26× better |
-| flugpl | 246 | 247 | unchanged |
-| khb05250 | 86 | **268** | 3.1× worse |
-| gt2 | 1,244 | **45,811** | 37× worse |
+| p0201 | 989 | **358** | 2.76× better |
+| flugpl | 274 | 262 | 1.05× better |
+| small_milp | 167 | 161 | 1.04× better |
+| gt2 | 307 | **399** | 1.3× worse |
+| khb05250 | 55 | **158** | 2.9× worse |
 
-Hit the time limit, so the count is the limit: `mas76`, `neos5`, `gen-ip054`.
+Geomean 0.94× over the four MIPLIB instances: **roughly neutral, two better, two
+worse, no blow-up.** On that evidence presolve still should not go on by default
+in `command_milp`, but "neutral and unpredictable per instance" is a different
+reason from the one recorded there.
 
-**Presolve makes the tree worse on this set, not better,** which is why
-`command_milp` has it off by default. Running the same four against the binary
-from before this work gives identical numbers for p0201, khb05250 and flugpl,
-and gt2 1,244 → 38,957 - so the damage is not new. It is MILP presolve itself;
-this work makes gt2 somewhat worse still rather than introducing the problem.
-
-The honest summary is that these column-singleton rules are an LP result. The
-tree does not want them, and nothing here changes that.
+*Correcting an earlier measurement of my own.* I first took these against the
+depth-first tree and reported gt2 at 1,244 → 45,811 nodes, a 37× blow-up, and a
+geomean of 0.62×. That number is real but it is about depth-first search, not
+about presolve: depth first commits to a subtree and never revisits the choice,
+so a presolve that reshapes the branching order can send it somewhere bad and
+keep it there. Best estimate leaves and comes back. Forcing the old order back
+with `--depth-first` on the current binary reproduces the blow-up at 847 →
+1,388, which is what pins the cause on node selection rather than on the
+reduction. The 37× should not be quoted.
 
 ```bash
-python3 bench/presolve_effect.py --mode=milp --set=miplib --limit=20 \
+python3 bench/presolve_effect.py --mode=milp --set=miplib --limit=30 \
     --instances flugpl gt2 khb05250 p0201
 ```
+
+**A trap this instance set walked into.** Before `propagate_bounds` had its
+tolerances scaled, `small_milp` with presolve *off* returned 6,902,342,470.68
+and called it optimal, against a true optimum of 7,246,146,141.83 - a 4.7% error
+reported as a proof. With presolve *on* the same binary returned the optimum to
+5.8e-13. Presolve was not fixing anything; it was removing 212 columns and so
+changing what the faulty interval arithmetic ever looked at.
+
+Two things follow. A node count compared between a run that is right and a run
+that is wrong measures nothing, so any MILP presolve table taken before that fix
+is void - including the first version of the one above. And `small_milp` is the
+instance that catches this class of bug: its activities reach 1e9, so an
+absolute epsilon anywhere in a bound or activity comparison falls under the
+noise floor there. MIPLIB cannot catch it, because 0/±1 instances never get near
+it. Any presolve rule that compares an activity against a fixed tolerance should
+be run against this instance before it is believed.
 
 ### dfl001, and why a stronger presolve can stop a first-order solver early
 

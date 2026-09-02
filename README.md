@@ -39,7 +39,7 @@ estimated.
 - **First-order** — 76/88 Netlib published optima at `--tol=1e-8`
 - **Presolve** — removes 23.3% of Netlib rows and 20.9% of its columns, and
   29.7% of the refinery model's columns, where it previously removed none.
-  1.36× fewer simplex iterations; the MILP tree is a separate story
+  1.36× fewer simplex iterations; roughly neutral on branch-and-bound nodes
 - **MILP** — 5 of 7 MIPLIB instances exact; `gen-ip054` 0.330%, `mas76` 0.562%
 - **QP** — 21 of the 24 smallest Maros–Meszaros instances
 - **GPU (Tesla T4)** — 2.70×–7.09× on solve time over the same algorithm on CPU
