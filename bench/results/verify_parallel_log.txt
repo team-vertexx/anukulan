@@ -1,0 +1,35 @@
+== simplex, 88 Netlib instances against published optima ==
+== milp survey ==
+
+IDENTICAL   verify_simplex_serial.txt vs verify_simplex_threads6.txt
+DIFFERS     miplib_serial.txt vs miplib_threads6.txt
+5,23c5,22
+< gen                          optimal            0.000     2.4       283
+< p0201                        optimal            0.000     2.5      1104
+< gt2                          optimal            0.000     1.9      3230
+< acc-tight4                   time limit         0.000    30.8         0
+< enlight8                     time limit         0.000    15.0     82811
+< pb-market-split8-70-4        time limit         0.000    15.0     65760
+< f2gap401600                  time limit         0.000    15.0      1700
+< app2-1                       time limit         0.001    15.0      1228
+< gen-ip021                    time limit         0.387    15.0     81538
+< mik-250-20-75-5              time limit         0.388    15.0      8643
+< mik-250-20-75-2              time limit         0.725    15.0     13560
+< pg5_34                       time limit         1.555    15.0       247
+< neos5                        time limit         3.333    15.0      2918
+< gmu-35-50                    time limit         4.359    15.0      2881
+< fiber                        time limit         4.523    15.0      2047
+< binkar10_1                   time limit         5.119    15.0      4923
+< neos-3610040-iskar           time limit         5.405    15.0       190
+< graphdraw-gemcutter          time limit         5.493    15.0     21125
+< bppc8-09                     time limit         7.627    15.0       340
+---
+> gen                          optimal            0.000     3.3       283
+> p0201                        optimal            0.000     3.4      1104
+> gt2                          optimal            0.000     2.7      3230
+> acc-tight4                   time limit         0.000    31.2         0
+> enlight8                     time limit         0.000    15.0     58932
+> pb-market-split8-70-4        time limit         0.000    15.0     46031
+> f2gap401600                  time limit         0.000    15.0      1372
+> app2-1                       time limit         0.001    15.0       941
+> mik-250-20-75-5              time limit         0.388    15.0      5862

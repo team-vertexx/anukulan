@@ -151,6 +151,34 @@ is now scanning every nonbasic column for the pivot row, and scanning a rotating
 subset instead trades iteration count against per-iteration cost. Untried, and
 the trade has to be measured rather than assumed.
 
+> **Re-measured 31 Aug 2026, and the two paragraphs above no longer hold.**
+>
+> A fresh sampling profile of the same command — `simplex degen3 --presolve` —
+> puts **65.7% of samples in `LuFactor::factorize`** (66.8% counting both
+> symbols it compiles to), `pivot_row` at **1.9%** and `compute_duals` at
+> **2.5%**. That is the reverse of the reading above, which had factorisation at
+> 11 samples in 4,500 and the pricing pass as the dominant cost.
+>
+> Both conclusions drawn from the old profile therefore need re-arguing, and in
+> the opposite direction. **Forrest–Tomlin is aimed at the hottest thing in the
+> component**, not a cold one: the run refactorises 3,991 times, once every
+> fifty pivots, and spends two thirds of itself there. And **partial pricing is
+> aimed at 2%**, so it cannot move the profile whatever the trade turns out to
+> be.
+>
+> **Re-taken on the ratio-test fix, as the first version of this note said it
+> would have to be.** That earlier run reached the 200,000 iteration limit in
+> 145.5 s and disagreed with §5 of RESULTS, which was reason enough not to trust
+> the profile beside it. On the fixed base `degen3` solves — **optimal, 105,433
+> iterations, 108.1 s, 2,089 refactorisations** — and 105,433 is exactly what §5
+> documents, so that disagreement was the bug and is now gone.
+>
+> The profile is unmoved by it: `factorize` was 66.4% before the fix and 65.7%
+> after. The fix changed how many iterations the instance needs, not where the
+> time inside one goes, so the argument above stands on the current code rather
+> than on a run that no longer reproduces. Evidence:
+> `bench/results/profile_degen3.txt`.
+
 ### 5. MILP 22 → 52
 
 The largest single piece of work, and the one the problem statement cares most

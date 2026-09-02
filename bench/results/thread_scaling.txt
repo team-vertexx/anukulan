@@ -1,0 +1,131 @@
+# binary   ~/sankhya-parallel/build/sankhya
+# extra    --no-polish
+# repeats  3, minimum kept
+# load average at start 3.57
+
+# datt256_lp: 335 iterations (~3.0s serial)
+## datt256_lp   status iteration limit, 335 iterations, objective 2.560000441010e+02
+ threads    solve s  speedup     wall s  end-to-end
+       1      2.380     1.00      3.093        1.00
+       2      1.791     1.33      2.470        1.25
+       3      1.686     1.41      2.359        1.31
+       4      1.680     1.42      2.394        1.29
+       5      1.634     1.46      2.351        1.32
+       6      1.650     1.44      2.365        1.31
+       7      1.686     1.41      2.395        1.29
+       8      1.861     1.28      2.590        1.19
+       9      1.839     1.29      2.544        1.22
+      10      1.910     1.25      2.617        1.18
+
+# graph40-40: 577 iterations (~3.0s serial)
+## graph40-40   status iteration limit, 577 iterations, objective -3.000000000000e+02
+ threads    solve s  speedup     wall s  end-to-end
+       1      2.741     1.00      3.807        1.00
+       2      2.110     1.30      3.170        1.20
+       3      2.092     1.31      3.256        1.17
+       4      2.032     1.35      3.196        1.19
+       5      1.989     1.38      3.157        1.21
+       6      2.075     1.32      3.218        1.18
+       7      2.129     1.29      3.306        1.15
+       8      2.406     1.14      3.484        1.09
+       9      2.542     1.08      3.713        1.03
+      10      2.649     1.03      3.827        0.99
+
+# supportcase10: 933 iterations (~3.0s serial)
+## supportcase10   status iteration limit, 933 iterations, objective 3.112317281011e+00
+ threads    solve s  speedup     wall s  end-to-end
+       1      2.029     1.00      2.310        1.00
+       2      1.504     1.35      1.804        1.28
+       3      1.436     1.41      1.738        1.33
+       4      1.371     1.48      1.716        1.35
+       5      1.372     1.48      1.704        1.36
+       6      1.367     1.48      1.705        1.35
+       7      1.506     1.35      1.840        1.26
+       8      1.884     1.08      2.219        1.04
+       9      2.179     0.93      2.512        0.92
+      10      2.312     0.88      2.645        0.87
+
+# cont1: 1008 iterations (~3.0s serial)
+## cont1   status iteration limit, 1008 iterations, objective 2.915126519408e-04
+ threads    solve s  speedup     wall s  end-to-end
+       1      2.117     1.00      2.371        1.00
+       2      1.722     1.23      1.954        1.21
+       3      1.693     1.25      1.933        1.23
+       4      1.727     1.23      1.978        1.20
+       5      1.787     1.18      2.047        1.16
+       6      1.787     1.18      2.044        1.16
+       7      1.898     1.12      2.149        1.10
+       8      2.339     0.91      2.600        0.91
+       9      2.552     0.83      2.804        0.85
+      10      2.740     0.77      2.993        0.79
+
+# watson_1: 383 iterations (~3.0s serial)
+## watson_1   status iteration limit, 383 iterations, objective -5.044649011936e+05
+ threads    solve s  speedup     wall s  end-to-end
+       1      2.401     1.00      2.959        1.00
+       2      2.091     1.15      2.677        1.11
+       3      2.013     1.19      2.606        1.14
+       4      2.073     1.16      2.677        1.11
+       5      2.007     1.20      2.609        1.13
+       6      2.100     1.14      2.688        1.10
+       7      2.102     1.14      2.706        1.09
+       8      2.311     1.04      2.899        1.02
+       9      2.354     1.02      2.951        1.00
+      10      2.444     0.98      3.031        0.98
+
+# sgpf5y6: 599 iterations (~3.0s serial)
+## sgpf5y6   status iteration limit, 599 iterations, objective -2.363139302046e+03
+ threads    solve s  speedup     wall s  end-to-end
+       1      2.752     1.00      3.264        1.00
+       2      2.464     1.12      2.982        1.09
+       3      2.254     1.22      2.795        1.17
+       4      2.233     1.23      2.761        1.18
+       5      2.217     1.24      2.748        1.19
+       6      2.366     1.16      2.895        1.13
+       7      2.599     1.06      3.116        1.05
+       8      2.748     1.00      3.246        1.01
+       9      2.859     0.96      3.388        0.96
+      10      2.958     0.93      3.460        0.94
+
+# qap15: 8695 iterations (~3.0s serial)
+## qap15   status iteration limit, 8695 iterations, objective 1.040997508751e+03
+ threads    solve s  speedup     wall s  end-to-end
+       1      2.166     1.00      2.219        1.00
+       2      1.742     1.24      1.783        1.24
+       3      1.686     1.28      1.727        1.28
+       4      1.544     1.40      1.595        1.39
+       5      1.459     1.48      1.512        1.47
+       6      1.453     1.49      1.507        1.47
+       7      1.710     1.27      1.765        1.26
+       8      3.560     0.61      3.615        0.61
+       9      5.307     0.41      5.361        0.41
+      10      5.729     0.38      5.783        0.38
+
+# maros-r7: 6818 iterations (~3.0s serial)
+## maros-r7   status iteration limit, 6818 iterations, objective 1.497185166312e+06
+ threads    solve s  speedup     wall s  end-to-end
+       1      1.897     1.00      1.954        1.00
+       2      1.211     1.57      1.254        1.56
+       3      1.060     1.79      1.103        1.77
+       4      1.037     1.83      1.092        1.79
+       5      0.934     2.03      0.988        1.98
+       6      0.921     2.06      0.978        2.00
+       7      1.057     1.79      1.113        1.75
+       8      2.310     0.82      2.367        0.83
+       9      3.756     0.51      3.811        0.51
+      10      4.235     0.45      4.291        0.46
+
+# load average at end 7.77
+
+## geometric mean speedup over the set
+ threads    solve  end-to-end
+       1     1.00        1.00
+       2     1.28        1.24
+       3     1.35        1.29
+       4     1.37        1.30
+       5     1.41        1.33
+       6     1.39        1.31
+       7     1.29        1.23
+       8     0.96        0.95
+       9     0.83        0.82
+      10     0.78        0.78

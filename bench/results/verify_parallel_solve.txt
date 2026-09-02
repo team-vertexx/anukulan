@@ -1,0 +1,5 @@
+
+88 instances compared at 1 thread against 6, iteration cap 20000
+  identical objective, iterations and status : 88
+  differing                                  : 0
+  of those reaching optimal, matching the published value: 39

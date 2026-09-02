@@ -39,8 +39,19 @@ add_library(sankhya
   src/sankhya/crossover.cpp
   src/sankhya/presolve.cpp
   src/sankhya/ldl.cpp
+  src/sankhya/threading.cpp
+  src/sankhya/threaded_backend.cpp
 )
 target_include_directories(sankhya PUBLIC src)
+
+# std::thread needs the platform's thread library linked, and nothing more. No
+# OpenMP: the reductions have to be bit-identical, which means owning the
+# partition, and Apple Clang ships without libomp so requiring it would break
+# the one thing the build promises - clone it and run cmake. See
+# src/sankhya/threading.hpp.
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+find_package(Threads REQUIRED)
+target_link_libraries(sankhya PUBLIC Threads::Threads)
 
 if(MSVC)
   target_compile_options(sankhya PRIVATE /W4)

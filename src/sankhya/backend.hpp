@@ -217,6 +217,19 @@ class LinAlgBackend {
 // Plain scalar C++. The reference against which any other backend is checked.
 const LinAlgBackend& cpu_backend();
 
+// The same arithmetic spread over a thread pool. One thread or fewer returns
+// cpu_backend() itself.
+//
+// This backend produces bit-identical results to cpu_backend() at every thread
+// count. That is a property of what it threads, not an accident: the matrix
+// products split by rows so each output entry is still summed in the serial
+// order, the elementwise steps have no cross-entry dependence, and the one
+// reduction that is threaded is a maximum, which is exactly associative. The
+// inner products are left on the calling thread precisely because summation is
+// not. threaded_backend.cpp says this at more length, and test_threading checks
+// it rather than trusting it.
+const LinAlgBackend& threaded_cpu_backend(int threads);
+
 #ifdef SANKHYA_WITH_CUDA
 // Hand-written CUDA kernels. Throws if no device is present.
 const LinAlgBackend& cuda_backend();
