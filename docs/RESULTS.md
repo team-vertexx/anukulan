@@ -243,6 +243,63 @@ noise floor there. MIPLIB cannot catch it, because 0/±1 instances never get nea
 it. Any presolve rule that compares an activity against a fixed tolerance should
 be run against this instance before it is believed.
 
+### The refinery model, end to end
+
+The one number the problem statement cares about, on `data/refinery/refinery.mps`
+through the simplex:
+
+| | objective | iterations |
+|---|---|---|
+| plain | 24260622668.873257 | 4,378 |
+| presolved | 24260622668.873268 | **3,202** |
+
+Same answer to 4.5e-16 relative, which is machine precision on a number of that
+size, and **1.37× fewer pivots**. Presolve removed nothing from this model
+before this work, so both halves of that line are new.
+
+```bash
+build/sankhya simplex data/refinery/refinery.mps --presolve
+```
+
+### A check that failed for the wrong reason, and what it taught
+
+Running the same on/off comparison over MIPLIB through the simplex reports four
+instances - `beasleyC1`, `beasleyC2`, `beasleyC3`, `beavma` - where the presolved
+objective differs from the plain one. On `beasleyC3` it is 40.43 against 152.05.
+That reads exactly like presolve cutting off the optimum, which is the failure
+this component is most able to produce.
+
+It is not. `beasleyC3` has 1,250 binary columns, and presolve is entitled to use
+that: it rounds integer bounds, and it rounds the implied bounds that tightening
+derives. The LP relaxation of the presolved model is therefore *legitimately*
+tighter than the relaxation of the original, and 152.05 is the better root bound
+rather than a wrong answer. `--presolve-no-bound-tightening` reproduces 40.43
+exactly, which is what pins it.
+
+The check was wrong, not the reduction. **An LP relaxation of a model with
+integer columns cannot be used to test that presolve preserves the answer**,
+because the two runs are not solving the same problem. `presolve_effect.py` now
+skips that comparison when the file declares any integer column and says how
+many it skipped. Recorded because the first version of that harness would have
+reported a correct presolve as having corrupted eight instances, and the number
+it printed on beasleyC3 - a 3.7× objective change - is alarming enough to have
+been believed.
+
+The fix needed fixing too, and the second bug is the more useful one. Detecting
+integrality by looking for a `MARKER`/`INTORG` block finds nothing in five of
+those eight: `beasleyC1`, `beasleyC2`, `beasleyC3`, `beavma` and `r50x360`
+declare their columns binary with `BV` in `BOUNDS` and have no `INTORG` anywhere
+in the file. A check that only knows about `INTORG` therefore still reports them
+as corrupted, having been written specifically to stop doing that.
+
+Over the whole set, LP relaxations through the simplex: **1.12× fewer iterations
+over 96 instances**, 33 fewer, 7 more, 56 unchanged, and no answer changed on any
+instance where the comparison is valid.
+
+```bash
+python3 bench/presolve_effect.py --mode=simplex --set=miplib --limit=30
+```
+
 ### dfl001, and why a stronger presolve can stop a first-order solver early
 
 One instance converges plain and not presolved. `dfl001` at `--tol=1e-6` returns

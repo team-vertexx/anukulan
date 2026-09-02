@@ -28,6 +28,37 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 
 
+# Integrality is declared two different ways in MPS and both have to be looked
+# for. A MARKER/INTORG block in COLUMNS is the one everybody remembers; BV, LI
+# and UI in BOUNDS is the other, and it is not a rare corner - of the eight
+# MIPLIB instances whose LP relaxation moves under presolve, five have no INTORG
+# anywhere and declare 1,250 binaries apiece with BV. Checking only for INTORG
+# reports those five as presolve corrupting the answer.
+INTEGER_BOUND_TYPES = ("BV", "LI", "UI")
+
+
+def has_integers(path):
+    """True when the MPS declares any integer column, by either route."""
+    try:
+        with open(path, errors="ignore") as fh:
+            in_bounds = False
+            for line in fh:
+                if not line.strip():
+                    continue
+                if not line[0].isspace():
+                    in_bounds = line.split()[0].upper() == "BOUNDS"
+                    continue
+                if "INTORG" in line:
+                    return True
+                if in_bounds:
+                    fields = line.split()
+                    if fields and fields[0].upper() in INTEGER_BOUND_TYPES:
+                        return True
+    except OSError:
+        pass
+    return False
+
+
 def run(binary, mode, model, presolve, limit, extra):
     cmd = [binary, mode, model, "--quiet", "--format=json", f"--time-limit={limit}"]
     if presolve:
@@ -67,6 +98,22 @@ def main():
 
     # "work" is iterations for the simplex and nodes for the tree.
     key = "iterations" if args.mode == "simplex" else "nodes"
+    # Presolve must not change the answer. Comparing the two runs against each
+    # other is the weak form of that check - two runs sharing a bug agree - but
+    # it needs no reference value, so it covers every instance rather than the
+    # ones somebody has published an optimum for. Where a reference exists the
+    # stronger check belongs in verify_presolve.py.
+    #
+    # It does NOT apply to an LP relaxation of a model with integer columns, and
+    # that is not a detail. Presolve is entitled to use integrality - it rounds
+    # integer bounds and rounds the implied bounds tightening derives - so the
+    # relaxation of the presolved model is legitimately tighter than the
+    # relaxation of the original. On beasleyC3 that is 40.43 against 152.05, and
+    # the larger number is the better bound rather than a wrong answer. Checking
+    # it anyway reports four MIPLIB instances as corrupted by a presolve that is
+    # working exactly as intended, which is a test failing for the wrong reason.
+    disagreed = []
+    skipped_integral = 0
     print(f"{'instance':<26} {'off':>12} {'on':>12} {'ratio':>8}   {'off s':>7} {'on s':>7}")
     ratios, rows = [], []
     both_solved = off_only = on_only = neither = 0
@@ -98,8 +145,20 @@ def main():
         # Only pairs where both sides finished say anything about work done.
         if so and sn and wo > 0 and wn > 0:
             ratios.append(ratio)
+        # An LP relaxation of an integer model is not a comparison; see above.
+        integral = args.mode == "simplex" and has_integers(model)
+        if integral:
+            skipped_integral += 1
+        oo, on_obj = off.get("objective"), on.get("objective")
+        if so and sn and not integral and oo is not None and on_obj is not None:
+            scale = max(1.0, abs(oo))
+            if abs(oo - on_obj) / scale > 1e-6:
+                disagreed.append((name, oo, on_obj, abs(oo - on_obj) / scale))
+
         mark = ""
-        if so and not sn: mark = "  <-- lost it"
+        if so and sn and any(d[0] == name for d in disagreed):
+            mark = "  <-- ANSWER CHANGED"
+        elif so and not sn: mark = "  <-- lost it"
         elif sn and not so: mark = "  <-- gained it"
         elif so and sn and ratio < 0.8: mark = "  <-- slower"
         print(f"{name:<26} {wo:12d} {wn:12d} {ratio:8.2f}   "
@@ -112,6 +171,18 @@ def main():
 
     print(f"\nboth finished {both_solved}, only without presolve {off_only}, "
           f"only with {on_only}, neither {neither}")
+    # Printed before the speed summary and never folded into it, because a
+    # presolve that changed an answer has no speed to report.
+    if disagreed:
+        print(f"\nANSWER CHANGED on {len(disagreed)} of {both_solved} instances "
+              f"both sides finished:")
+        for name, a, b, rel in disagreed:
+            print(f"  {name:<26} off {a:.10g}  on {b:.10g}  rel {rel:.3e}")
+    else:
+        print(f"answers agree on all {both_solved} instances both sides finished")
+    if skipped_integral:
+        print(f"  ({skipped_integral} skipped: an LP relaxation of an integer "
+              f"model, where presolve may legitimately tighten the bound)")
     if ratios:
         geo = math.exp(sum(math.log(r) for r in ratios) / len(ratios))
         faster = sum(1 for r in ratios if r > 1.05)

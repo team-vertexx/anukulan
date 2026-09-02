@@ -369,6 +369,12 @@ int command_simplex(const std::vector<std::string>& args) {
   bool as_json = false;
   bool quiet = false;
   bool use_presolve = false;
+  // The same presolve switches command_solve carries. Without them a reduction
+  // cannot be ablated against the simplex, and the simplex is where presolve's
+  // effect is best measured: it stops on an exact optimality test, where the
+  // first-order method's relative one moves when presolve changes what it
+  // divides by.
+  sankhya::PresolveOptions presolve_options;
   bool use_crossover = false;
   double crossover_tolerance = 1e-4;
   // A seed that has not converged by here is not going to produce a better
@@ -458,6 +464,31 @@ int command_simplex(const std::vector<std::string>& args) {
       options.pricing = sankhya::SimplexOptions::Pricing::kDevex;
     } else if (a == "--presolve") {
       use_presolve = true;
+    } else if (a == "--presolve-no-bound-tightening") {
+      use_presolve = true;
+      presolve_options.bound_tightening = false;
+    } else if (a == "--presolve-no-dual-fixing") {
+      use_presolve = true;
+      presolve_options.dual_fixing = false;
+    } else if (a == "--presolve-no-doubletons") {
+      use_presolve = true;
+      presolve_options.doubleton_equations = false;
+    } else if (a == "--presolve-no-forcing") {
+      use_presolve = true;
+      presolve_options.forcing_rows = false;
+    } else if (a == "--presolve-no-slack-singletons") {
+      use_presolve = true;
+      presolve_options.slack_column_singletons = false;
+    } else if (a == "--presolve-no-inequality-singletons") {
+      use_presolve = true;
+      presolve_options.inequality_column_singletons = false;
+    } else if (a == "--presolve-rows-only") {
+      use_presolve = true;
+      presolve_options.fixed_columns = false;
+      presolve_options.empty_columns = false;
+      presolve_options.free_column_singletons = false;
+      presolve_options.slack_column_singletons = false;
+      presolve_options.inequality_column_singletons = false;
     } else if (a == "--verbose") {
       options.verbose = true;
     } else if (a == "--format=json") {
@@ -484,7 +515,7 @@ int command_simplex(const std::vector<std::string>& args) {
   sankhya::PresolveResult pre;
   sankhya::Model solved_model = read_result.model;
   if (use_presolve) {
-    pre = sankhya::presolve(read_result.model);
+    pre = sankhya::presolve(read_result.model, presolve_options);
     if (pre.status != sankhya::PresolveStatus::kReduced) {
       std::printf("status        %s (proved by presolve, without solving)\n",
                   sankhya::to_string(pre.status).c_str());
