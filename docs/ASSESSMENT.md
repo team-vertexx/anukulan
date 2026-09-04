@@ -63,7 +63,7 @@ separate file so re-fetching cannot undo them.
 
 ## 2.2 Built from scratch, and it can be checked
 
-13,651 lines with no dependency outside the standard library. No HiGHS, no
+16,152 lines with no dependency outside the standard library. No HiGHS, no
 OR-Tools, no SciPy underneath. HiGHS appears in the repository exactly once: as
 the thing being benchmarked against.
 

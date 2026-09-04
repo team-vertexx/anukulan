@@ -11,7 +11,7 @@ HiGHS appears in this repository exactly once: as the thing we benchmark
 *against*.
 
 ```
-13,651 lines of solver and CLI     13 test suites, all passing
+16,152 lines of solver and CLI     13 test suites, all passing
 88 Netlib instances verified against published optima — 0 wrong answers
 ```
 
