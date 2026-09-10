@@ -147,6 +147,11 @@ c-MIR restricted to original rows, dual steepest edge inside branch and bound.
 Each cost real time to disprove. `git log` is the other half of this — the
 commit messages carry the reasoning, not just the change.
 
+## Author
+
+The solver in `src/` is written by Mohit Prajapati —
+[@mohitt31](https://github.com/mohitt31).
+
 ## Team
 
 | | |
@@ -154,6 +159,10 @@ commit messages carry the reasoning, not just the change.
 | Abhishek Kumar | [@Abhishek-Kumar-2312](https://github.com/Abhishek-Kumar-2312) |
 
 Built for Smart India Hackathon 2026, problem statement SIH26119.
+
+## Licence
+
+Apache License 2.0 — see [LICENSE](LICENSE).
 
 ## Reproducing any number in this repository
 
