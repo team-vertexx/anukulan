@@ -35,7 +35,8 @@ class LuFactor {
  public:
   // Factorises the basis whose columns are `basis` taken from `columns`, which
   // must be the constraint matrix stored column-wise. Returns false if the basis
-  // is singular, with `error` describing which row or column failed.
+  // is singular, with `error` describing which row or column failed. A failure
+  // leaves the previous factorisation exactly as it was.
   bool factorize(const SparseMatrix& columns, const std::vector<Int>& basis,
                  const LuOptions& options = {}, std::string* error = nullptr);
 
@@ -54,6 +55,11 @@ class LuFactor {
   Int nucleus_size() const { return n_ - triangular_; }
 
  private:
+  // The factorisation itself, into this object from scratch. factorize() runs
+  // it on a fresh object and adopts the result only if it succeeds.
+  bool build(const SparseMatrix& columns, const std::vector<Int>& basis,
+             const LuOptions& options, std::string* error);
+
   struct Eta {
     Int pivot_row = 0;
     std::vector<Int> rows;

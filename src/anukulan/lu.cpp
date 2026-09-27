@@ -35,6 +35,23 @@ struct Active {
 
 bool LuFactor::factorize(const SparseMatrix& columns, const std::vector<Int>& basis,
                          const LuOptions& options, std::string* error) {
+  // Build into a fresh object and adopt it only if it succeeds. The simplex
+  // relies on a failed factorisation leaving the previous one intact: its basis
+  // does not change when a refactorisation fails, and it goes on solving with
+  // the factors it had, to roll back or to report where it stopped. Building in
+  // place broke that. The first thing a build does is reset every pivot to -1,
+  // so a failure left factors that indexed outside every vector they touched,
+  // and the next solve wrote before the start of the heap block. On the Linux
+  // CI runner that aborted cycle and wood1p; on the development machine cycle
+  // reported a numerical error and the bad write went unnoticed.
+  LuFactor fresh;
+  if (!fresh.build(columns, basis, options, error)) return false;
+  *this = std::move(fresh);
+  return true;
+}
+
+bool LuFactor::build(const SparseMatrix& columns, const std::vector<Int>& basis,
+                     const LuOptions& options, std::string* error) {
   auto fail = [&](const std::string& message) {
     if (error) *error = message;
     return false;
