@@ -1765,3 +1765,66 @@ work on a model family of this kind, at every size tried, without changing one
 answer. It does not yet show the learned parts: a predictor for MILP decisions
 and heuristics tuned to the plant. Those are measured the same way when they
 exist: on held-out days of the same family, cold against warm.
+
+## 12. A case stack: the base plan and sixty what-if cases
+
+Before a crude purchase or a shutdown, a planner does not solve one model. They
+solve the base plan and then a stack of cases around it, each of which differs
+from the base in one piece of data: what if this crude were cheaper, what if
+diesel demand fell, what if the FCC lost half its capacity for a period. Every
+case keeps the base plan's structure, so the base's optimal basis is a far
+better start for each of them than the all-logical one.
+
+**The stack.** `scripts/refinery_cases.py` writes the base plan from
+`scripts/refinery_model.py` and sixty cases, each changed in one way: one
+crude's cost moved by -6%, -3%, +3% or +6% (32 cases); one crude's purchase
+ceiling halved (8); one product's sales ceiling moved by -10% or +10% in every
+period (8); the CDU at 80%, or the FCC or the hydrotreater at 50%, in one of the
+first four periods (12). No case can be infeasible: each one only moves a price
+or tightens a ceiling, and buying nothing is always a feasible plan.
+
+**The measurement.** `anukulan family --from-first` solves every case twice on
+the identical model with the dual simplex: cold, and from the basis the base
+case ended on. The warm answer is compared with the cold one and checked against
+the model's own rows.
+
+| plan | rows | cases | pivots, cold to warm | seconds, cold to warm | answers that differ |
+|---|---|---|---|---|---|
+| 12 periods | 1,380 | 60 | 195,152 to 5,986 (**0.031x**) | 20.05 to 1.00 (**0.050x**) | 0 |
+| 24 periods | 2,760 | 60 | 764,471 to 11,794 (**0.015x**) | 162.81 to 4.42 (**0.027x**) | 0 |
+
+```bash
+python3 -u bench/case_stack.py        # writes bench/results/case_stack.txt
+```
+
+Twelve of the sixty cases need no pivots at all from the base's basis at 12
+periods: the change does not move the optimal plan (a price rise on a crude the
+plan does not buy, say), so the base's basis is already optimal for the case. On
+average a case takes 3,253 pivots cold and 100 from the base.
+
+**Why the GPU batch is not first.** On the 12-period plan the first-order method
+takes 4,600 iterations to reach a relative tolerance of 1e-2, 25,600 to 1e-3
+and 102,400 to 1e-4 (presolve on, CPU), where a cold dual simplex takes about
+3,000 pivots and a warm one about 100. A planning LP of this size is small and
+badly scaled, which is the regime where the simplex is at its best and a
+first-order method at its worst. So on plans like this one the GPU's job in a
+case stack is to bound every case of a large stack at once, cheaply and safely,
+and the cases that decide are finished exactly by the warm simplex. Whether one
+GPU batch beats warm simplex outright, and at what plan size, is measured when
+the batch exists, not assumed.
+
+## 13. The correctness gate in CI
+
+The numbers in §5 are from the development machine with a 60-second limit. The
+CI gate runs the same harness on a hosted Linux runner with a 120-second limit
+over every instance the fetch script downloads, which is 89 today. Its most
+recent result, on this branch and on the commit before it:
+
+```
+89 instances: 83 correct, 0 WRONG, 6 did not finish
+```
+
+The instances that do not finish differ between the two machines (`scsd1` stops
+on a numerical error on the runner and solves on the development machine), which
+is why the counts are reported separately rather than merged. The count that
+matters is the same on both: no wrong answers.
