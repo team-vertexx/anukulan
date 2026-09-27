@@ -1,0 +1,3 @@
+periods  12  rows   1380  re-solves  29  pivots  127303 ->   5701 (0.045x)  seconds    15.23 ->    1.19 (0.078x)  answers that differ 0  warm failures 0
+periods  24  rows   2760  re-solves   9  pivots  154635 ->   3770 (0.024x)  seconds    38.16 ->    1.88 (0.049x)  answers that differ 0  warm failures 0
+periods  52  rows   5980  re-solves   5  pivots  115957 ->   5148 (0.044x)  seconds    81.10 ->    8.07 (0.100x)  answers that differ 0  warm failures 0

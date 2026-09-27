@@ -1,5 +1,5 @@
 ########## WITH DOUBLETONS ##########
-using ~/sankhya/build/sankhya
+using ~/anukulan/build/anukulan
 instance           published  plain err    pre err   plain s     pre s iters plain  iters pre
 25fv47           5501.845888   1.55e-08   7.84e-09      1.60      1.29      118160     101440
 80bau3b        987232.160720   7.91e-06   7.66e-06     44.08      8.35     1000000     204800
@@ -103,7 +103,7 @@ geomean wall-clock speedup: 1.63x over 66 instances that take more than 50 ms
 best 50.73x, worst 0.41x
 
 ########## WITHOUT DOUBLETONS ##########
-using ~/sankhya/build/sankhya
+using ~/anukulan/build/anukulan
 instance           published  plain err    pre err   plain s     pre s iters plain  iters pre
 25fv47           5501.845888   1.55e-08   1.69e-09      1.67      0.97      118160      66920
 80bau3b        987232.160720   7.91e-06   7.66e-06     47.62      9.66     1000000     204800
