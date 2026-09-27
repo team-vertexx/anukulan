@@ -1,0 +1,2 @@
+periods  12  rows   1380  cases  60  pivots  195152 ->   5986 (0.031x)  seconds    20.05 ->    1.00 (0.050x)  answers that differ 0  warm failures 0
+periods  24  rows   2760  cases  60  pivots  764471 ->  11794 (0.015x)  seconds   162.81 ->    4.42 (0.027x)  answers that differ 0  warm failures 0
