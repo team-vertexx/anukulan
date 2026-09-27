@@ -39,7 +39,7 @@ CANDIDATES = [
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", default="data/lptestset")
-    parser.add_argument("--binary", default="build/sankhya")
+    parser.add_argument("--binary", default="build/anukulan")
     parser.add_argument("--only", default="")
     parser.add_argument("--max-mb", type=float, default=60.0,
                         help="skip anything whose expanded file exceeds this")

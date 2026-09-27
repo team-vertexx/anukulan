@@ -7,7 +7,7 @@
 set -eu
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
-out="sankhya-source.zip"
+out="anukulan-source.zip"
 rm -f "$out"
 
 # git archive takes exactly what is tracked, so anything gitignored - build
@@ -18,5 +18,5 @@ files=$(unzip -l "$out" | tail -1 | awk '{print $2}')
 echo "wrote $out  ($size, $files files)"
 echo
 echo "Next: kaggle.com -> Datasets -> New Dataset -> drag this file in,"
-echo "title it sankhya-source, set it Private, Create."
+echo "title it anukulan-source, set it Private, Create."
 echo "Then follow docs/KAGGLE.md from step 2."

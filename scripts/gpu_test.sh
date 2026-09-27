@@ -36,9 +36,9 @@ nvcc --version | tail -2
 nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader || true
 
 step "2. build"
-cmake -S . -B "$build" -DCMAKE_BUILD_TYPE=Release -DSANKHYA_ENABLE_CUDA=ON > /dev/null
+cmake -S . -B "$build" -DCMAKE_BUILD_TYPE=Release -DANUKULAN_ENABLE_CUDA=ON > /dev/null
 cmake --build "$build" -j"$(nproc 2>/dev/null || echo 4)" 2>&1 | tail -3
-"./$build/sankhya" backends
+"./$build/anukulan" backends
 
 step "3. backend operations against the CPU reference"
 # Not `ctest ... | tail`: the exit status of a pipeline is the status of its
@@ -78,7 +78,7 @@ for n in names:
         continue
     out = {}
     for tag, flag in (("cpu", "--backend=cpu"), ("gpu", "--backend=cuda")):
-        r = subprocess.run([f"./{build}/sankhya", "solve", str(p), "--tol=1e-6",
+        r = subprocess.run([f"./{build}/anukulan", "solve", str(p), "--tol=1e-6",
                             "--max-iter=500000", "--time-limit=120",
                             "--format=json", "--quiet", flag],
                            capture_output=True, text=True)
@@ -112,7 +112,7 @@ for n in names:
     row = {"name": n}
     for tag, flag in (("cpu", "--backend=cpu"), ("gpu", "--backend=cuda")):
         t = time.perf_counter()
-        r = subprocess.run([f"./{build}/sankhya", "solve", str(p), "--tol=1e-4",
+        r = subprocess.run([f"./{build}/anukulan", "solve", str(p), "--tol=1e-4",
                             "--max-iter=1000000", "--time-limit=600",
                             "--format=json", "--quiet", flag],
                            capture_output=True, text=True)
@@ -166,7 +166,7 @@ for n in names:
         continue
     for flag, backend in (("--backend=cpu", "cpu"), ("--backend=cuda", "gpu")):
         for pre in (False, True):
-            cmd = [f"./{build}/sankhya", "solve", str(path), "--tol=1e-4",
+            cmd = [f"./{build}/anukulan", "solve", str(path), "--tol=1e-4",
                    "--max-iter=1000000", "--time-limit=600", "--format=json",
                    "--quiet", flag]
             if pre:
@@ -208,13 +208,13 @@ echo "problem however it looks. This asks the backend itself which kernel owns"
 echo "the run - no external profiler, because nsys is not on this image and"
 echo "installing it there is its own afternoon."
 if [ -f data/lptestset/graph40-40.mps ]; then
-  "./$build/sankhya" solve data/lptestset/graph40-40.mps --backend=cuda \
+  "./$build/anukulan" solve data/lptestset/graph40-40.mps --backend=cuda \
       --tol=1e-4 --max-iter=1000000 --time-limit=600 --quiet --profile \
       | tee results/graph40-40-profile.txt || true
   echo
   echo "For comparison, the same on an instance where the GPU already pays:"
   if [ -f data/lptestset/qap15.mps ]; then
-    "./$build/sankhya" solve data/lptestset/qap15.mps --backend=cuda \
+    "./$build/anukulan" solve data/lptestset/qap15.mps --backend=cuda \
         --tol=1e-4 --max-iter=1000000 --time-limit=600 --quiet --profile \
         | tee results/qap15-profile.txt || true
   fi
@@ -223,7 +223,7 @@ else
 fi
 
 step "8. presolve end to end, checked against published optima"
-python3 bench/verify_presolve.py --binary "./$build/sankhya" --abs-tol=1e-8 \
+python3 bench/verify_presolve.py --binary "./$build/anukulan" --abs-tol=1e-8 \
     --csv results/presolve_verified.csv || true
 
 printf '\n=== summary\n'
