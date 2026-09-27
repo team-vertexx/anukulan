@@ -12,3 +12,7 @@ data/reference/_scratch/
 data/refinery/*.mps
 *.zip
 Highs.log
+
+# generated families for bench/plant_memory.py
+data/refinery/family/
+__pycache__/
