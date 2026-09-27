@@ -28,7 +28,12 @@ for f in sorted(glob.glob("data/netlib/*.mps")):
     try:
         d = json.loads(p.stdout.strip().splitlines()[-1])
     except Exception:
-        rows.append((name, "read failed", None)); unfinished += 1; continue
+        # No answer on stdout at all: a crash or a reader error. Named, so a CI
+        # log says which instance it was rather than only counting it.
+        why = f"no answer, exit code {p.returncode}"
+        rows.append((name, why, None)); unfinished += 1
+        print(f"  {name:<12} {why}", flush=True)
+        continue
     status = d.get("status", "?")
     if status != "optimal":
         rows.append((name, status, None)); unfinished += 1
@@ -44,6 +49,6 @@ for f in sorted(glob.glob("data/netlib/*.mps")):
 
 print(f"\n{len(rows)} instances: {solved} correct, {wrong} WRONG, {unfinished} did not finish")
 for name, status, err in rows:
-    if err is None and status != "read failed":
+    if err is None:
         print(f"  did not finish: {name} ({status})")
 sys.exit(1 if wrong else 0)
