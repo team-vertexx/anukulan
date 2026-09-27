@@ -2,7 +2,7 @@
 // deletes parts of the model and then claims a solution for the parts it
 // deleted. So the tests here are not only "did the reduction fire" but "does
 // the point that comes back out satisfy the model that went in".
-#include "sankhya/presolve.hpp"
+#include "anukulan/presolve.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -10,10 +10,10 @@
 #include <vector>
 
 #include "check.hpp"
-#include "sankhya/simplex.hpp"
-#include "sankhya/standard_form.hpp"
+#include "anukulan/simplex.hpp"
+#include "anukulan/standard_form.hpp"
 
-using namespace sankhya;
+using namespace anukulan;
 
 namespace {
 
@@ -99,7 +99,7 @@ void test_singleton_row_becomes_a_bound() {
   CHECK_EQ(r.counts.singleton_rows, 1);
   CHECK_EQ(r.reduced.num_rows(), 0);
   CHECK_EQ(r.reduced.num_cols(), 1);
-  CHECK(r.reduced.col_upper.size() == 1 && sankhya_test::close(r.reduced.col_upper[0], 5.0, 1e-7));
+  CHECK(r.reduced.col_upper.size() == 1 && anukulan_test::close(r.reduced.col_upper[0], 5.0, 1e-7));
 
   // With every reduction on, nothing is left to solve and the answer comes out
   // of postsolve alone. min -x subject to 2x <= 10 is -5.
@@ -287,7 +287,7 @@ void test_integer_bounds_are_rounded_not_relaxed() {
   PresolveResult r = presolve(m, hold);
   CHECK(r.status == PresolveStatus::kReduced);
   CHECK_EQ(r.reduced.num_cols(), 1);
-  CHECK(r.reduced.col_upper.size() == 1 && sankhya_test::close(r.reduced.col_upper[0], 2.0, 1e-12));
+  CHECK(r.reduced.col_upper.size() == 1 && anukulan_test::close(r.reduced.col_upper[0], 2.0, 1e-12));
 
   // A relaxed 2.333 would let branch and bound waste a node discovering what
   // the rounding already knew.
@@ -381,7 +381,7 @@ void test_round_trip_against_a_direct_solve() {
     CHECK_NEAR(reduced_obj, direct_obj, 1e-6);
     const double violation = worst_violation(m, full);
     if (violation > 1e-6) {
-      sankhya_test::report(__FILE__, __LINE__,
+      anukulan_test::report(__FILE__, __LINE__,
                            "restored point violates the original model by " +
                                std::to_string(violation));
     }
@@ -802,5 +802,5 @@ int main() {
   test_integer_bounds_are_rounded_not_relaxed();
   test_hessian_blocks_column_removal();
   test_round_trip_against_a_direct_solve();
-  return sankhya_test::finish("presolve");
+  return anukulan_test::finish("presolve");
 }

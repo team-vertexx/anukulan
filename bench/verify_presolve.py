@@ -90,7 +90,7 @@ def main():
     # gpu_test.sh builds into build-cuda, an ordinary cmake build goes to build,
     # and defaulting to one of them means the other run fails on a path.
     ap.add_argument("--binary", default=None,
-                    help="path to the sankhya binary; found automatically if omitted")
+                    help="path to the anukulan binary; found automatically if omitted")
     ap.add_argument("--data", default=os.path.join(ROOT, "data", "netlib"))
     ap.add_argument("--reference",
                     default=os.path.join(ROOT, "data", "reference", "netlib.csv"))
@@ -112,15 +112,15 @@ def main():
     args = ap.parse_args()
 
     if not args.binary:
-        for candidate in (os.path.join(ROOT, "build-cuda", "sankhya"),
-                          os.path.join(ROOT, "build", "sankhya"),
-                          os.path.join(os.getcwd(), "build-cuda", "sankhya"),
-                          os.path.join(os.getcwd(), "build", "sankhya")):
+        for candidate in (os.path.join(ROOT, "build-cuda", "anukulan"),
+                          os.path.join(ROOT, "build", "anukulan"),
+                          os.path.join(os.getcwd(), "build-cuda", "anukulan"),
+                          os.path.join(os.getcwd(), "build", "anukulan")):
             if os.path.exists(candidate):
                 args.binary = candidate
                 break
         else:
-            print("could not find the sankhya binary. Build it, or pass --binary.",
+            print("could not find the anukulan binary. Build it, or pass --binary.",
                   file=sys.stderr)
             return 2
         print(f"using {args.binary}")

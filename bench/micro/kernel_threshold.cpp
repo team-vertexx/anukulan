@@ -14,10 +14,10 @@
 #include <cstdlib>
 #include <vector>
 
-#include "sankhya/backend.hpp"
-#include "sankhya/sparse.hpp"
+#include "anukulan/backend.hpp"
+#include "anukulan/sparse.hpp"
 
-using namespace sankhya;
+using namespace anukulan;
 using Clock = std::chrono::steady_clock;
 
 template <typename F>

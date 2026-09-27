@@ -2,7 +2,7 @@
 
 Accuracy is the relative distance from the objective published in the Netlib index, not the tolerance the solver was asked for.
 
-| instance | rows x cols | sankhya iters | HiGHS-PDLP iters | ratio | sankhya acc | HiGHS-PDLP acc | HiGHS simplex s | sankhya s |
+| instance | rows x cols | anukulan iters | HiGHS-PDLP iters | ratio | anukulan acc | HiGHS-PDLP acc | HiGHS simplex s | anukulan s |
 |---|---|---:|---:|---:|---|---|---:|---:|
 | afiro | | 360 | 320 | 1.12x | 2.60e-07 | 1.35e-07 | 0.010 | 0.007 |
 | sc50a | | 1000 | 480 | 2.08x | 2.96e-06 | 1.75e-06 | 0.009 | 0.007 |

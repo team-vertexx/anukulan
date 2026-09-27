@@ -10,7 +10,7 @@ set -e
 cd "$(dirname "$0")/../.."
 mkdir -p bench/results
 BIN=build/micro_spmv_scaling
-c++ -std=c++20 -O2 -Isrc -o "$BIN" bench/micro/spmv_scaling.cpp build/libsankhya.a
+c++ -std=c++20 -O2 -Isrc -o "$BIN" bench/micro/spmv_scaling.cpp build/libanukulan.a
 
 out=bench/results/spmv_scaling.txt
 {

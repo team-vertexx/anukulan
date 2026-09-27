@@ -3,32 +3,32 @@
 #include <vector>
 
 #include "check.hpp"
-#include "sankhya/crossover.hpp"
-#include "sankhya/model.hpp"
-#include "sankhya/pdhg.hpp"
-#include "sankhya/simplex.hpp"
-#include "sankhya/standard_form.hpp"
+#include "anukulan/crossover.hpp"
+#include "anukulan/model.hpp"
+#include "anukulan/pdhg.hpp"
+#include "anukulan/simplex.hpp"
+#include "anukulan/standard_form.hpp"
 
-using sankhya::CrossoverResult;
-using sankhya::Int;
-using sankhya::kInf;
-using sankhya::Model;
-using sankhya::PdhgOptions;
-using sankhya::PdhgResult;
-using sankhya::PdhgStatus;
-using sankhya::SimplexOptions;
-using sankhya::SimplexResult;
-using sankhya::SimplexStatus;
-using sankhya::StandardFormResult;
-using sankhya::StandardLp;
-using sankhya::sz;
-using sankhya::Triplet;
-using sankhya::VarStatus;
-using sankhya::crossover_basis;
-using sankhya::solve_lp;
-using sankhya::solve_pdhg;
-using sankhya::to_logical_form;
-using sankhya::to_standard_form;
+using anukulan::CrossoverResult;
+using anukulan::Int;
+using anukulan::kInf;
+using anukulan::Model;
+using anukulan::PdhgOptions;
+using anukulan::PdhgResult;
+using anukulan::PdhgStatus;
+using anukulan::SimplexOptions;
+using anukulan::SimplexResult;
+using anukulan::SimplexStatus;
+using anukulan::StandardFormResult;
+using anukulan::StandardLp;
+using anukulan::sz;
+using anukulan::Triplet;
+using anukulan::VarStatus;
+using anukulan::crossover_basis;
+using anukulan::solve_lp;
+using anukulan::solve_pdhg;
+using anukulan::to_logical_form;
+using anukulan::to_standard_form;
 
 namespace {
 
@@ -41,11 +41,11 @@ Model random_lp(unsigned seed, Int rows, Int cols) {
 
   Model model;
   model.name = "random";
-  model.sense = sankhya::ObjSense::kMinimize;
+  model.sense = anukulan::ObjSense::kMinimize;
   model.col_lower.assign(sz(cols), 0.0);
   model.col_upper.assign(sz(cols), 10.0);
   model.objective.assign(sz(cols), 0.0);
-  model.col_type.assign(sz(cols), sankhya::VarType::kContinuous);
+  model.col_type.assign(sz(cols), anukulan::VarType::kContinuous);
   model.col_names.resize(sz(cols));
   for (Int j = 0; j < cols; ++j) model.objective[sz(j)] = coeff(rng);
 
@@ -68,7 +68,7 @@ Model random_lp(unsigned seed, Int rows, Int cols) {
     // both kinds of logical to deal with.
     model.row_upper[sz(i)] = activity + ((i % 2 == 0) ? 0.0 : 5.0);
   }
-  model.constraints = sankhya::SparseMatrix::from_triplets(rows, cols, std::move(entries));
+  model.constraints = anukulan::SparseMatrix::from_triplets(rows, cols, std::move(entries));
   return model;
 }
 
@@ -96,7 +96,7 @@ void test_produced_basis_is_always_installable() {
     CHECK(static_cast<Int>(cross.basic.size()) == sf.lp.num_rows());
 
     // Every basic position names a real column, and no column is basic twice.
-    const sankhya::LogicalForm form = to_logical_form(sf.lp);
+    const anukulan::LogicalForm form = to_logical_form(sf.lp);
     std::vector<int> seen(sz(form.columns.rows()), 0);
     for (Int b : cross.basic) {
       CHECK(b >= 0 && b < form.columns.rows());
@@ -105,7 +105,7 @@ void test_produced_basis_is_always_installable() {
       CHECK(cross.status[sz(b)] == VarStatus::kBasic);
     }
 
-    sankhya::SimplexBasis basis;
+    anukulan::SimplexBasis basis;
     std::string error;
     const bool installed = basis.set_from(form, cross.basic, cross.status, &error);
     if (!installed) std::fprintf(stderr, "seed %u: %s\n", seed, error.c_str());
@@ -150,7 +150,7 @@ void test_answer_is_unchanged() {
     warm_options.start_status = &cross.status;
     const SimplexResult warm = solve_lp(sf.lp, warm_options);
     CHECK(warm.status == SimplexStatus::kOptimal);
-    CHECK(sankhya_test::close(warm.objective, cold.objective, 1e-7));
+    CHECK(anukulan_test::close(warm.objective, cold.objective, 1e-7));
     CHECK(warm.started_warm);
 
     cold_total += cold.iterations;
@@ -184,7 +184,7 @@ void test_optimal_point_needs_no_work() {
   options.start_status = &cross.status;
   const SimplexResult again = solve_lp(sf.lp, options);
   CHECK(again.status == SimplexStatus::kOptimal);
-  CHECK(sankhya_test::close(again.objective, exact.objective, 1e-9));
+  CHECK(anukulan_test::close(again.objective, exact.objective, 1e-9));
   std::printf("     from its own optimum: %d iterations (cold was %d)\n",
               again.iterations, exact.iterations);
   CHECK(again.iterations <= exact.iterations);
@@ -208,5 +208,5 @@ int main() {
   test_answer_is_unchanged();
   test_optimal_point_needs_no_work();
   test_rejects_a_point_that_does_not_fit();
-  return sankhya_test::finish("test_crossover");
+  return anukulan_test::finish("test_crossover");
 }

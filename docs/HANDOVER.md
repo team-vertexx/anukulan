@@ -1,5 +1,5 @@
 ---
-title: "Sankhya"
+title: "Anukulan"
 subtitle: "An LP / MILP / QP solver built from scratch — design decisions, what is tested and how, where it stands, and what happens next"
 date: "30 August 2026"
 geometry: margin=2.3cm
@@ -228,7 +228,7 @@ Source sizes, as a sense of where the mass is:
 | `crossover.cpp` | ~190 | first-order point → simplex basis |
 | `ldl.cpp` | 144 | sparse $LDL^\top$ for the QP's KKT system |
 
-C++17, no external dependencies beyond the standard library. CMake. CUDA is
+C++20, no external dependencies beyond the standard library. CMake. CUDA is
 optional and compiled out when absent.
 
 ## 6. The central design decision: which algorithms
@@ -932,8 +932,8 @@ evidence and scoping what a barrier method would cost is a real deliverable.
 ### What is held outside the five
 
 The simplex core, crossover, the ratio test and the Netlib verification harness
-are being worked separately. Streams 1–5 leave `src/sankhya/simplex.cpp`,
-`src/sankhya/crossover.*` and `bench/verify_simplex.py` alone.
+are being worked separately. Streams 1–5 leave `src/anukulan/simplex.cpp`,
+`src/anukulan/crossover.*` and `bench/verify_simplex.py` alone.
 
 ## 17. What the five are worth
 
@@ -985,7 +985,7 @@ amount of recent work and have not been re-run on hardware.
 ## 19. Getting set up
 
 ```bash
-git clone https://github.com/team-vertexx/sankhya && cd sankhya
+git clone https://github.com/team-vertexx/anukulan && cd anukulan
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j8
 for t in build/tests/test_*; do "$t"; done          # 12 suites, all should pass
@@ -993,10 +993,10 @@ for t in build/tests/test_*; do "$t"; done          # 12 suites, all should pass
 python3 scripts/fetch_netlib.py                      # 88 LP instances
 python3 scripts/fetch_miplib.py                      # 103 MILP instances
 
-build/sankhya simplex data/netlib/25fv47.mps --presolve
-build/sankhya simplex data/netlib/degen3.mps --crossover
-build/sankhya solve   data/refinery/refinery.mps --presolve
-build/sankhya milp    data/miplib/flugpl.mps --time-limit=30
+build/anukulan simplex data/netlib/25fv47.mps --presolve
+build/anukulan simplex data/netlib/degen3.mps --crossover
+build/anukulan solve   data/refinery/refinery.mps --presolve
+build/anukulan milp    data/miplib/flugpl.mps --time-limit=30
 ```
 
 Documents in the repository, in reading order:

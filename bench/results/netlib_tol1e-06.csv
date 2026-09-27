@@ -1,4 +1,4 @@
-instance,published,sankhya_status,sankhya_iterations,sankhya_seconds,sankhya_objective,sankhya_rel_error,highs_pdlp_status,highs_pdlp_iterations,highs_pdlp_seconds,highs_pdlp_objective,highs_pdlp_rel_error,highs_simplex_status,highs_simplex_iterations,highs_simplex_seconds,highs_simplex_objective,highs_simplex_rel_error
+instance,published,anukulan_status,anukulan_iterations,anukulan_seconds,anukulan_objective,anukulan_rel_error,highs_pdlp_status,highs_pdlp_iterations,highs_pdlp_seconds,highs_pdlp_objective,highs_pdlp_rel_error,highs_simplex_status,highs_simplex_iterations,highs_simplex_seconds,highs_simplex_objective,highs_simplex_rel_error
 afiro,-464.75314286,optimal,360,0.0073,-464.7532636823821,2.599710920581499e-07,optimal,320,0.0177,-464.75320583,1.3549128382471387e-07,optimal,6,0.0072,-464.75314286,0.0
 sc50a,-64.575077059,optimal,1000,0.0053,-64.57488605501001,2.957859265241064e-06,optimal,480,0.0069,-64.57496432,1.7458593179064538e-06,optimal,18,0.0062,-64.575077059,0.0
 adlittle,225494.96316,optimal,16560,0.0239,225494.55216721463,1.8226251248655281e-06,optimal,7240,0.0214,225494.75565,9.202422843485915e-07,optimal,87,0.0082,225494.96316,0.0

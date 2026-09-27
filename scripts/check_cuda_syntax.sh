@@ -18,7 +18,7 @@ work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
 cp "$root/scripts/cudastub/cuda_runtime.h" "$work/"
-python3 - "$root/src/sankhya/cuda_backend.cu" "$work/backend_check.cpp" <<'PY'
+python3 - "$root/src/anukulan/cuda_backend.cu" "$work/backend_check.cpp" <<'PY'
 import re, sys
 src = open(sys.argv[1]).read()
 out = re.sub(r'<<<.*?>>>', '', src, flags=re.S)

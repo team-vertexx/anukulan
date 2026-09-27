@@ -21,7 +21,7 @@ CONFIGS = {
 }
 
 def run(name, extra, tol):
-    cmd = ["build/sankhya","solve",f"data/netlib/{name}.mps","--format=json",
+    cmd = ["build/anukulan","solve",f"data/netlib/{name}.mps","--format=json",
            "--presolve",f"--tol={tol}"] + extra
     t = time.perf_counter()
     p = subprocess.run(cmd, capture_output=True, text=True)

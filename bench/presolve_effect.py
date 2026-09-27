@@ -75,7 +75,7 @@ def run(binary, mode, model, presolve, limit, extra):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--binary", default=os.path.join(ROOT, "build-work", "sankhya"))
+    ap.add_argument("--binary", default=os.path.join(ROOT, "build-work", "anukulan"))
     ap.add_argument("--mode", default="simplex", choices=["simplex", "milp"])
     ap.add_argument("--set", default="netlib")
     ap.add_argument("--limit", default="60")

@@ -11,7 +11,7 @@ SET = ["afiro","sc50a","adlittle","blend","share1b","stocfor1","sctap1","scfxm1"
        "bandm","degen2","fit1p","25fv47","woodw","degen3","stocfor2","maros-r7"]
 
 def run(name, flags):
-    cmd = (["build/sankhya","solve",f"data/netlib/{name}.mps","--format=json",
+    cmd = (["build/anukulan","solve",f"data/netlib/{name}.mps","--format=json",
             "--presolve","--tol=1e-8"] + flags)
     t = time.perf_counter()
     p = subprocess.run(cmd, capture_output=True, text=True)

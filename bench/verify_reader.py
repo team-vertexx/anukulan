@@ -39,7 +39,7 @@ def highs_dimensions(binary: str, path: pathlib.Path):
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--binary", default="build/sankhya")
+    parser.add_argument("--binary", default="build/anukulan")
     parser.add_argument("--highs", default="highs")
     parser.add_argument("--instances", default="data/netlib")
     parser.add_argument("--reference", default="data/reference/netlib.csv")

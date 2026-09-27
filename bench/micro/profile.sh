@@ -12,10 +12,10 @@ sample_one() {
   "$@" > /dev/null 2>&1 &
   local pid=$!
   sleep 1
-  sample "$pid" "$secs" -mayDie -f "/tmp/sankhya_$tag.sample" > /dev/null 2>&1 || true
+  sample "$pid" "$secs" -mayDie -f "/tmp/anukulan_$tag.sample" > /dev/null 2>&1 || true
   wait "$pid" 2>/dev/null || true
   echo "===== $tag: $* ====="
-  python3 - "/tmp/sankhya_$tag.sample" <<'PY'
+  python3 - "/tmp/anukulan_$tag.sample" <<'PY'
 import re, sys, collections
 txt = open(sys.argv[1], errors="ignore").read()
 counts = collections.Counter()
@@ -35,9 +35,9 @@ PY
 {
   echo "# load average at start: $(uptime | sed 's/.*averages: //')"
   echo
-  sample_one milp_mas76 25 build/sankhya milp data/miplib/mas76.mps --time-limit=40
-  sample_one simplex_degen3 25 build/sankhya simplex data/netlib/degen3.mps --presolve
-  sample_one pdhg_datt256 25 build/sankhya solve data/lptestset/datt256_lp.mps --no-polish --max-iter=100000 --time-limit=40
+  sample_one milp_mas76 25 build/anukulan milp data/miplib/mas76.mps --time-limit=40
+  sample_one simplex_degen3 25 build/anukulan simplex data/netlib/degen3.mps --presolve
+  sample_one pdhg_datt256 25 build/anukulan solve data/lptestset/datt256_lp.mps --no-polish --max-iter=100000 --time-limit=40
   echo "# load average at end: $(uptime | sed 's/.*averages: //')"
 } > "$out" 2>&1
 echo "wrote $out"

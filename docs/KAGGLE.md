@@ -42,19 +42,19 @@ It must print `cuda_backend.cu type-checks clean`. Then package:
 
     bash scripts/package_for_kaggle.sh
 
-That writes `sankhya-source.zip`, a few megabytes - source only, no benchmark
+That writes `anukulan-source.zip`, a few megabytes - source only, no benchmark
 data, which gets downloaded on the Kaggle side instead.
 
 Then on kaggle.com:
 
 1. Left sidebar, **Datasets** → **New Dataset**
-2. Drag `sankhya-source.zip` in
-3. Title it `sankhya-source`
+2. Drag `anukulan-source.zip` in
+3. Title it `anukulan-source`
 4. Set visibility to **Private**
 5. **Create**
 
 Kaggle unzips it for you. The files land at
-`/kaggle/input/sankhya-source/`.
+`/kaggle/input/anukulan-source/`.
 
 ### Option B: a private GitHub repository (better once you are iterating)
 
@@ -63,7 +63,7 @@ personal access token:
 
     from kaggle_secrets import UserSecretsClient
     token = UserSecretsClient().get_secret("GITHUB_TOKEN")
-    !git clone https://{token}@github.com/team-vertexx/<repo>.git /kaggle/working/sankhya
+    !git clone https://{token}@github.com/team-vertexx/<repo>.git /kaggle/working/anukulan
 
 Worth setting up when you start changing kernels and re-running often, because
 updating means a `git pull` instead of a fresh upload.
@@ -77,7 +77,7 @@ updating means a `git pull` instead of a fresh upload.
    - **Accelerator**: `GPU T4 x2` or `GPU P100` (either is fine)
    - **Internet**: `On`
    - **Persistence**: leave off
-3. If you used Option A: **+ Add Input** → **Datasets** → your `sankhya-source`
+3. If you used Option A: **+ Add Input** → **Datasets** → your `anukulan-source`
 
 Check the accelerator actually attached before doing anything else:
 
@@ -93,8 +93,8 @@ below will fail in confusing ways otherwise.
 
 `/kaggle/input` is **read only**. Builds must happen in `/kaggle/working`.
 
-    !cp -r /kaggle/input/sankhya-source /kaggle/working/sankhya
-    %cd /kaggle/working/sankhya
+    !cp -r /kaggle/input/anukulan-source /kaggle/working/anukulan
+    %cd /kaggle/working/anukulan
     !ls
 
 You should see `CMakeLists.txt`, `src`, `scripts`, `tests`.
@@ -121,7 +121,7 @@ It takes 10-20 minutes the first time, most of it downloading benchmark
 instances. What it does, in order:
 
 1. confirms a device and `nvcc`
-2. builds with `-DSANKHYA_ENABLE_CUDA=ON`
+2. builds with `-DANUKULAN_ENABLE_CUDA=ON`
 3. runs the backend contract tests - every CUDA operation against the CPU
    reference
 4. runs the solver on GPU against **published** Netlib optimal values
@@ -197,7 +197,7 @@ for three synchronisations each to matter. Nor is sparsity on its own -
 `nsys` is not on the Kaggle image and installing it there is its own afternoon,
 so the backend times itself instead:
 
-    !./build-cuda/sankhya solve data/lptestset/graph40-40.mps \
+    !./build-cuda/anukulan solve data/lptestset/graph40-40.mps \
         --backend=cuda --tol=1e-4 --quiet --profile
 
 That prints a table of every kernel, its share of the device time, its launch
@@ -246,7 +246,7 @@ If a script cannot find the binary, it is because `gpu_test.sh` builds into
 `build-cuda` while an ordinary cmake build goes to `build`. `verify_presolve.py`
 now looks for both, and takes `--binary` when neither is where it expects:
 
-    !python3 bench/verify_presolve.py --binary ./build-cuda/sankhya --abs-tol=1e-8
+    !python3 bench/verify_presolve.py --binary ./build-cuda/anukulan --abs-tol=1e-8
 
 The file worth sending back is `results/gpu_matrix.csv`. It has one row per
 instance per backend per presolve setting, so the speedups can be recomputed

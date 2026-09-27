@@ -4,40 +4,40 @@
 #include <vector>
 
 #include "check.hpp"
-#include "sankhya/mps_reader.hpp"
-#include "sankhya/simplex.hpp"
-#include "sankhya/standard_form.hpp"
+#include "anukulan/mps_reader.hpp"
+#include "anukulan/simplex.hpp"
+#include "anukulan/standard_form.hpp"
 
-using sankhya::Int;
-using sankhya::kInf;
-using sankhya::LogicalForm;
-using sankhya::SimplexBasis;
-using sankhya::StandardFormResult;
-using sankhya::sz;
-using sankhya::Model;
-using sankhya::SimplexOptions;
-using sankhya::SimplexResult;
-using sankhya::SimplexStatus;
-using sankhya::SparseMatrix;
-using sankhya::Triplet;
-using sankhya::VarType;
-using sankhya::solve_dual_simplex;
-using sankhya::solve_lp;
-using sankhya::solve_simplex;
-using sankhya::to_standard_form;
-using sankhya::to_string;
-using sankhya::VarStatus;
+using anukulan::Int;
+using anukulan::kInf;
+using anukulan::LogicalForm;
+using anukulan::SimplexBasis;
+using anukulan::StandardFormResult;
+using anukulan::sz;
+using anukulan::Model;
+using anukulan::SimplexOptions;
+using anukulan::SimplexResult;
+using anukulan::SimplexStatus;
+using anukulan::SparseMatrix;
+using anukulan::Triplet;
+using anukulan::VarType;
+using anukulan::solve_dual_simplex;
+using anukulan::solve_lp;
+using anukulan::solve_simplex;
+using anukulan::to_standard_form;
+using anukulan::to_string;
+using anukulan::VarStatus;
 
 namespace {
 
 LogicalForm build(const std::string& text) {
   std::istringstream in(text);
-  const sankhya::MpsReadResult r = sankhya::read_mps_stream(in, "<test>");
+  const anukulan::MpsReadResult r = anukulan::read_mps_stream(in, "<test>");
   if (!r.ok) std::fprintf(stderr, "read failed: %s\n", r.error.c_str());
   CHECK(r.ok);
-  const StandardFormResult sf = sankhya::to_standard_form(r.model);
+  const StandardFormResult sf = anukulan::to_standard_form(r.model);
   CHECK(sf.ok);
-  return sankhya::to_logical_form(sf.lp);
+  return anukulan::to_logical_form(sf.lp);
 }
 
 const char* kMixed =
@@ -316,7 +316,7 @@ void test_dual_matches_primal() {
     const SimplexResult d = solve_lp(sf.lp, dual_options);
     if (p.status != SimplexStatus::kOptimal) continue;
     if (d.status != SimplexStatus::kOptimal) {
-      sankhya_test::report(__FILE__, __LINE__,
+      anukulan_test::report(__FILE__, __LINE__,
                            "dual did not reach optimal where the primal did: " +
                                to_string(d.status));
       continue;
@@ -341,5 +341,5 @@ int main() {
   test_reduced_costs_vanish_on_the_basis();
   test_pivoting_preserves_the_invariant();
   test_larger_instance_factorizes_and_solves();
-  return sankhya_test::finish("test_simplex");
+  return anukulan_test::finish("test_simplex");
 }

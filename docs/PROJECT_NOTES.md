@@ -1,5 +1,5 @@
 ---
-title: "Sankhya — an optimization solver written from scratch"
+title: "Anukulan — an optimization solver written from scratch"
 subtitle: "What it is, how it was built, what went wrong, and what is next"
 author: "Team Vertex"
 date: "August 2026"
@@ -10,8 +10,8 @@ colorlinks: true
 
 # 1. What this is
 
-Sankhya is a solver for linear programs, mixed-integer programs and convex
-quadratic programs, written from scratch in C++17, with a CUDA backend for the
+Anukulan is a solver for linear programs, mixed-integer programs and convex
+quadratic programs, written from scratch in C++20, with a CUDA backend for the
 part of it that runs well on a GPU.
 
 It was built for Smart India Hackathon 2026, problem statement **SIH26119** from
@@ -416,7 +416,7 @@ python3 bench/verify_presolve.py --tol=1e-6 --abs-tol=1e-6 --check-feasibility
 python3 bench/miplib_survey.py
 
 # One model, end to end
-build/sankhya solve data/refinery/refinery.mps --tol=1e-8 --gap-tol=1e-2 --presolve
+build/anukulan solve data/refinery/refinery.mps --tol=1e-8 --gap-tol=1e-2 --presolve
 ```
 
 Two conventions in the source worth knowing before reading it:

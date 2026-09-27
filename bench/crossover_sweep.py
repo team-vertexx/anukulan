@@ -8,7 +8,7 @@ are worth the iterations spent getting the point.
 """
 import glob, json, os, subprocess, sys
 
-BIN = os.environ.get("SANKHYA", "build/sankhya")
+BIN = os.environ.get("ANUKULAN", "build/anukulan")
 tol = sys.argv[1] if len(sys.argv) > 1 else "1e-4"
 only = sys.argv[2:] 
 

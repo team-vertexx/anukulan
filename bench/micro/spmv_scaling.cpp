@@ -17,11 +17,11 @@
 #include <thread>
 #include <vector>
 
-#include "sankhya/mps_reader.hpp"
-#include "sankhya/scaling.hpp"
-#include "sankhya/standard_form.hpp"
+#include "anukulan/mps_reader.hpp"
+#include "anukulan/scaling.hpp"
+#include "anukulan/standard_form.hpp"
 
-using namespace sankhya;
+using namespace anukulan;
 using Clock = std::chrono::steady_clock;
 
 // Bounded spin then yield. Pure spinning is what made a ten-thread barrier cost

@@ -4,33 +4,33 @@
 #include <vector>
 
 #include "check.hpp"
-#include "sankhya/mps_reader.hpp"
-#include "sankhya/scaling.hpp"
-#include "sankhya/standard_form.hpp"
+#include "anukulan/mps_reader.hpp"
+#include "anukulan/scaling.hpp"
+#include "anukulan/standard_form.hpp"
 
-using sankhya::Int;
-using sankhya::kInf;
-using sankhya::Model;
-using sankhya::Norm;
-using sankhya::Scaling;
-using sankhya::ScalingOptions;
-using sankhya::ScalingReport;
-using sankhya::StandardFormResult;
-using sankhya::StandardLp;
-using sankhya::sz;
+using anukulan::Int;
+using anukulan::kInf;
+using anukulan::Model;
+using anukulan::Norm;
+using anukulan::Scaling;
+using anukulan::ScalingOptions;
+using anukulan::ScalingReport;
+using anukulan::StandardFormResult;
+using anukulan::StandardLp;
+using anukulan::sz;
 
 namespace {
 
 Model read_model(const std::string& text) {
   std::istringstream in(text);
-  const sankhya::MpsReadResult r = sankhya::read_mps_stream(in, "<test>");
+  const anukulan::MpsReadResult r = anukulan::read_mps_stream(in, "<test>");
   if (!r.ok) std::fprintf(stderr, "read failed: %s\n", r.error.c_str());
   CHECK(r.ok);
   return r.model;
 }
 
 StandardLp build(const std::string& text) {
-  const StandardFormResult r = sankhya::to_standard_form(read_model(text));
+  const StandardFormResult r = anukulan::to_standard_form(read_model(text));
   CHECK(r.ok);
   return r.lp;
 }
@@ -93,7 +93,7 @@ void test_reduces_spread() {
   // Row norms in the fixture run from 1e-4 to 1e6, so a spread of about 1e10.
   CHECK(before_rows > 1e9);
 
-  const ScalingReport report = sankhya::scale_lp(&lp);
+  const ScalingReport report = anukulan::scale_lp(&lp);
   std::printf("     scaling: row spread %.3e -> %.3e, col spread %.3e -> %.3e\n",
               report.row_spread_before, report.row_spread_after,
               report.col_spread_before, report.col_spread_after);
@@ -115,7 +115,7 @@ void test_scaled_problem_is_equivalent() {
   // relationship must hold everywhere and not just at the optimum.
   const StandardLp original = build(kBadlyScaled);
   StandardLp scaled = original;
-  const ScalingReport report = sankhya::scale_lp(&scaled);
+  const ScalingReport report = anukulan::scale_lp(&scaled);
   const Scaling& s = report.scaling;
 
   std::mt19937 rng(20260823);
@@ -172,7 +172,7 @@ void test_scaled_problem_is_equivalent() {
 void test_infinite_bounds_survive() {
   StandardLp lp = build(kBadlyScaled);
   const StandardLp before = lp;
-  sankhya::scale_lp(&lp);
+  anukulan::scale_lp(&lp);
   for (std::size_t j = 0; j < before.lower.size(); ++j) {
     CHECK_EQ(std::isinf(before.lower[j]), std::isinf(lp.lower[j]));
     CHECK_EQ(std::isinf(before.upper[j]), std::isinf(lp.upper[j]));
@@ -185,7 +185,7 @@ void test_transpose_follows_the_matrix() {
   // PDHG reads K and K' every iteration. If scaling updates one and not the
   // other, the dual update is quietly wrong and nothing ever reports it.
   StandardLp lp = build(kBadlyScaled);
-  sankhya::scale_lp(&lp);
+  anukulan::scale_lp(&lp);
 
   std::mt19937 rng(5);
   std::uniform_real_distribution<double> pick(-2.0, 2.0);
@@ -206,12 +206,12 @@ void test_transpose_follows_the_matrix() {
 void test_scaling_is_stable_when_repeated() {
   // A second pass over an already equilibrated matrix must not drift or blow up.
   StandardLp once = build(kBadlyScaled);
-  sankhya::scale_lp(&once);
+  anukulan::scale_lp(&once);
   const double spread_once = max_norm(once, true, Norm::kInfinity) /
                              min_nonzero_norm(once, true, Norm::kInfinity);
 
   StandardLp twice = once;
-  sankhya::scale_lp(&twice);
+  anukulan::scale_lp(&twice);
   const double spread_twice = max_norm(twice, true, Norm::kInfinity) /
                               min_nonzero_norm(twice, true, Norm::kInfinity);
   CHECK(spread_twice < spread_once * 10.0);
@@ -234,7 +234,7 @@ void test_empty_rows_and_columns_are_left_alone() {
       "    RHS       USED      1.0        UNUSED    -5.0\n"
       "ENDATA\n";
   StandardLp lp = build(text);
-  const ScalingReport report = sankhya::scale_lp(&lp);
+  const ScalingReport report = anukulan::scale_lp(&lp);
   for (const double v : report.scaling.row_scale) CHECK(std::isfinite(v) && v > 0.0);
   for (const double v : report.scaling.col_scale) CHECK(std::isfinite(v) && v > 0.0);
   for (const double v : lp.k.value()) CHECK(std::isfinite(v));
@@ -247,8 +247,8 @@ void test_ruiz_only_option() {
   StandardLp ruiz_only = build(kBadlyScaled);
   ScalingOptions options;
   options.pock_chambolle = false;
-  const ScalingReport a = sankhya::scale_lp(&with_pc);
-  const ScalingReport b = sankhya::scale_lp(&ruiz_only, options);
+  const ScalingReport a = anukulan::scale_lp(&with_pc);
+  const ScalingReport b = anukulan::scale_lp(&ruiz_only, options);
 
   // Ruiz on its own drives the infinity norms very close to one; the extra
   // Pock-Chambolle pass trades some of that for better 1-norm behaviour.
@@ -266,5 +266,5 @@ int main() {
   test_scaling_is_stable_when_repeated();
   test_empty_rows_and_columns_are_left_alone();
   test_ruiz_only_option();
-  return sankhya_test::finish("test_scaling");
+  return anukulan_test::finish("test_scaling");
 }

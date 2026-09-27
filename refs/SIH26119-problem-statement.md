@@ -8,7 +8,7 @@
 - **Organization:** Mangalore Refinery and Petrochemicals Limited (MRPL)
 - **Department:** Mangalore Refinery and Petrochemicals Limited (MRPL)
 - **Category:** Software
-- **Theme:** Miscellaneous
+- **Theme:** Smart Automation
 - **Deadline for Idea Submission:** 20 September 2026
 - **Submitted Ideas:** 0/500
 - **Dataset Link:** Teams to use publicly available mathematical optimization benchmark datasets such as MIPLIB, Netlib LP, Mittelmann benchmark instances, QPLIB (for quadratic programming where applicable), along with representative refinery scheduling, crude blending, production planning and supply chain optimization case studies from open literature. Where industrial da

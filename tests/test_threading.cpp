@@ -5,14 +5,14 @@
 #include <vector>
 
 #include "check.hpp"
-#include "sankhya/backend.hpp"
-#include "sankhya/threading.hpp"
+#include "anukulan/backend.hpp"
+#include "anukulan/threading.hpp"
 
-using sankhya::Int;
-using sankhya::LinAlgBackend;
-using sankhya::SparseMatrix;
-using sankhya::sz;
-using sankhya::Triplet;
+using anukulan::Int;
+using anukulan::LinAlgBackend;
+using anukulan::SparseMatrix;
+using anukulan::sz;
+using anukulan::Triplet;
 
 namespace {
 
@@ -73,11 +73,11 @@ void test_products_are_bit_identical() {
   const std::vector<double> x = random_vector(n, 7), y = random_vector(m, 11);
 
   std::vector<double> want_y(sz(m)), want_x(sz(n));
-  sankhya::cpu_backend().multiply(a, x.data(), want_y.data());
-  sankhya::cpu_backend().multiply_transpose(at, y.data(), want_x.data());
+  anukulan::cpu_backend().multiply(a, x.data(), want_y.data());
+  anukulan::cpu_backend().multiply_transpose(at, y.data(), want_x.data());
 
   for (const int t : thread_counts()) {
-    const LinAlgBackend& tb = sankhya::threaded_cpu_backend(t);
+    const LinAlgBackend& tb = anukulan::threaded_cpu_backend(t);
     std::vector<double> got_y(sz(m)), got_x(sz(n));
     tb.multiply(a, x.data(), got_y.data());
     tb.multiply_transpose(at, y.data(), got_x.data());
@@ -92,8 +92,8 @@ void test_steps_are_bit_identical() {
   const std::vector<double> kt_y = random_vector(n, 9);
   std::vector<double> lower(sz(n)), upper(sz(n));
   for (Int j = 0; j < n; ++j) {
-    lower[sz(j)] = (j % 5 == 0) ? -sankhya::kInf : -2.0;
-    upper[sz(j)] = (j % 7 == 0) ? sankhya::kInf : 3.0;
+    lower[sz(j)] = (j % 5 == 0) ? -anukulan::kInf : -2.0;
+    upper[sz(j)] = (j % 7 == 0) ? anukulan::kInf : 3.0;
   }
   const std::vector<double> yv = random_vector(m, 13), q = random_vector(m, 17);
   const std::vector<double> kxb = random_vector(m, 19), kx = random_vector(m, 23);
@@ -127,10 +127,10 @@ void test_steps_are_bit_identical() {
   };
 
   std::vector<double> want;
-  run(sankhya::cpu_backend(), &want);
+  run(anukulan::cpu_backend(), &want);
   for (const int t : thread_counts()) {
     std::vector<double> got;
-    run(sankhya::threaded_cpu_backend(t), &got);
+    run(anukulan::threaded_cpu_backend(t), &got);
     CHECK(same_bits(got, want));
   }
 }
@@ -140,9 +140,9 @@ void test_steps_are_bit_identical() {
 void test_short_and_long_loops_agree() {
   for (const Int n : {1, 2, 7, 8191, 8192, 8193, 40000}) {
     const std::vector<double> v = random_vector(n, static_cast<unsigned>(n));
-    const double want = sankhya::cpu_backend().inf_norm(v.data(), n);
+    const double want = anukulan::cpu_backend().inf_norm(v.data(), n);
     for (const int t : thread_counts()) {
-      CHECK(sankhya::threaded_cpu_backend(t).inf_norm(v.data(), n) == want);
+      CHECK(anukulan::threaded_cpu_backend(t).inf_norm(v.data(), n) == want);
     }
   }
 }
@@ -154,22 +154,22 @@ void test_degenerate_shapes() {
   const SparseMatrix a = SparseMatrix::from_triplets(5, 2, std::move(entries));
   const double x[2] = {1.5, -2.5};
   std::vector<double> want(5, 99.0), got(5, 99.0);
-  sankhya::cpu_backend().multiply(a, x, want.data());
+  anukulan::cpu_backend().multiply(a, x, want.data());
   for (const int t : thread_counts()) {
     std::fill(got.begin(), got.end(), 99.0);
-    sankhya::threaded_cpu_backend(t).multiply(a, x, got.data());
+    anukulan::threaded_cpu_backend(t).multiply(a, x, got.data());
     CHECK(same_bits(got, want));
   }
   for (const int t : thread_counts()) {
-    CHECK(sankhya::threaded_cpu_backend(t).inf_norm(nullptr, 0) == 0.0);
+    CHECK(anukulan::threaded_cpu_backend(t).inf_norm(nullptr, 0) == 0.0);
   }
 }
 
 // One thread must hand back the serial backend itself rather than a pool of one,
 // so that the default path is not paying for machinery it is not using.
 void test_one_thread_is_the_serial_backend() {
-  CHECK(&sankhya::threaded_cpu_backend(1) == &sankhya::cpu_backend());
-  CHECK(&sankhya::threaded_cpu_backend(0) == &sankhya::cpu_backend());
+  CHECK(&anukulan::threaded_cpu_backend(1) == &anukulan::cpu_backend());
+  CHECK(&anukulan::threaded_cpu_backend(0) == &anukulan::cpu_backend());
 }
 
 // The split is what every claim above rests on: blocks must be in order, cover
@@ -180,7 +180,7 @@ void test_splits_partition_exactly() {
   for (const Int rows : {0, 1, 5, 997}) {
     const SparseMatrix a = uneven_matrix(std::max<Int>(rows, 1), 51, 99);
     for (const int blocks : {1, 2, 3, 8, 64, 1000}) {
-      const std::vector<Int> cut = sankhya::split_rows_by_nonzeros(a, blocks);
+      const std::vector<Int> cut = anukulan::split_rows_by_nonzeros(a, blocks);
       CHECK(static_cast<int>(cut.size()) == blocks + 1);
       CHECK(cut.front() == 0);
       CHECK(cut.back() == a.rows());
@@ -189,7 +189,7 @@ void test_splits_partition_exactly() {
   }
   for (const Int n : {0, 1, 1000}) {
     for (const int blocks : {1, 3, 64}) {
-      const std::vector<Int> cut = sankhya::split_range(n, blocks);
+      const std::vector<Int> cut = anukulan::split_range(n, blocks);
       CHECK(cut.front() == 0);
       CHECK(cut.back() == n);
       for (int b = 1; b <= blocks; ++b) CHECK(cut[sz(b)] >= cut[sz(b - 1)]);
@@ -200,7 +200,7 @@ void test_splits_partition_exactly() {
 // Every block runs exactly once, whichever thread happens to take it.
 void test_pool_runs_every_block_once() {
   for (const int t : thread_counts()) {
-    sankhya::ThreadPool pool(t);
+    anukulan::ThreadPool pool(t);
     for (const int blocks : {1, 2, 7, 64, 501}) {
       std::vector<int> seen(sz(blocks), 0);
       pool.run_blocks(blocks, [&](int b) { seen[sz(b)] += 1; });
@@ -219,5 +219,5 @@ int main() {
   test_steps_are_bit_identical();
   test_short_and_long_loops_agree();
   test_degenerate_shapes();
-  return sankhya_test::finish("test_threading");
+  return anukulan_test::finish("test_threading");
 }

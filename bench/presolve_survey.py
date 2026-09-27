@@ -41,7 +41,7 @@ def run(binary, model, extra):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--binary", default=os.path.join(ROOT, "build-work", "sankhya"))
+    ap.add_argument("--binary", default=os.path.join(ROOT, "build-work", "anukulan"))
     ap.add_argument("--set", default="netlib",
                     help="netlib, miplib, refinery, or a directory of .mps files")
     ap.add_argument("--extra", default="", help="flags passed to presolve")

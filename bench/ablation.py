@@ -41,7 +41,7 @@ def run(binary, path, flags, tolerance, max_iter, time_limit):
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--binary", default="build/sankhya")
+    parser.add_argument("--binary", default="build/anukulan")
     parser.add_argument("--instances", default="data/netlib")
     parser.add_argument("--out", default="bench/results/ablation")
     parser.add_argument("--tolerance", type=float, default=1e-6)
