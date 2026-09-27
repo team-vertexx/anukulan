@@ -1,7 +1,7 @@
 # Anukulan
 
 [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/team-vertexx/anukulan/blob/master/notebooks/anukulan_demo.ipynb)
-**Run it yourself in about three minutes, no install:** the notebook builds the
+**Run it yourself in about four minutes, no install:** the notebook builds the
 solver from source, runs the tests, and reproduces plant memory and the 60-case
 stack measured below on a free CPU runtime.
 
