@@ -1,0 +1,1729 @@
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <stdexcept>
+#include <ios>
+#include <fstream>
+#include <sstream>
+#include <string>
+#include <vector>
+
+#include "anukulan/model.hpp"
+#include "anukulan/mps_reader.hpp"
+#include "anukulan/backend.hpp"
+#include "anukulan/branch_and_bound.hpp"
+#include "anukulan/pdhg.hpp"
+#include "anukulan/presolve.hpp"
+#include "anukulan/qp.hpp"
+#include "anukulan/crossover.hpp"
+#include "anukulan/simplex.hpp"
+#include "anukulan/standard_form.hpp"
+#include "anukulan/threading.hpp"
+
+namespace {
+
+void print_usage() {
+  std::printf(
+      "anukulan - optimization solver core\n"
+      "\n"
+      "usage:\n"
+      "  anukulan read <file.mps> [options]     read a model and print its statistics\n"
+      "  anukulan standard <file.mps> [options] read a model and build the solver's\n"
+      "                                        standard form, printing its shape\n"
+      "  anukulan solve <file.mps> [options]    solve an LP with the first-order method\n"
+      "  anukulan milp <file.mps> [options]     solve a MILP by branch and bound\n"
+      "  anukulan qp <file.qps> [options]       solve a convex QP by ADMM\n"
+      "  anukulan simplex <file.mps> [options]  solve an LP with the primal simplex\n"
+      "  anukulan presolve <file.mps> [opts]    reduce a model and report what went\n"
+      "                                        and what is left\n"
+      "  anukulan family <a.mps> <b.mps> ...    solve a family of same-shape models\n"
+      "                                        in order, each cold and from the\n"
+      "                                        previous one's basis (plant memory)\n"
+      "  anukulan backends                      report which backends this build has\n"
+      "\n"
+      "options:\n"
+      "  --neg-up-bound=keep|minus-inf   how to read a negative UP bound with no\n"
+      "                                  lower bound. keep (default) matches HiGHS,\n"
+      "                                  minus-inf matches CPLEX.\n"
+      "  --quiet                         do not print reader warnings\n"
+      "\n"
+      "solve options:\n"
+      "  --tol=<x>            relative tolerance, default 1e-6\n"
+      "  --abs-tol=<x>        also require no single row violated by more than\n"
+      "                       this in absolute terms. 0 (default) is PDLP\n"
+      "                       behaviour; the relative measure alone can hide a\n"
+      "                       real violation on models with a large right-hand side\n"
+      "  --max-iter=<n>       iteration limit\n"
+      "  --time-limit=<s>     wall clock limit in seconds\n"
+      "  --no-scaling         turn off Ruiz and Pock-Chambolle preconditioning\n"
+      "  --ruiz-only          Ruiz equilibration only, no Pock-Chambolle pass\n"
+      "  --pdlp-termination   drop the infinity-norm criteria and stop on PDLP's\n"
+      "                       2-norm ones alone\n"
+      "  --no-adaptive        fixed step size\n"
+      "  --no-restarts        no restarting\n"
+      "  --no-halpern         averaged restarts instead of Halpern\n"
+      "  --no-reflection --adaptive-step --no-fixed-point-restart\n"
+      "  --no-pid-weight      turn off one cuPDLPx addition each (all on)\n"
+      "  --reflection=G       R(z) = (1+G) T(z) - G z, 0 is plain Halpern\n"
+      "  --constant-step      fixed step size instead of the adaptive rule\n"
+      "  --step-scale=S       fixed step size S/||K|| (default 0.998)\n"
+      "  --fixed-point-restart  restart on ||z-T(z)||, not on the KKT error\n"
+      "  --pid-weight         PID control on the primal weight\n"
+      "  --kp= --ki= --kd=    its coefficients (default 0.5, 0, 0)\n"
+      "  --no-polish          no feasibility polishing\n"
+      "  --no-exit-polish     polish during the solve but not on the way out\n"
+      "  --gap-tol=T          duality gap tolerance, if not --tol (e.g. 1e-2)\n"
+      "  --polish-first=N     first polish attempt, doubling after (default 100)\n"
+      "  --polish-factor=F    polish budget as a fraction of iterations so far\n"
+      "  --no-primal-weight   keep the primal weight at one\n"
+      "  --presolve           reduce the model first, then map the answer back\n"
+      "  --no-crossover       do not seed the simplex basis from a first-order solve\n"
+      "  --crossover-tol=T    how far that seed solve is taken (default 1e-4)\n"
+      "  --profile            report where the device time went, kernel by kernel\n"
+      "  --verbose            print progress\n"
+      "  --backend=cpu|cuda   force a backend instead of picking automatically\n"
+      "  --threads=<n>        spread the first-order method over n threads.\n"
+      "                       1 (default) is serial; 0 picks a count for this\n"
+      "                       machine. The answer is identical at every n.\n"
+      "  --solution=<path>    write the primal solution so it can be checked\n"
+      "                       independently\n");
+}
+
+// "--tol=1e-6" -> 1e-6. Returns false when the argument is not this option at
+// all, so a chain of these reads as a list of alternatives.
+bool value_of(const std::string& arg, const std::string& prefix, double* out) {
+  if (arg.rfind(prefix, 0) != 0) return false;
+  *out = std::strtod(arg.c_str() + prefix.size(), nullptr);
+  return true;
+}
+
+// JSON has no inf and no nan. An objective that is either means there is no
+// incumbent, and "null" is what a parser can actually read.
+std::string json_number(double v) {
+  if (!std::isfinite(v)) return "null";
+  std::ostringstream out;
+  out.precision(17);
+  out << v;
+  return out.str();
+}
+
+int command_read(const std::vector<std::string>& args) {
+  if (args.empty()) {
+    std::fprintf(stderr, "read: expected a file name\n");
+    return 2;
+  }
+  const std::string path = args[0];
+  anukulan::MpsOptions options;
+  bool quiet = false;
+  bool as_json = false;
+
+  for (std::size_t i = 1; i < args.size(); ++i) {
+    const std::string& a = args[i];
+    if (a == "--neg-up-bound=keep") {
+      options.negative_up_bound = anukulan::MpsOptions::NegativeUpBound::kKeepLower;
+    } else if (a == "--neg-up-bound=minus-inf") {
+      options.negative_up_bound = anukulan::MpsOptions::NegativeUpBound::kMinusInfinity;
+    } else if (a == "--quiet") {
+      quiet = true;
+    } else if (a == "--format=json") {
+      as_json = true;
+    } else if (a == "--format=human") {
+      as_json = false;
+    } else {
+      std::fprintf(stderr, "read: unknown option \"%s\"\n", a.c_str());
+      return 2;
+    }
+  }
+
+  const anukulan::MpsReadResult result = anukulan::read_mps(path, options);
+  if (!quiet) {
+    for (const std::string& w : result.warnings)
+      std::fprintf(stderr, "warning: %s\n", w.c_str());
+  }
+  if (!result.ok) {
+    std::fprintf(stderr, "error: %s\n", result.error.c_str());
+    return 1;
+  }
+
+  const anukulan::ModelStats stats = anukulan::compute_stats(result.model);
+  if (!as_json) {
+    std::printf("%s", anukulan::format_stats(result.model, stats).c_str());
+    std::printf("obj nonzeros  %d\nfree rows     %d dropped\n",
+                result.objective_nonzeros, result.free_rows_dropped);
+    // The Netlib index counts the objective row and its entries, so print the
+    // comparable figures too - it makes checking against that table trivial.
+    std::printf("netlib-style  rows %d, cols %d, nonzeros %d\n", stats.rows + 1,
+                stats.cols, stats.nnz + result.objective_nonzeros);
+    return 0;
+  }
+
+  // Built with a stream rather than printf: a format/argument mismatch here is
+  // silent (it produced a garbage warning count once), and this JSON is what the
+  // benchmark harness consumes, so the types have to be checked by the compiler.
+  std::ostringstream out;
+  out.setf(std::ios::boolalpha);
+  out.precision(17);
+
+  std::string name;
+  for (const char c : result.model.name) {
+    if (c == '"' || c == '\\') name.push_back('\\');
+    name.push_back(c);
+  }
+
+  auto field = [&out](const char* key, auto value, bool last = false) {
+    out << '"' << key << "\":" << value << (last ? "" : ",");
+  };
+
+  out << "{\"name\":\"" << name << "\",";
+  field("rows", stats.rows);
+  field("cols", stats.cols);
+  field("nnz", stats.nnz);
+  field("obj_nnz", result.objective_nonzeros);
+  field("free_rows_dropped", result.free_rows_dropped);
+  field("hessian_nnz", stats.hessian_nnz);
+  // The Netlib index counts the objective row and its entries, so emit the
+  // comparable figures too and let the harness compare like with like.
+  field("netlib_rows", stats.rows + 1);
+  field("netlib_cols", stats.cols);
+  field("netlib_nnz", stats.nnz + result.objective_nonzeros);
+  field("eq_rows", stats.equality_rows);
+  field("le_rows", stats.less_rows);
+  field("ge_rows", stats.greater_rows);
+  field("range_rows", stats.range_rows);
+  field("free_rows", stats.free_rows);
+  field("integer_cols", stats.integer_cols);
+  field("binary_cols", stats.binary_cols);
+  field("free_cols", stats.free_cols);
+  field("boxed_cols", stats.boxed_cols);
+  field("fixed_cols", stats.fixed_cols);
+  field("min_abs_coeff", stats.min_abs_coeff);
+  field("max_abs_coeff", stats.max_abs_coeff);
+  field("obj_offset", result.model.objective_offset);
+  field("maximize", result.model.sense == anukulan::ObjSense::kMaximize);
+  field("fixed_format", result.fixed_format);
+  field("warnings", result.warnings.size(), /*last=*/true);
+  out << "}\n";
+  std::fputs(out.str().c_str(), stdout);
+  return 0;
+}
+
+int command_standard(const std::vector<std::string>& args) {
+  if (args.empty()) {
+    std::fprintf(stderr, "standard: expected a file name\n");
+    return 2;
+  }
+  bool as_json = false;
+  bool quiet = false;
+  for (std::size_t i = 1; i < args.size(); ++i) {
+    if (args[i] == "--format=json") {
+      as_json = true;
+    } else if (args[i] == "--quiet") {
+      quiet = true;
+    } else if (args[i] != "--format=human") {
+      std::fprintf(stderr, "standard: unknown option \"%s\"\n", args[i].c_str());
+      return 2;
+    }
+  }
+
+  const anukulan::MpsReadResult read_result = anukulan::read_mps(args[0]);
+  if (!read_result.ok) {
+    std::fprintf(stderr, "error: %s\n", read_result.error.c_str());
+    return 1;
+  }
+  const anukulan::StandardFormResult sf = anukulan::to_standard_form(read_result.model);
+  if (!quiet) {
+    for (const std::string& w : sf.warnings)
+      std::fprintf(stderr, "warning: %s\n", w.c_str());
+  }
+  if (!sf.ok) {
+    std::fprintf(stderr, "error: %s\n", sf.error.c_str());
+    return 1;
+  }
+
+  const anukulan::StandardLp& lp = sf.lp;
+  if (as_json) {
+    std::ostringstream out;
+    out.setf(std::ios::boolalpha);
+    out.precision(17);
+    out << "{\"name\":\"" << read_result.model.name << "\","
+        << "\"model_rows\":" << read_result.model.num_rows() << ","
+        << "\"model_nnz\":" << read_result.model.constraints.nnz() << ","
+        << "\"std_rows\":" << lp.num_rows() << ","
+        << "\"std_cols\":" << lp.num_cols() << ","
+        << "\"std_nnz\":" << lp.k.nnz() << ","
+        << "\"equalities\":" << lp.num_equalities << ","
+        << "\"inequalities\":" << lp.num_inequalities() << ","
+        << "\"from_ranges\":" << sf.rows_from_ranges << ","
+        << "\"free_rows_dropped\":" << sf.free_rows_dropped << ","
+        << "\"maximize\":" << (lp.objective_scale < 0.0) << "}\n";
+    std::fputs(out.str().c_str(), stdout);
+    return 0;
+  }
+
+  std::printf(
+      "model         %d rows, %d cols, %d nonzeros\n"
+      "standard form %d rows, %d cols, %d nonzeros\n"
+      "  equalities  %d\n"
+      "  >= rows     %d  (%d of them from %d two-sided rows)\n"
+      "  dropped     %d free rows\n"
+      "objective     %s, offset %.10e\n",
+      read_result.model.num_rows(), read_result.model.num_cols(),
+      read_result.model.constraints.nnz(), lp.num_rows(), lp.num_cols(), lp.k.nnz(),
+      lp.num_equalities, lp.num_inequalities(), 2 * sf.rows_from_ranges,
+      sf.rows_from_ranges, sf.free_rows_dropped,
+      lp.objective_scale < 0.0 ? "maximize (negated)" : "minimize",
+      lp.objective_offset);
+  return 0;
+}
+
+int command_presolve(const std::vector<std::string>& args) {
+  if (args.empty()) {
+    std::fprintf(stderr, "presolve: expected a file name\n");
+    return 2;
+  }
+  bool as_json = false;
+  bool quiet = false;
+  anukulan::PresolveOptions options;
+  for (std::size_t i = 1; i < args.size(); ++i) {
+    const std::string& a = args[i];
+    if (a == "--format=json") {
+      as_json = true;
+    } else if (a == "--quiet") {
+      quiet = true;
+    } else if (a == "--no-bound-tightening") {
+      options.bound_tightening = false;
+    } else if (a == "--no-duplicate-rows") {
+      options.duplicate_rows = false;
+    } else if (a == "--no-forcing-rows") {
+      options.forcing_rows = false;
+    } else if (a == "--no-column-singletons") {
+      options.free_column_singletons = false;
+      options.slack_column_singletons = false;
+    } else if (a == "--no-slack-singletons") {
+      options.slack_column_singletons = false;
+    } else if (a == "--no-inequality-singletons") {
+      options.inequality_column_singletons = false;
+    } else if (a == "--no-dual-fixing") {
+      options.dual_fixing = false;
+    } else if (a == "--no-coeff-tightening") {
+      options.coefficient_tightening = false;
+    } else if (a == "--no-doubletons") {
+      options.doubleton_equations = false;
+    } else if (a == "--rows-only") {
+      options.fixed_columns = false;
+      options.empty_columns = false;
+      options.free_column_singletons = false;
+      options.slack_column_singletons = false;
+      options.inequality_column_singletons = false;
+    } else if (a != "--format=human") {
+      std::fprintf(stderr, "presolve: unknown option \"%s\"\n", a.c_str());
+      return 2;
+    }
+  }
+
+  const anukulan::MpsReadResult read_result = anukulan::read_mps(args[0]);
+  if (!read_result.ok) {
+    std::fprintf(stderr, "error: %s\n", read_result.error.c_str());
+    return 1;
+  }
+  if (!quiet) {
+    for (const std::string& w : read_result.warnings)
+      std::fprintf(stderr, "warning: %s\n", w.c_str());
+  }
+
+  const anukulan::PresolveResult r = anukulan::presolve(read_result.model, options);
+  const anukulan::PresolveCounts& c = r.counts;
+  if (as_json) {
+    std::ostringstream out;
+    out.precision(17);
+    out << "{\"name\":\"" << read_result.model.name << "\","
+        << "\"status\":\"" << anukulan::to_string(r.status) << "\","
+        << "\"rows_before\":" << r.original_rows << ","
+        << "\"cols_before\":" << r.original_cols << ","
+        << "\"nnz_before\":" << r.original_nnz << ","
+        << "\"rows_after\":" << (r.original_rows - c.rows_removed) << ","
+        << "\"cols_after\":" << (r.original_cols - c.cols_removed) << ","
+        << "\"nnz_after\":" << (r.original_nnz - c.nonzeros_removed) << ","
+        << "\"empty_rows\":" << c.empty_rows << ","
+        << "\"singleton_rows\":" << c.singleton_rows << ","
+        << "\"redundant_rows\":" << c.redundant_rows << ","
+        << "\"forcing_rows\":" << c.forcing_rows << ","
+        << "\"duplicate_rows\":" << c.duplicate_rows << ","
+        << "\"fixed_columns\":" << c.fixed_columns << ","
+        << "\"empty_columns\":" << c.empty_columns << ","
+        << "\"free_column_singletons\":" << c.free_column_singletons << ","
+        << "\"slack_column_singletons\":" << c.slack_column_singletons << ","
+        << "\"slack_singletons_declined\":" << c.slack_singletons_declined << ","
+        << "\"inequality_column_singletons\":" << c.inequality_column_singletons << ","
+        << "\"doubleton_equations\":" << c.doubleton_equations << ","
+        << "\"dual_fixed_columns\":" << c.dual_fixed_columns << ","
+        << "\"coefficients_tightened\":" << c.coefficients_tightened << ","
+        << "\"bounds_tightened\":" << c.bounds_tightened << ","
+        << "\"rounds\":" << c.rounds << ","
+        << "\"seconds\":" << r.seconds << "}\n";
+    std::fputs(out.str().c_str(), stdout);
+    return 0;
+  }
+
+  std::fputs(anukulan::format_presolve(r).c_str(), stdout);
+  return 0;
+}
+
+int command_simplex(const std::vector<std::string>& args) {
+  if (args.empty()) {
+    std::fprintf(stderr, "simplex: expected a file name\n");
+    return 2;
+  }
+  bool as_json = false;
+  bool quiet = false;
+  bool use_presolve = false;
+  // The same presolve switches command_solve carries. Without them a reduction
+  // cannot be ablated against the simplex, and the simplex is where presolve's
+  // effect is best measured: it stops on an exact optimality test, where the
+  // first-order method's relative one moves when presolve changes what it
+  // divides by.
+  anukulan::PresolveOptions presolve_options;
+  // On by default, and that is a measurement. Over all 88 Netlib instances at a
+  // 60 s limit, seeding the simplex from a first-order point takes it from 79
+  // correct to 82 - modszk1, stocfor2 and woodw go from a numerical error, a
+  // time limit and an iteration limit respectively to the published optimum -
+  // with zero wrong answers either way. The seed costs iterations on small
+  // instances, which is why this was opt-in until the whole set was measured.
+  //
+  // It is safe to default because a seeded solve that does not reach an optimum
+  // falls back to the cold one: crossover can save pivots or do nothing, but it
+  // cannot cost an answer. --no-crossover turns it off.
+  bool use_crossover = true;
+  // Threads for the crossover seed, which is a first-order solve and so the one
+  // part of this command that has any. The simplex itself is serial.
+  const anukulan::LinAlgBackend* backend = nullptr;
+  double crossover_tolerance = 1e-4;
+  // A seed that has not converged by here is not going to produce a better
+  // basis for being run longer, and every iteration of it is iterations the
+  // simplex did not need. bore3d spent 194,440 of them to save 284 pivots.
+  //
+  // Swept over fifteen Netlib instances, simplex pivots against seed cost:
+  //
+  //     cap        pivots            seed iterations
+  //     2,000      15,438 -> 6,850   25,600
+  //     5,000      15,438 -> 5,659   51,680
+  //     20,000     15,438 -> 5,333   99,400
+  //     200,000    15,438 -> 5,141   273,840
+  //
+  // Almost all of the saving is bought by 5,000; the last 4% of it costs five
+  // times the seed.
+  //
+  // A flat cap is the wrong shape, though. Those fifteen are small, and on a
+  // large instance the same 5,000 iterations is a much looser point: d2q06c
+  // goes 25,012 -> 3,952 pivots with an uncapped seed and only 25,012 ->
+  // 10,365 at a flat 5,000. So the cap is per row, with the flat number as a
+  // floor for the small ones.
+  //
+  // Swept over fourteen instances, simplex pivots against seed cost:
+  //
+  //     per row    pivots               seed
+  //     flat       47,487 -> 17,996     61,120
+  //     10         47,487 -> 12,781     80,590
+  //     20         47,487 -> 14,917     110,160
+  //     40         47,487 -> 11,403     154,000
+  //
+  // Ten is where the benefit per seed iteration is best, and it is the default.
+  // Say plainly that this is not finely determined: twenty is worse than ten
+  // and forty is better again, which is not a curve, it is the basis you happen
+  // to land on. What the sweep does establish is the shape - a per-row budget
+  // beats a flat one, and past ten the seed grows faster than the saving.
+  double crossover_iterations_per_row = 10.0;
+  double crossover_dual_weight = 1.0;
+  anukulan::Int crossover_max_iterations = 5000;
+  anukulan::SimplexOptions options;
+  for (std::size_t i = 1; i < args.size(); ++i) {
+    const std::string& a = args[i];
+    double v = 0.0;
+    if (value_of(a, "--crossover-tol=", &v)) {
+      crossover_tolerance = v;
+      use_crossover = true;
+    } else if (value_of(a, "--crossover-max-iter=", &v)) {
+      crossover_max_iterations = static_cast<anukulan::Int>(v);
+      use_crossover = true;
+    } else if (value_of(a, "--crossover-iter-per-row=", &v)) {
+      crossover_iterations_per_row = v;
+      use_crossover = true;
+    } else if (value_of(a, "--crossover-dual-weight=", &v)) {
+      crossover_dual_weight = v;
+      use_crossover = true;
+    } else if (a == "--no-crossover") {
+      use_crossover = false;
+    } else if (a == "--crossover") {
+      use_crossover = true;
+    } else if (value_of(a, "--max-iter=", &v)) {
+      options.max_iterations = static_cast<anukulan::Int>(v);
+    } else if (value_of(a, "--time-limit=", &v)) {
+      options.time_limit_seconds = v;
+    } else if (value_of(a, "--refactor=", &v)) {
+      options.refactorization_frequency = static_cast<anukulan::Int>(v);
+    } else if (value_of(a, "--max-rollback=", &v)) {
+      options.max_rollback = static_cast<anukulan::Int>(v);
+    } else if (value_of(a, "--stall=", &v)) {
+      options.stall_iterations = static_cast<anukulan::Int>(v);
+    } else if (value_of(a, "--unsafe-pivot=", &v)) {
+      options.unsafe_pivot_fraction = v;
+    } else if (value_of(a, "--primal-tol=", &v)) {
+      options.primal_tolerance = v;
+    } else if (value_of(a, "--dual-tol=", &v)) {
+      options.dual_tolerance = v;
+    } else if (a == "--dse") {
+      options.dual_pricing = anukulan::SimplexOptions::DualPricing::kSteepestEdge;
+    } else if (a == "--dual") {
+      options.algorithm = anukulan::SimplexOptions::Algorithm::kDual;
+    } else if (a == "--primal") {
+      options.algorithm = anukulan::SimplexOptions::Algorithm::kPrimal;
+    } else if (a == "--no-incremental-pricing") {
+      options.incremental_pricing = false;
+    } else if (a == "--piecewise-phase-one") {
+      options.piecewise_phase_one = true;
+    } else if (a == "--dantzig") {
+      options.pricing = anukulan::SimplexOptions::Pricing::kDantzig;
+    } else if (a == "--devex") {
+      options.pricing = anukulan::SimplexOptions::Pricing::kDevex;
+    } else if (value_of(a, "--threads=", &v)) {
+      // Only the crossover seed uses this; the simplex itself has no parallel
+      // path. The answer does not change either way - see backend.hpp.
+      const int t = v <= 0 ? anukulan::default_thread_count() : static_cast<int>(v);
+      backend = &anukulan::threaded_cpu_backend(t);
+    } else if (a == "--presolve") {
+      use_presolve = true;
+    } else if (a == "--presolve-no-bound-tightening") {
+      use_presolve = true;
+      presolve_options.bound_tightening = false;
+    } else if (a == "--presolve-no-dual-fixing") {
+      use_presolve = true;
+      presolve_options.dual_fixing = false;
+    } else if (a == "--presolve-no-doubletons") {
+      use_presolve = true;
+      presolve_options.doubleton_equations = false;
+    } else if (a == "--presolve-no-forcing") {
+      use_presolve = true;
+      presolve_options.forcing_rows = false;
+    } else if (a == "--presolve-no-slack-singletons") {
+      use_presolve = true;
+      presolve_options.slack_column_singletons = false;
+    } else if (a == "--presolve-no-inequality-singletons") {
+      use_presolve = true;
+      presolve_options.inequality_column_singletons = false;
+    } else if (a == "--presolve-rows-only") {
+      use_presolve = true;
+      presolve_options.fixed_columns = false;
+      presolve_options.empty_columns = false;
+      presolve_options.free_column_singletons = false;
+      presolve_options.slack_column_singletons = false;
+      presolve_options.inequality_column_singletons = false;
+    } else if (a == "--verbose") {
+      options.verbose = true;
+    } else if (a == "--format=json") {
+      as_json = true;
+    } else if (a == "--quiet") {
+      quiet = true;
+    } else if (a != "--format=human") {
+      std::fprintf(stderr, "simplex: unknown option \"%s\"\n", a.c_str());
+      return 2;
+    }
+  }
+
+  const anukulan::MpsReadResult read_result = anukulan::read_mps(args[0]);
+  if (!read_result.ok) {
+    std::fprintf(stderr, "error: %s\n", read_result.error.c_str());
+    return 1;
+  }
+  if (read_result.model.has_integers() && !quiet) {
+    std::fprintf(stderr,
+                 "warning: model has integer variables; solving the continuous "
+                 "relaxation\n");
+  }
+
+  anukulan::PresolveResult pre;
+  anukulan::Model solved_model = read_result.model;
+  if (use_presolve) {
+    pre = anukulan::presolve(read_result.model, presolve_options);
+    if (pre.status != anukulan::PresolveStatus::kReduced) {
+      std::printf("status        %s (proved by presolve, without solving)\n",
+                  anukulan::to_string(pre.status).c_str());
+      return 1;
+    }
+    if (!quiet && !as_json) std::fputs(anukulan::format_presolve(pre).c_str(), stdout);
+    solved_model = pre.reduced;
+  }
+
+  const anukulan::StandardFormResult sf = anukulan::to_standard_form(solved_model);
+  if (!sf.ok) {
+    std::fprintf(stderr, "error: %s\n", sf.error.c_str());
+    return 1;
+  }
+
+  // Crossover: let the first-order method get roughly to the answer, then start
+  // the simplex from the basis that point implies rather than from all logicals.
+  anukulan::CrossoverResult cross;
+  anukulan::PdhgResult seed;
+  if (use_crossover) {
+    anukulan::PdhgOptions po;
+    po.backend = backend;
+    po.tolerance = crossover_tolerance;
+    po.gap_tolerance = crossover_tolerance;
+    anukulan::Int budget = crossover_max_iterations;
+    if (crossover_iterations_per_row > 0.0) {
+      budget = std::max<anukulan::Int>(
+          budget, static_cast<anukulan::Int>(crossover_iterations_per_row *
+                                            sf.lp.num_rows()));
+    }
+    if (budget > 0) po.max_iterations = budget;
+    seed = anukulan::solve_pdhg(sf.lp, po);
+    anukulan::CrossoverOptions co;
+    co.dual_weight = crossover_dual_weight;
+    cross = anukulan::crossover_basis(sf.lp, seed.x, seed.y, co);
+    if (cross.ok) {
+      options.start_basic = &cross.basic;
+      options.start_status = &cross.status;
+    }
+  }
+
+  anukulan::SimplexResult r = anukulan::solve_lp(sf.lp, options);
+
+  // A starting basis is an optimisation, and an optimisation that turns
+  // "optimal" into "numerical error" is not one. cycle is the instance that
+  // proves the point: its crossover basis factorises, warm starts, and then
+  // fails - so if the seeded solve does not reach an optimum, the cold solve is
+  // run and that is the answer. Crossover can then only ever save pivots.
+  bool crossover_fell_back = false;
+  if (use_crossover && cross.ok && r.status != anukulan::SimplexStatus::kOptimal) {
+    anukulan::SimplexOptions cold = options;
+    cold.start_basic = nullptr;
+    cold.start_status = nullptr;
+    const anukulan::SimplexResult again = anukulan::solve_lp(sf.lp, cold);
+    if (again.status == anukulan::SimplexStatus::kOptimal) {
+      r = again;
+      crossover_fell_back = true;
+    }
+  }
+  if (use_presolve && !r.x.empty()) r.x = pre.postsolve.apply(r.x);
+  const anukulan::ModelViolation checked =
+      anukulan::measure_violation(read_result.model, r.x);
+
+  // The end-to-end version of the check inside the simplex, and it has to be
+  // here as well as there: with presolve the simplex sees a different problem,
+  // so a point that satisfies the reduced rows can still miss the original
+  // ones, and postsolve is where that appears.
+  //
+  // cycle presolved reported optimal at -17.23 against a published
+  // -5.2263930249, missing rows by 2.4e+03. Nothing before this point objected.
+  // Whatever the cause turns out to be, reporting that as an optimum is the one
+  // thing that must not happen.
+  if (r.status == anukulan::SimplexStatus::kOptimal &&
+      checked.relative_row_violation > 1e-6) {
+    r.status = anukulan::SimplexStatus::kNumericalError;
+    r.message = "the answer misses the model's own rows by " +
+                std::to_string(checked.row_violation) +
+                ", so it is not an optimum of the model that was read";
+  }
+
+  if (as_json) {
+    std::ostringstream out;
+    out.setf(std::ios::boolalpha);
+    out.precision(17);
+    out << "{\"name\":\"" << read_result.model.name << "\","
+        << "\"status\":\"" << anukulan::to_string(r.status) << "\","
+        << "\"objective\":" << r.objective << ","
+        << "\"iterations\":" << r.iterations << ","
+        << "\"phase_one_iterations\":" << r.phase_one_iterations << ","
+        << "\"incremental_prices\":" << r.incremental_prices << ","
+        << "\"ftran_calls\":" << r.ftran_calls << ","
+        << "\"ftran_sparse\":" << r.ftran_sparse << ","
+        << "\"btran_calls\":" << r.btran_calls << ","
+        << "\"btran_sparse\":" << r.btran_sparse << ","
+        << "\"refactorizations\":" << r.refactorizations << ","
+        << "\"bland_switches\":" << r.bland_switches << ","
+        << "\"worst_update_growth\":" << r.worst_update_growth << ","
+        << "\"rollbacks\":" << r.rollbacks << ","
+        << "\"devex_resets\":" << r.devex_resets << ","
+        << "\"dual_start_flips\":" << r.dual_start_flips << ","
+        << "\"fell_back_to_primal\":" << r.fell_back_to_primal << ","
+        << "\"seconds\":" << r.solve_seconds << ","
+        << "\"presolved\":" << use_presolve << ","
+        << "\"row_violation\":" << checked.row_violation << ","
+        << "\"bound_violation\":" << checked.bound_violation << ","
+        << "\"crossover\":" << use_crossover << ","
+        << "\"crossover_ok\":" << cross.ok << ","
+        << "\"crossover_fell_back\":" << crossover_fell_back << ","
+        << "\"crossover_rolled_back\":" << cross.rolled_back << ","
+        << "\"crossover_message\":\"" << cross.message << "\","
+        << "\"crossover_candidates\":" << cross.candidates << ","
+        << "\"crossover_pushed\":" << cross.pushed << ","
+        << "\"crossover_logicals_left\":" << cross.logicals_remaining << ","
+        << "\"crossover_seed_iterations\":" << seed.iterations << ","
+        << "\"crossover_seed_seconds\":" << seed.solve_seconds << ","
+        << "\"started_warm\":" << r.started_warm << ","
+        << "\"std_rows\":" << sf.lp.num_rows() << ","
+        << "\"std_cols\":" << sf.lp.num_cols() << "}\n";
+    std::fputs(out.str().c_str(), stdout);
+    return r.status == anukulan::SimplexStatus::kOptimal ? 0 : 1;
+  }
+
+  std::printf(
+      "status        %s%s%s\n"
+      "objective     %.12e\n"
+      "iterations    %d  (%d in phase one)\n"
+      "refactorized  %d times\n"
+      "time          %.3f s\n"
+      "vs original   row %.3e  bound %.3e\n",
+      anukulan::to_string(r.status).c_str(), r.message.empty() ? "" : ": ",
+      r.message.c_str(), r.objective, r.iterations, r.phase_one_iterations,
+      r.refactorizations, r.solve_seconds, checked.row_violation,
+      checked.bound_violation);
+  return r.status == anukulan::SimplexStatus::kOptimal ? 0 : 1;
+}
+
+// Plant memory, measured. A refinery does not solve one model: it re-solves the
+// same plan every day as crude prices, product prices and demands move. This
+// solves such a family in order, each member twice on the identical model:
+// cold, from the all-logical basis, which is how every solve starts today; and
+// warm, from the basis the previous member ended on, which is what a solver
+// that remembers the plant would do. Only the start differs. The two answers
+// are compared with each other, and the warm one is also checked against the
+// model's own rows, so a start can save pivots but never change an answer.
+int command_family(const std::vector<std::string>& args) {
+  std::vector<std::string> files;
+  bool as_json = false;
+  anukulan::SimplexOptions options;
+  options.algorithm = anukulan::SimplexOptions::Algorithm::kDual;
+  for (const std::string& a : args) {
+    double v = 0.0;
+    if (a == "--format=json") {
+      as_json = true;
+    } else if (a == "--primal") {
+      options.algorithm = anukulan::SimplexOptions::Algorithm::kPrimal;
+    } else if (a == "--dual") {
+      options.algorithm = anukulan::SimplexOptions::Algorithm::kDual;
+    } else if (value_of(a, "--time-limit=", &v)) {
+      options.time_limit_seconds = v;
+    } else if (value_of(a, "--max-iter=", &v)) {
+      options.max_iterations = static_cast<anukulan::Int>(v);
+    } else if (a.rfind("--", 0) == 0) {
+      std::fprintf(stderr, "family: unknown option \"%s\"\n", a.c_str());
+      return 2;
+    } else {
+      files.push_back(a);
+    }
+  }
+  if (files.size() < 2) {
+    std::fprintf(stderr, "family: expected two or more model files, in order\n");
+    return 2;
+  }
+
+  std::vector<anukulan::Int> memory_basic;
+  std::vector<anukulan::VarStatus> memory_status;
+  anukulan::Int memory_rows = -1;
+  anukulan::Int memory_cols = -1;
+  long long cold_pivots = 0;
+  long long warm_pivots = 0;
+  double cold_seconds = 0.0;
+  double warm_seconds = 0.0;
+  int warm_members = 0;
+  int disagreements = 0;
+  int warm_failures = 0;
+
+  if (!as_json) {
+    std::printf("%-26s %8s %8s %9s %9s  %-8s %s\n", "model", "cold", "warm",
+                "cold s", "warm s", "status", "objective");
+  }
+  for (const std::string& file : files) {
+    const anukulan::MpsReadResult rr = anukulan::read_mps(file);
+    if (!rr.ok) {
+      std::fprintf(stderr, "error: %s: %s\n", file.c_str(), rr.error.c_str());
+      return 1;
+    }
+    const anukulan::StandardFormResult sf = anukulan::to_standard_form(rr.model);
+    if (!sf.ok) {
+      std::fprintf(stderr, "error: %s: %s\n", file.c_str(), sf.error.c_str());
+      return 1;
+    }
+
+    const anukulan::SimplexResult cold = anukulan::solve_lp(sf.lp, options);
+
+    // The remembered basis only fits a member with the same shape; anything
+    // else is a different model and starts cold.
+    const bool fits = !memory_basic.empty() && memory_rows == sf.lp.num_rows() &&
+                      memory_cols == sf.lp.num_cols();
+    anukulan::SimplexResult warm;
+    bool warm_ok = false;
+    bool agree = true;
+    if (fits) {
+      anukulan::SimplexOptions from_memory = options;
+      from_memory.start_basic = &memory_basic;
+      from_memory.start_status = &memory_status;
+      warm = anukulan::solve_lp(sf.lp, from_memory);
+      warm_ok = warm.status == anukulan::SimplexStatus::kOptimal;
+      if (warm_ok) {
+        const anukulan::ModelViolation checked =
+            anukulan::measure_violation(rr.model, warm.x);
+        if (checked.relative_row_violation > 1e-6) warm_ok = false;
+      }
+      if (!warm_ok) ++warm_failures;
+      if (warm_ok && cold.status == anukulan::SimplexStatus::kOptimal) {
+        const double scale = std::max(1.0, std::abs(cold.objective));
+        agree = std::abs(warm.objective - cold.objective) <= 1e-9 * scale;
+        if (!agree) ++disagreements;
+      }
+      ++warm_members;
+      cold_pivots += cold.iterations;
+      warm_pivots += warm.iterations;
+      cold_seconds += cold.solve_seconds;
+      warm_seconds += warm.solve_seconds;
+    }
+
+    // Remember the basis of whichever start finished at an optimum.
+    const anukulan::SimplexResult& keep = warm_ok ? warm : cold;
+    if (keep.status == anukulan::SimplexStatus::kOptimal) {
+      memory_basic = keep.final_basic;
+      memory_status = keep.final_status;
+      memory_rows = sf.lp.num_rows();
+      memory_cols = sf.lp.num_cols();
+    } else {
+      memory_basic.clear();
+      memory_status.clear();
+    }
+
+    if (as_json) {
+      std::ostringstream out;
+      out.setf(std::ios::boolalpha);
+      out.precision(17);
+      out << "{\"model\":\"" << file << "\","
+          << "\"cold_status\":\"" << anukulan::to_string(cold.status) << "\","
+          << "\"cold_pivots\":" << cold.iterations << ","
+          << "\"cold_seconds\":" << cold.solve_seconds << ","
+          << "\"objective\":" << json_number(cold.objective) << ","
+          << "\"warm\":" << fits << ",";
+      if (fits) {
+        out << "\"warm_status\":\"" << anukulan::to_string(warm.status) << "\","
+            << "\"warm_pivots\":" << warm.iterations << ","
+            << "\"warm_seconds\":" << warm.solve_seconds << ","
+            << "\"warm_objective\":" << json_number(warm.objective) << ","
+            << "\"agree\":" << agree << ",";
+      }
+      out << "\"std_rows\":" << sf.lp.num_rows() << ","
+          << "\"std_cols\":" << sf.lp.num_cols() << "}\n";
+      std::fputs(out.str().c_str(), stdout);
+    } else if (fits) {
+      std::printf("%-26s %8d %8d %9.3f %9.3f  %-8s %.10e\n", file.c_str(),
+                  cold.iterations, warm.iterations, cold.solve_seconds,
+                  warm.solve_seconds, warm_ok ? (agree ? "same" : "DIFFER") : "failed",
+                  cold.objective);
+    } else {
+      std::printf("%-26s %8d %8s %9.3f %9s  %-8s %.10e\n", file.c_str(),
+                  cold.iterations, "-", cold.solve_seconds, "-", "first",
+                  cold.objective);
+    }
+  }
+
+  const double pivot_ratio =
+      cold_pivots > 0 ? static_cast<double>(warm_pivots) / static_cast<double>(cold_pivots) : 0.0;
+  const double time_ratio = cold_seconds > 0.0 ? warm_seconds / cold_seconds : 0.0;
+  if (as_json) {
+    std::ostringstream out;
+    out.precision(17);
+    out << "{\"summary\":true,\"members_compared\":" << warm_members
+        << ",\"cold_pivots\":" << cold_pivots << ",\"warm_pivots\":" << warm_pivots
+        << ",\"pivot_ratio\":" << pivot_ratio << ",\"cold_seconds\":" << cold_seconds
+        << ",\"warm_seconds\":" << warm_seconds << ",\"time_ratio\":" << time_ratio
+        << ",\"disagreements\":" << disagreements
+        << ",\"warm_failures\":" << warm_failures << "}\n";
+    std::fputs(out.str().c_str(), stdout);
+  } else {
+    std::printf(
+        "\n%d members started from the previous one's basis\n"
+        "pivots   cold %lld   warm %lld   warm/cold %.3f\n"
+        "seconds  cold %.3f   warm %.3f   warm/cold %.3f\n"
+        "answers that differ: %d   warm starts that failed: %d\n",
+        warm_members, cold_pivots, warm_pivots, pivot_ratio, cold_seconds,
+        warm_seconds, time_ratio, disagreements, warm_failures);
+  }
+  return (disagreements == 0 && warm_failures == 0) ? 0 : 1;
+}
+
+int command_solve(const std::vector<std::string>& args) {
+  bool use_presolve = false;
+  bool profile = false;
+  anukulan::PresolveOptions presolve_options;
+  if (args.empty()) {
+    std::fprintf(stderr, "solve: expected a file name\n");
+    return 2;
+  }
+  anukulan::PdhgOptions options;
+  bool as_json = false;
+  bool quiet = false;
+  std::string solution_path;
+
+  for (std::size_t i = 1; i < args.size(); ++i) {
+    const std::string& a = args[i];
+    double v = 0.0;
+    if (value_of(a, "--tol=", &v)) {
+      options.tolerance = v;
+    } else if (value_of(a, "--abs-tol=", &v)) {
+      options.absolute_tolerance = v;
+    } else if (value_of(a, "--max-iter=", &v)) {
+      options.max_iterations = static_cast<anukulan::Int>(v);
+    } else if (value_of(a, "--time-limit=", &v)) {
+      options.time_limit_seconds = v;
+    } else if (value_of(a, "--check-every=", &v)) {
+      options.termination_check_frequency = static_cast<anukulan::Int>(v);
+    } else if (a.rfind("--solution=", 0) == 0) {
+      solution_path = a.substr(std::string("--solution=").size());
+    } else if (a == "--backend=cpu") {
+      options.backend = &anukulan::cpu_backend();
+    } else if (value_of(a, "--threads=", &v)) {
+      // 0 asks for a sensible number, 1 is the serial path, anything more
+      // spreads the first-order method's arithmetic over a pool. The answer
+      // does not change either way - see backend.hpp.
+      const int t = v <= 0 ? anukulan::default_thread_count()
+                           : static_cast<int>(v);
+      options.backend = &anukulan::threaded_cpu_backend(t);
+    } else if (a == "--backend=cuda") {
+#ifdef ANUKULAN_WITH_CUDA
+      options.backend = &anukulan::cuda_backend();
+#else
+      std::fprintf(stderr,
+                   "this build has no CUDA backend; configure with "
+                   "-DANUKULAN_ENABLE_CUDA=ON\n");
+      return 2;
+#endif
+    } else if (a == "--pdlp-termination") {
+      options.require_inf_norm_termination = false;
+    } else if (a == "--ruiz-only") {
+      options.scaling.pock_chambolle = false;
+    } else if (a == "--no-scaling") {
+      options.scaling.ruiz_iterations = 0;
+      options.scaling.pock_chambolle = false;
+    } else if (a == "--no-adaptive") {
+      options.adaptive_step_size = false;
+    } else if (a == "--halpern") {
+      options.halpern = true;
+    } else if (value_of(a, "--reflection=", &v)) {
+      options.reflection = v;
+    } else if (a == "--constant-step") {
+      options.constant_step_size = true;
+    } else if (a == "--no-reflection") {
+      options.reflection = 0.0;
+    } else if (a == "--adaptive-step") {
+      options.constant_step_size = false;
+    } else if (a == "--no-fixed-point-restart") {
+      options.restart_on_fixed_point = false;
+    } else if (a == "--no-pid-weight") {
+      options.pid_primal_weight = false;
+    } else if (value_of(a, "--step-scale=", &v)) {
+      options.constant_step_size = true;
+      options.constant_step_scale = v;
+    } else if (a == "--fixed-point-restart") {
+      options.restart_on_fixed_point = true;
+    } else if (a == "--pid-weight") {
+      options.pid_primal_weight = true;
+    } else if (value_of(a, "--kp=", &v)) {
+      options.pid_primal_weight = true;
+      options.primal_weight_kp = v;
+    } else if (value_of(a, "--ki=", &v)) {
+      options.pid_primal_weight = true;
+      options.primal_weight_ki = v;
+    } else if (value_of(a, "--kd=", &v)) {
+      options.pid_primal_weight = true;
+      options.primal_weight_kd = v;
+    } else if (a == "--cupdlpx") {
+      // All four together, which is the configuration the paper reports.
+      options.reflection = 1.0;
+      options.constant_step_size = true;
+      options.restart_on_fixed_point = true;
+      options.pid_primal_weight = true;
+    } else if (a == "--no-halpern") {
+      options.halpern = false;
+    } else if (a == "--no-reuse-products") {
+      options.reuse_products = false;
+    } else if (a == "--no-polish") {
+      options.polish_feasibility = false;
+    } else if (a == "--no-exit-polish") {
+      options.polish_on_exit = false;
+    } else if (value_of(a, "--gap-tol=", &v)) {
+      options.gap_tolerance = v;
+    } else if (value_of(a, "--polish-first=", &v)) {
+      options.polish_first_iteration = static_cast<anukulan::Int>(v);
+    } else if (value_of(a, "--polish-factor=", &v)) {
+      options.polish_iteration_factor = v;
+    } else if (a == "--no-restarts") {
+      options.restarts = false;
+    } else if (a == "--no-primal-weight") {
+      options.primal_weight_updates = false;
+    } else if (a == "--verbose") {
+      options.verbose = true;
+    } else if (a == "--format=json") {
+      as_json = true;
+    } else if (a == "--profile") {
+      profile = true;
+    } else if (a == "--presolve") {
+      use_presolve = true;
+    } else if (a == "--presolve-no-bound-tightening") {
+      use_presolve = true;
+      presolve_options.bound_tightening = false;
+    } else if (a == "--presolve-rows-only") {
+      use_presolve = true;
+      presolve_options.fixed_columns = false;
+      presolve_options.empty_columns = false;
+      presolve_options.free_column_singletons = false;
+      presolve_options.slack_column_singletons = false;
+      presolve_options.inequality_column_singletons = false;
+    } else if (a == "--presolve-no-dual-fixing") {
+      use_presolve = true;
+      presolve_options.dual_fixing = false;
+    } else if (a == "--presolve-no-coeff-tightening") {
+      use_presolve = true;
+      presolve_options.coefficient_tightening = false;
+    } else if (a == "--presolve-no-doubletons") {
+      use_presolve = true;
+      presolve_options.doubleton_equations = false;
+    } else if (a == "--presolve-no-slack-singletons") {
+      use_presolve = true;
+      presolve_options.slack_column_singletons = false;
+    } else if (a == "--presolve-no-inequality-singletons") {
+      use_presolve = true;
+      presolve_options.inequality_column_singletons = false;
+    } else if (a == "--presolve-no-forcing") {
+      use_presolve = true;
+      presolve_options.forcing_rows = false;
+    } else if (a == "--quiet") {
+      quiet = true;
+    } else if (a != "--format=human") {
+      std::fprintf(stderr, "solve: unknown option \"%s\"\n", a.c_str());
+      return 2;
+    }
+  }
+
+  const anukulan::MpsReadResult read_result = anukulan::read_mps(args[0]);
+  if (!read_result.ok) {
+    std::fprintf(stderr, "error: %s\n", read_result.error.c_str());
+    return 1;
+  }
+  if (read_result.model.has_integers() && !quiet) {
+    std::fprintf(stderr,
+                 "warning: model has integer variables; solving the continuous "
+                 "relaxation\n");
+  }
+  // Presolve sits in front of the solver and behind postsolve, so nothing
+  // downstream of here knows it happened: what comes back out is a point in the
+  // original model's columns, with the original model's objective.
+  anukulan::PresolveResult pre;
+  anukulan::Model solved_model = read_result.model;
+  if (use_presolve) {
+    pre = anukulan::presolve(read_result.model, presolve_options);
+    if (pre.status != anukulan::PresolveStatus::kReduced) {
+      std::printf("status        %s (proved by presolve, without solving)\n",
+                  anukulan::to_string(pre.status).c_str());
+      if (!pre.message.empty())
+        std::printf("reason        %s\n", pre.message.c_str());
+      return 1;
+    }
+    if (!quiet) std::fputs(anukulan::format_presolve(pre).c_str(), stdout);
+    solved_model = pre.reduced;
+  }
+
+  const anukulan::StandardFormResult sf = anukulan::to_standard_form(solved_model);
+  if (!sf.ok) {
+    std::fprintf(stderr, "error: %s\n", sf.error.c_str());
+    return 1;
+  }
+
+  const anukulan::LinAlgBackend& profiled_backend =
+      options.backend ? *options.backend : anukulan::default_backend();
+  if (profile) profiled_backend.set_profiling(true);
+  anukulan::PdhgResult r = anukulan::solve_pdhg(sf.lp, options);
+  std::string kernel_report;
+  if (profile) {
+    kernel_report = profiled_backend.profile_report();
+    profiled_backend.set_profiling(false);
+  }
+
+  // The solver's residuals describe the model it was handed. With presolve in
+  // front of it that is not the model the caller asked about, so the answer is
+  // re-checked against the original before any claim is made about it. See
+  // measure_violation in model.hpp for what went wrong without this.
+  if (use_presolve) r.x = pre.postsolve.apply(r.x);
+
+  // The dual, mapped back the same way the primal is. Standard-form rows carry
+  // a sign and a model row they came from - a two-sided row becomes two of them
+  // - so they fold back onto the model's own rows first, and presolve's row
+  // recovery runs after that.
+  std::vector<double> model_dual(anukulan::sz(solved_model.num_rows()), 0.0);
+  for (anukulan::Int i = 0; i < sf.lp.num_rows(); ++i) {
+    const auto& origin = sf.lp.row_origin[anukulan::sz(i)];
+    model_dual[anukulan::sz(origin.model_row)] += origin.sign * r.y[anukulan::sz(i)];
+  }
+  std::vector<double> original_dual = model_dual;
+  bool dual_exact = true;
+  if (use_presolve) {
+    // Reduced costs of the reduced model, which the singleton-row recovery
+    // needs: d = c - A' y.
+    std::vector<double> reduced_costs = solved_model.objective;
+    for (anukulan::Int i = 0; i < solved_model.num_rows(); ++i) {
+      const double yi = model_dual[anukulan::sz(i)];
+      if (yi == 0.0) continue;
+      for (anukulan::Int e = solved_model.constraints.row_begin(i);
+           e < solved_model.constraints.row_end(i); ++e) {
+        reduced_costs[anukulan::sz(solved_model.constraints.index()[anukulan::sz(e)])] -=
+            yi * solved_model.constraints.value()[anukulan::sz(e)];
+      }
+    }
+    original_dual = pre.postsolve.apply_dual(model_dual, reduced_costs,
+                                             read_result.model.objective);
+    dual_exact = pre.postsolve.dual_is_exact();
+  }
+
+  // Measured on both paths, because the number is worth seeing either way.
+  const anukulan::ModelViolation checked =
+      anukulan::measure_violation(read_result.model, r.x);
+
+  // Acted on only when presolve ran, and the asymmetry is deliberate. Without
+  // presolve the solver's own criteria already describe this model, and a
+  // violation that survives them is PDLP's documented relative behaviour, which
+  // --abs-tol exists to override. With presolve they describe the reduced model
+  // instead, so nothing has checked the original unless this does.
+  // Which number is checked follows which tolerance was asked for. With
+  // --abs-tol the caller wants an absolute guarantee, so the absolute violation
+  // is what gets tested. Without it they asked for PDLP's relative criterion,
+  // and the honest comparison is the relative violation against the same --tol
+  // the unpresolved path is judged by. Holding the absolute number against a
+  // relative tolerance failed graph40-40 for a violation the unpresolved run
+  // was passing.
+  bool violates_cap = false;
+  if (use_presolve && r.status == anukulan::PdhgStatus::kOptimal) {
+    const bool absolute = options.absolute_tolerance > 0.0;
+    const double measured =
+        absolute ? checked.worst() : checked.relative_row_violation;
+    const double cap =
+        absolute ? options.absolute_tolerance : options.tolerance;
+    if (measured > cap) {
+      violates_cap = true;
+      r.status = anukulan::PdhgStatus::kNumericalError;
+      r.message =
+          "the reduced model met the tolerance and the original does not. "
+          "presolve removes rows, and the rows it removes are often the ones "
+          "with the largest right-hand sides, which are what the relative "
+          "criterion divides by - so the same --tol is a stricter absolute "
+          "requirement on the model you handed in than on the one that was "
+          "solved. re-run with --abs-tol, or a tighter --tol";
+    }
+  }
+
+  if (!solution_path.empty()) {
+    // Column name and value, one per line. Deliberately plain text: the point is
+    // that something which shares no code with this program can read it back and
+    // check the answer for itself.
+    std::ofstream out(solution_path);
+    if (!out) {
+      std::fprintf(stderr, "cannot write solution to \"%s\"\n",
+                   solution_path.c_str());
+      return 1;
+    }
+    out.precision(17);
+    out << "# objective " << r.objective << "\n";
+    out << "# status " << anukulan::to_string(r.status) << "\n";
+    for (std::size_t j = 0; j < r.x.size(); ++j) {
+      out << read_result.model.col_names[j] << " " << r.x[j] << "\n";
+    }
+    // Row duals - shadow prices - after the solution, marked with whether
+    // presolve could put them back exactly.
+    out << "# duals " << (dual_exact ? "exact" : "approximate") << "\n";
+    for (std::size_t i = 0; i < original_dual.size(); ++i) {
+      const std::string name = i < read_result.model.row_names.size()
+                                   ? read_result.model.row_names[i]
+                                   : ("row" + std::to_string(i));
+      out << "# dual " << name << " " << original_dual[i] << "\n";
+    }
+  }
+
+  if (as_json) {
+    std::ostringstream out;
+    out.setf(std::ios::boolalpha);
+    out.precision(17);
+    out << "{\"name\":\"" << read_result.model.name << "\","
+        << "\"status\":\"" << anukulan::to_string(r.status) << "\","
+        << "\"objective\":" << r.objective << ","
+        << "\"presolved\":" << use_presolve << ","
+        << "\"original_row_violation\":" << checked.row_violation << ","
+        << "\"original_row_violation_relative\":"
+        << checked.relative_row_violation << ","
+        << "\"dual_exact\":" << dual_exact << ","
+        << "\"original_bound_violation\":" << checked.bound_violation << ","
+        << "\"iterations\":" << r.iterations << ","
+        << "\"restarts\":" << r.restarts << ","
+        << "\"polish_attempts\":" << r.polish_attempts << ","
+        << "\"polish_iterations\":" << r.polish_iterations << ","
+        << "\"polished\":" << (r.polished ? "true" : "false") << ","
+        << "\"seconds\":" << r.solve_seconds << ","
+        << "\"phase_scaling\":" << r.phases.scaling << ","
+        << "\"phase_matrix_norm\":" << r.phases.matrix_norm << ","
+        << "\"phase_setup\":" << r.phases.setup << ","
+        << "\"phase_iterating\":" << r.phases.iterating << ","
+        << "\"phase_checks\":" << r.phases.checks << ","
+        << "\"phase_polishing\":" << r.phases.polishing << ","
+        << "\"rel_primal\":" << r.residual.relative_primal << ","
+        << "\"rel_dual\":" << r.residual.relative_dual << ","
+        << "\"rel_gap\":" << r.residual.relative_gap << ","
+        << "\"rel_primal_inf\":" << r.residual.relative_primal_inf << ","
+        << "\"rel_dual_inf\":" << r.residual.relative_dual_inf << ","
+        << "\"abs_primal\":" << r.residual.primal_residual_inf << ","
+        << "\"abs_dual\":" << r.residual.dual_residual_inf << ","
+        << "\"matrix_norm\":" << r.matrix_norm_estimate << ","
+        << "\"row_spread_before\":" << r.scaling.row_spread_before << ","
+        << "\"row_spread_after\":" << r.scaling.row_spread_after << ","
+        << "\"std_rows\":" << sf.lp.num_rows() << ","
+        << "\"std_cols\":" << sf.lp.num_cols() << "}\n";
+    std::fputs(out.str().c_str(), stdout);
+    return r.status == anukulan::PdhgStatus::kOptimal ? 0 : 1;
+  }
+
+  char vb[220];
+  std::snprintf(vb, sizeof(vb), "vs original   row %.3e  bound %.3e%s\n",
+                checked.row_violation, checked.bound_violation,
+                violates_cap ? "   <- over the tolerance" : "");
+  const std::string violation_line(vb);
+  std::printf(
+      "status        %s%s%s\n"
+      "objective     %.12e\n"
+      "iterations    %d  (%d restarts, %d more in %d polish attempts%s)\n"
+      "time          %.3f s\n"
+      "relative      primal %.3e  dual %.3e  gap %.3e\n"
+      "rel inf-norm  primal %.3e  dual %.3e\n"
+      "worst abs     primal %.3e  dual %.3e\n"
+      "||K||         %.6e\n"
+      "row spread    %.3e -> %.3e\n%s",
+      anukulan::to_string(r.status).c_str(), r.message.empty() ? "" : ": ",
+      r.message.c_str(), r.objective, r.iterations, r.restarts,
+      r.polish_iterations, r.polish_attempts, r.polished ? ", adopted" : "",
+      r.solve_seconds,
+      r.residual.relative_primal, r.residual.relative_dual, r.residual.relative_gap,
+      r.residual.relative_primal_inf, r.residual.relative_dual_inf,
+      r.residual.primal_residual_inf, r.residual.dual_residual_inf,
+      r.matrix_norm_estimate, r.scaling.row_spread_before,
+      r.scaling.row_spread_after, violation_line.c_str());
+  if (profile) {
+    // Where the solve went, phase by phase. This is measured on the ordinary
+    // run - a handful of clock reads, no serialisation - so unlike the kernel
+    // table below it can be read as wall clock.
+    //
+    // The line that matters on a GPU is the last one: scaling, the matrix norm
+    // and the termination checks are host work that a faster device cannot
+    // help with, and if they dominate then the kernels are not the thing to
+    // optimise. On graph40-40 they were 79% of the solve.
+    const anukulan::PdhgResult::Phases& p = r.phases;
+    const double total = p.total();
+    auto share = [total](double v) { return total > 0.0 ? 100.0 * v / total : 0.0; };
+    std::printf(
+        "\nwhere the solve time went\n"
+        "  %-16s %8.4f s  %5.1f%%\n"
+        "  %-16s %8.4f s  %5.1f%%\n"
+        "  %-16s %8.4f s  %5.1f%%\n"
+        "  %-16s %8.4f s  %5.1f%%\n"
+        "  %-16s %8.4f s  %5.1f%%\n"
+        "  %-16s %8.4f s  %5.1f%%\n"
+        "  %-16s %8.4f s\n"
+        "  %-16s %8.4f s  %5.1f%%   <- what a faster device cannot help with\n",
+        "scaling", p.scaling, share(p.scaling),
+        "matrix norm", p.matrix_norm, share(p.matrix_norm),
+        "setup", p.setup, share(p.setup),
+        "iterating", p.iterating, share(p.iterating),
+        "checks", p.checks, share(p.checks),
+        "polishing", p.polishing, share(p.polishing),
+        "accounted", total,
+        "off the device", p.scaling + p.matrix_norm + p.setup + p.checks,
+        share(p.scaling + p.matrix_norm + p.setup + p.checks));
+  }
+  if (!kernel_report.empty()) {
+    std::printf(
+        "\nwhere the device time went. Timing serialises the launches it\n"
+        "measures, so this run is slower than a real one and the wall clock\n"
+        "above is not a benchmark. The proportions are the point.\n\n%s",
+        kernel_report.c_str());
+  }
+  return r.status == anukulan::PdhgStatus::kOptimal ? 0 : 1;
+}
+
+int command_milp(const std::vector<std::string>& args) {
+  // Off by default, and that is a measurement rather than an oversight - but a
+  // different measurement from the one that used to be written here, and the
+  // difference is worth keeping.
+  //
+  // The old note recorded gt2 going from 500 nodes to 8,320 with presolve on,
+  // which is a sixteen-fold regression and settled the question. That was
+  // measured against a depth-first tree with no RINS. On the tree that exists
+  // now - best-estimate node selection with plunging, RINS, a cut budget - the
+  // catastrophe is gone:
+  //
+  //                nodes off   nodes on
+  //     flugpl           274        262
+  //     gt2              307        399
+  //     p0201            989        358
+  //     neos5          4,408      4,214
+  //
+  // Three better or level, one 30% worse rather than 1,600%. On four instances
+  // that reads like presolve should now be the default.
+  //
+  // It is not, because four instances are not a measurement - a lesson this
+  // codebase has had to learn more than once. Over the full 70-instance MIPLIB
+  // survey at a 15 s limit:
+  //
+  //     presolve off   46 feasible, 7 proved optimal, 11 more within 1%
+  //     presolve on    45 feasible, 7 proved optimal, 14 more within 1%
+  //
+  // One fewer instance finds anything at all, three more land close. That is a
+  // trade, not a win, and it does not justify changing what the solver does by
+  // default. `--presolve` turns it on.
+  bool use_presolve = false;
+  if (args.empty()) {
+    std::fprintf(stderr, "milp: expected a file name\n");
+    return 2;
+  }
+  anukulan::BranchAndBoundOptions options;
+  options.relaxation.tolerance = 1e-8;
+  options.relaxation.max_iterations = 500000;
+  options.relaxation.time_limit_seconds = 30.0;
+  bool as_json = false;
+  std::string solution_path;
+  std::string debug_solution_path;
+
+  for (std::size_t i = 1; i < args.size(); ++i) {
+    const std::string& a = args[i];
+    double v = 0.0;
+    if (value_of(a, "--node-limit=", &v)) {
+      options.node_limit = static_cast<anukulan::Int>(v);
+    } else if (value_of(a, "--time-limit=", &v)) {
+      options.time_limit_seconds = v;
+    } else if (value_of(a, "--lp-tol=", &v)) {
+      options.relaxation.tolerance = v;
+    } else if (value_of(a, "--lp-max-iter=", &v)) {
+      options.relaxation.max_iterations = static_cast<anukulan::Int>(v);
+    } else if (value_of(a, "--lp-time=", &v)) {
+      options.relaxation.time_limit_seconds = v;
+    } else if (value_of(a, "--int-tol=", &v)) {
+      options.integrality_tolerance = v;
+    } else if (value_of(a, "--gomory-rounds=", &v)) {
+      options.gomory_rounds = static_cast<anukulan::Int>(v);
+    } else if (a == "--gomory") {
+      options.gomory_cuts = true;
+    } else if (a == "--no-reduced-cost-fixing") {
+      options.reduced_cost_fixing = false;
+    } else if (a == "--no-reliability") {
+      options.reliability_branching = false;
+    } else if (value_of(a, "--reliability=", &v)) {
+      options.reliability_threshold = static_cast<anukulan::Int>(v);
+    } else if (value_of(a, "--strong-depth=", &v)) {
+      options.strong_branch_max_depth = static_cast<anukulan::Int>(v);
+    } else if (value_of(a, "--strong-candidates=", &v)) {
+      options.strong_branch_candidates = static_cast<anukulan::Int>(v);
+    } else if (a == "--no-node-propagation") {
+      options.node_propagation = false;
+    } else if (value_of(a, "--propagation-rounds=", &v)) {
+      options.node_propagation_rounds = static_cast<int>(v);
+    } else if (a == "--no-adaptive-cuts") {
+      options.adaptive_cuts = false;
+    } else if (value_of(a, "--cut-threshold=", &v)) {
+      options.cut_bound_improvement = v;
+    } else if (a == "--no-gomory") {
+      options.gomory_cuts = false;
+    } else if (a == "--no-cover") {
+      options.cover_cuts = false;
+    } else if (a == "--no-mir") {
+      options.mir_cuts = false;
+    } else if (a == "--no-cuts") {
+      options.root_cuts = false;
+    } else if (value_of(a, "--stall=", &v)) {
+      options.simplex.dual_stall_iterations = static_cast<anukulan::Int>(v);
+    } else if (value_of(a, "--dive-iters=", &v)) {
+      options.dive_iteration_factor = static_cast<anukulan::Int>(v);
+    } else if (value_of(a, "--node-iters=", &v)) {
+      options.node_iteration_factor = static_cast<anukulan::Int>(v);
+    } else if (a == "--dse") {
+      options.simplex.dual_pricing =
+          anukulan::SimplexOptions::DualPricing::kSteepestEdge;
+    } else if (value_of(a, "--pump-objective=", &v)) {
+      options.pump_objective_weight = v;
+    } else if (a.rfind("--solution=", 0) == 0) {
+      solution_path = a.substr(std::string("--solution=").size());
+    } else if (a.rfind("--debug-solution=", 0) == 0) {
+      debug_solution_path = a.substr(std::string("--debug-solution=").size());
+    } else if (value_of(a, "--cut-share=", &v)) {
+      options.root_cut_time_share = v;
+    } else if (value_of(a, "--cut-rounds=", &v)) {
+      options.cut_rounds = static_cast<anukulan::Int>(v);
+    } else if (value_of(a, "--pump-share=", &v)) {
+      options.pump_time_share = v;
+    } else if (a == "--no-cut-filtering") {
+      options.root_cut_filtering = false;
+    } else if (a == "--no-rins") {
+      options.rins = false;
+    } else if (value_of(a, "--rins-nodes=", &v)) {
+      options.rins_nodes = static_cast<anukulan::Int>(v);
+    } else if (value_of(a, "--rins-share=", &v)) {
+      options.rins_time_share = v;
+    } else if (a == "--depth-first") {
+      options.node_selection =
+          anukulan::BranchAndBoundOptions::NodeSelection::kDepthFirst;
+    } else if (value_of(a, "--plunge-depth=", &v)) {
+      options.max_plunge_depth = static_cast<anukulan::Int>(v);
+    } else if (a == "--no-lp-diving") {
+      options.lp_diving = false;
+    } else if (value_of(a, "--lp-dive-steps=", &v)) {
+      options.lp_dive_max_steps = static_cast<anukulan::Int>(v);
+    } else if (value_of(a, "--lp-dive-share=", &v)) {
+      options.lp_dive_time_share = v;
+    } else if (a == "--no-objective-integrality") {
+      options.objective_integrality = false;
+    } else if (a == "--no-pump-interior") {
+      options.pump_interior_terms = false;
+    } else if (a == "--no-pump") {
+      options.feasibility_pump = false;
+    } else if (a == "--no-root-crossover") {
+      options.root_crossover = false;
+    } else if (a == "--nodes=simplex") {
+      options.node_solver = anukulan::BranchAndBoundOptions::NodeSolver::kSimplex;
+    } else if (a == "--nodes=first-order") {
+      options.node_solver =
+          anukulan::BranchAndBoundOptions::NodeSolver::kFirstOrder;
+    } else if (a == "--most-fractional") {
+      options.branching =
+          anukulan::BranchAndBoundOptions::Branching::kMostFractional;
+    } else if (a == "--no-heuristic") {
+      options.rounding_heuristic = false;
+      options.diving_heuristic = false;
+    } else if (value_of(a, "--threads=", &v)) {
+      // The node relaxations are simplex solves and serial. What this reaches
+      // is the root crossover seed, which is a first-order solve. The answer
+      // does not change either way - see backend.hpp.
+      const int t = v <= 0 ? anukulan::default_thread_count() : static_cast<int>(v);
+      options.relaxation.backend = &anukulan::threaded_cpu_backend(t);
+    } else if (a == "--presolve") {
+      use_presolve = true;
+    } else if (a == "--verbose") {
+      options.verbose = true;
+    } else if (a == "--format=json") {
+      as_json = true;
+    } else if (a != "--quiet" && a != "--format=human") {
+      std::fprintf(stderr, "milp: unknown option \"%s\"\n", a.c_str());
+      return 2;
+    }
+  }
+
+  const anukulan::MpsReadResult read_result = anukulan::read_mps(args[0]);
+  if (!read_result.ok) {
+    std::fprintf(stderr, "error: %s\n", read_result.error.c_str());
+    return 1;
+  }
+  if (!read_result.model.has_integers()) {
+    std::fprintf(stderr, "warning: no integer variables; this is just an LP\n");
+  }
+
+  const bool quiet = as_json;
+  anukulan::PresolveResult pre;
+  anukulan::Model solved_model = read_result.model;
+  if (use_presolve) {
+    pre = anukulan::presolve(read_result.model);
+    if (pre.status != anukulan::PresolveStatus::kReduced) {
+      std::printf("status        %s (proved by presolve, without branching)\n",
+                  anukulan::to_string(pre.status).c_str());
+      if (!pre.message.empty())
+        std::printf("reason        %s\n", pre.message.c_str());
+      return 1;
+    }
+    if (!quiet) std::fputs(anukulan::format_presolve(pre).c_str(), stdout);
+    solved_model = pre.reduced;
+  }
+
+  // A solution known to be feasible and optimal, against which every prune gets
+  // checked. See BranchAndBoundOptions::debug_solution for why: when a tree
+  // returns a wrong answer there is no way to reason backwards from the answer
+  // to the prune that lost it, and this turns that question into a printed
+  // line. The facility was there and had no way in from the command line, so
+  // using it meant writing C++.
+  //
+  // Read by column name, so a file this program wrote with --solution can be
+  // handed straight back to a run with different options - which is the check
+  // that matters when a change strengthens a prune.
+  std::vector<double> debug_solution;
+  if (!debug_solution_path.empty()) {
+    std::ifstream in(debug_solution_path);
+    if (!in) {
+      std::fprintf(stderr, "cannot read \"%s\"\n", debug_solution_path.c_str());
+      return 1;
+    }
+    debug_solution.assign(anukulan::sz(solved_model.num_cols()), 0.0);
+    std::size_t matched = 0;
+    std::string name;
+    while (in >> name) {
+      if (!name.empty() && name[0] == '#') {
+        std::string rest;
+        std::getline(in, rest);
+        continue;
+      }
+      double value = 0.0;
+      if (!(in >> value)) break;
+      for (std::size_t j = 0; j < solved_model.col_names.size(); ++j) {
+        if (solved_model.col_names[j] == name) {
+          debug_solution[j] = value;
+          ++matched;
+          break;
+        }
+      }
+    }
+    std::fprintf(stderr, "debug solution: matched %zu of %d columns\n", matched,
+                 solved_model.num_cols());
+    options.debug_solution = &debug_solution;
+  }
+
+  anukulan::BranchAndBoundResult r = anukulan::solve_milp(solved_model, options);
+  if (use_presolve) r.x = pre.postsolve.apply(r.x);
+
+  // Column name and value, one per line, which is the format --debug-solution
+  // reads back. Written only when there is an incumbent: a file of zeros from a
+  // run that found nothing would be handed back as a known answer and every
+  // prune would be checked against a point that is not one.
+  if (!solution_path.empty() && !r.x.empty()) {
+    std::ofstream out(solution_path);
+    if (!out) {
+      std::fprintf(stderr, "cannot write solution to \"%s\"\n",
+                   solution_path.c_str());
+      return 1;
+    }
+    out.precision(17);
+    out << "# objective " << r.objective << "\n";
+    out << "# status " << anukulan::to_string(r.status) << "\n";
+    for (std::size_t j = 0;
+         j < r.x.size() && j < read_result.model.col_names.size(); ++j) {
+      out << read_result.model.col_names[j] << " " << r.x[j] << "\n";
+    }
+  }
+
+  if (as_json) {
+    std::ostringstream out;
+    out.precision(17);
+    out << "{\"name\":\"" << read_result.model.name << "\","
+        << "\"status\":\"" << anukulan::to_string(r.status) << "\","
+        << "\"objective\":" << json_number(r.objective) << ","
+        << "\"dual_bound\":" << json_number(r.dual_bound) << ","
+        << "\"gap\":" << json_number(r.relative_gap) << ","
+        << "\"nodes\":" << r.nodes << ","
+        << "\"max_depth\":" << r.max_depth << ","
+        << "\"relaxations\":" << r.relaxations_solved << ","
+        << "\"incumbents\":" << r.incumbents_found << ","
+        << "\"heuristic_successes\":" << r.heuristic_successes << ","
+        << "\"best_estimate_jumps\":" << r.best_estimate_jumps << ","
+        << "\"rins_run\":" << r.rins_run << ","
+        << "\"rins_successes\":" << r.rins_successes << ","
+        << "\"lp_dives_run\":" << r.lp_dives_run << ","
+        << "\"lp_dive_successes\":" << r.lp_dive_successes << ","
+        << "\"lp_dive_steps\":" << r.lp_dive_steps << ","
+        << "\"integral_objective\":" << (r.integral_objective ? "true" : "false") << ","
+        << "\"pump_rounds\":" << r.pump_rounds << ","
+        << "\"pump_successes\":" << r.pump_successes << ","
+        << "\"pump_restarts\":" << r.pump_restarts << ","
+        << "\"root_crossover_pushed\":" << r.root_crossover_pushed << ","
+        << "\"root_crossover_used\":" << r.root_crossover_used << ","
+        << "\"cuts_added\":" << r.cuts_added << ","
+        << "\"gomory_cuts_added\":" << r.gomory_cuts_added << ","
+        << "\"children_pruned_by_propagation\":"
+        << r.children_pruned_by_propagation << ","
+        << "\"propagation_tightenings\":" << r.propagation_tightenings << ","
+        << "\"strong_branch_probes\":" << r.strong_branch_probes << ","
+        << "\"strong_branch_prunes\":" << r.strong_branch_prunes << ","
+        << "\"cuts_discarded\":" << (r.cuts_discarded ? "true" : "false") << ","
+        << "\"cuts_dropped_slack\":" << r.cuts_dropped_slack << ","
+        << "\"cut_rounds_abandoned\":" << r.cut_rounds_abandoned << ","
+        << "\"cuts_reverted\":"
+        << (r.cuts_reverted_after_root_failure ? "true" : "false") << ","
+        << "\"root_bound_rise\":" << r.root_bound_rise << ","
+        << "\"warm_started_nodes\":" << r.warm_started_nodes << ","
+        << "\"simplex_iterations\":" << r.simplex_iterations << ","
+        << "\"reduced_cost_tightenings\":" << r.reduced_cost_tightenings << ","
+        << "\"reduced_cost_fixings\":" << r.reduced_cost_fixings << ","
+        << "\"root_before\":" << r.root_bound_before_cuts << ","
+        << "\"root_after\":" << r.root_bound_after_cuts << ","
+        << "\"seconds\":" << r.solve_seconds << "}\n";
+    std::fputs(out.str().c_str(), stdout);
+    return r.status == anukulan::MilpStatus::kOptimal ? 0 : 1;
+  }
+
+  std::printf(
+      "status        %s\n"
+      "objective     %.12e\n"
+      "dual bound    %.12e   (gap %.3e)\n"
+      "nodes         %d   max depth %d   relaxations %d   incumbents %d\n"
+      "pruned        %d proved infeasible   %d unconverged\n"
+      "root cuts     %d added   bound %.10e -> %.10e\n"
+      "time          %.3f s\n",
+      anukulan::to_string(r.status).c_str(), r.objective, r.dual_bound,
+      r.relative_gap, r.nodes, r.max_depth, r.relaxations_solved,
+      r.incumbents_found, r.nodes_proved_infeasible, r.nodes_relaxation_failed,
+      r.cuts_added, r.root_bound_before_cuts, r.root_bound_after_cuts,
+      r.solve_seconds);
+  if (!r.message.empty()) std::printf("note          %s\n", r.message.c_str());
+  return r.status == anukulan::MilpStatus::kOptimal ? 0 : 1;
+}
+
+int command_qp(const std::vector<std::string>& args) {
+  bool use_presolve = false;
+  if (args.empty()) {
+    std::fprintf(stderr, "qp: expected a file name\n");
+    return 2;
+  }
+  anukulan::QpOptions options;
+  bool as_json = false;
+
+  for (std::size_t i = 1; i < args.size(); ++i) {
+    const std::string& a = args[i];
+    double v = 0.0;
+    if (value_of(a, "--tol=", &v)) {
+      options.absolute_tolerance = v;
+      options.relative_tolerance = v;
+    } else if (value_of(a, "--max-iter=", &v)) {
+      options.max_iterations = static_cast<anukulan::Int>(v);
+    } else if (value_of(a, "--time-limit=", &v)) {
+      options.time_limit_seconds = v;
+    } else if (value_of(a, "--abs-cap=", &v)) {
+      options.max_absolute_residual = v;
+    } else if (value_of(a, "--rho=", &v)) {
+      options.rho = v;
+    } else if (value_of(a, "--cg-iter=", &v)) {
+      options.cg_max_iterations = static_cast<anukulan::Int>(v);
+    } else if (a == "--no-scaling") {
+      options.scaling = false;
+    } else if (a == "--osqp-termination") {
+      options.max_absolute_residual = 0.0;
+    } else if (a == "--presolve") {
+      use_presolve = true;
+    } else if (value_of(a, "--max-fill=", &v)) {
+      options.max_fill_ratio = v;
+    } else if (a == "--indirect") {
+      options.direct = false;
+    } else if (a == "--direct") {
+      options.direct = true;
+    } else if (a == "--polish") {
+      options.polish = true;
+    } else if (a == "--no-adaptive-rho") {
+      options.adaptive_rho = false;
+    } else if (a == "--presolve") {
+      use_presolve = true;
+    } else if (a == "--verbose") {
+      options.verbose = true;
+    } else if (a == "--format=json") {
+      as_json = true;
+    } else if (a != "--quiet" && a != "--format=human") {
+      std::fprintf(stderr, "qp: unknown option \"%s\"\n", a.c_str());
+      return 2;
+    }
+  }
+
+  const anukulan::MpsReadResult read_result = anukulan::read_mps(args[0]);
+  if (!read_result.ok) {
+    std::fprintf(stderr, "error: %s\n", read_result.error.c_str());
+    return 1;
+  }
+  // A Hessian switches off every column-removing reduction, so what a QP gets
+  // out of this is the row side: rows that cannot bind, rows that are really
+  // bounds, and tighter bounds. Q carries over untouched.
+  anukulan::PresolveResult pre;
+  anukulan::Model solved_model = read_result.model;
+  if (use_presolve) {
+    pre = anukulan::presolve(read_result.model);
+    if (pre.status != anukulan::PresolveStatus::kReduced) {
+      std::printf("status        %s (proved by presolve, without solving)\n",
+                  anukulan::to_string(pre.status).c_str());
+      if (!pre.message.empty())
+        std::printf("reason        %s\n", pre.message.c_str());
+      return 1;
+    }
+    if (!as_json) std::fputs(anukulan::format_presolve(pre).c_str(), stdout);
+    solved_model = pre.reduced;
+  }
+
+  anukulan::QpResult r = anukulan::solve_qp(solved_model, options);
+  if (use_presolve) r.x = pre.postsolve.apply(r.x);
+
+  if (as_json) {
+    std::ostringstream out;
+    out.precision(17);
+    out << "{\"name\":\"" << read_result.model.name << "\","
+        << "\"status\":\"" << anukulan::to_string(r.status) << "\","
+        << "\"objective\":" << r.objective << ","
+        << "\"iterations\":" << r.iterations << ","
+        << "\"cg_iterations\":" << r.cg_iterations << ","
+        << "\"rho_updates\":" << r.rho_updates << ","
+        << "\"kkt_fill_ratio\":" << r.kkt_fill_ratio << ","
+        << "\"fell_back_to_cg\":" << r.fell_back_to_cg << ","
+        << "\"polished\":" << (r.polished ? 1 : 0) << ","
+        << "\"primal\":" << r.residual.primal << ","
+        << "\"dual\":" << r.residual.dual << ","
+        << "\"seconds\":" << r.solve_seconds << "}\n";
+    std::fputs(out.str().c_str(), stdout);
+    return r.status == anukulan::QpStatus::kOptimal ? 0 : 1;
+  }
+
+  std::printf(
+      "status        %s%s%s\n"
+      "objective     %.12e\n"
+      "iterations    %d ADMM, %d conjugate gradient   (%d rho updates)\n"
+      "polish        %s\n"
+      "residual      primal %.3e / %.3e   dual %.3e / %.3e\n"
+      "time          %.3f s\n",
+      anukulan::to_string(r.status).c_str(), r.message.empty() ? "" : ": ",
+      r.message.c_str(), r.objective, r.iterations, r.cg_iterations, r.rho_updates,
+      r.polished ? "accepted" : "not accepted", r.residual.primal,
+      r.residual.primal_tolerance, r.residual.dual, r.residual.dual_tolerance,
+      r.solve_seconds);
+  return r.status == anukulan::QpStatus::kOptimal ? 0 : 1;
+}
+
+int command_backends() {
+  std::printf("default       %s\n", anukulan::default_backend().name().c_str());
+  std::printf("cpu           available\n");
+#ifdef ANUKULAN_WITH_CUDA
+  bool cuda_ok = true;
+  std::string why;
+  try {
+    (void)anukulan::cuda_backend();
+  } catch (const std::exception& e) {
+    cuda_ok = false;
+    why = e.what();
+  }
+  std::printf("cuda          %s%s%s\n", cuda_ok ? "available" : "built, unusable",
+              cuda_ok ? "" : ": ", why.c_str());
+#else
+  std::printf("cuda          not built (configure with -DANUKULAN_ENABLE_CUDA=ON)\n");
+#endif
+  return 0;
+}
+
+}  // namespace
+
+int main(int argc, char** argv) {
+  const std::vector<std::string> argv_all(argv + 1, argv + argc);
+  if (argv_all.empty() || argv_all[0] == "-h" || argv_all[0] == "--help") {
+    print_usage();
+    return argv_all.empty() ? 2 : 0;
+  }
+  const std::string command = argv_all[0];
+  const std::vector<std::string> rest(argv_all.begin() + 1, argv_all.end());
+  if (command == "read") return command_read(rest);
+  if (command == "standard") return command_standard(rest);
+  if (command == "presolve") return command_presolve(rest);
+  if (command == "simplex") return command_simplex(rest);
+  if (command == "family") return command_family(rest);
+  if (command == "solve") return command_solve(rest);
+  if (command == "milp") return command_milp(rest);
+  if (command == "qp") return command_qp(rest);
+  if (command == "backends") return command_backends();
+
+  std::fprintf(stderr, "unknown command \"%s\"\n", command.c_str());
+  print_usage();
+  return 2;
+}
