@@ -15,7 +15,7 @@ HiGHS appears in this repository exactly once: as the thing we benchmark
 *against*.
 
 ```
-16,325 lines of solver and CLI     14 test suites, all passing
+16,340 lines of solver and CLI     14 test suites, all passing
 88 Netlib instances verified against published optima: 0 wrong answers
 ```
 
@@ -29,8 +29,10 @@ over a stack of cases. Anukulan is being built around that workload:
 
 - **Plant memory** (measured below): every certified solve is kept, and the next
   solve of the same model family starts from it.
-- **The case stack on the GPU** (next): the cases of one model share its matrix,
-  so one first-order pass on the GPU can solve many of them together.
+- **The case stack** (measured below on the CPU; the GPU batch is next): every
+  what-if case differs from the base case in one piece of data, so each starts
+  from the base case's basis. On the GPU the cases share the matrix, so one
+  first-order pass can bound all of them together.
 - **Heuristics that evolve for the plant** (planned): a candidate heuristic is
   kept only if it is faster on held-out models of the same plant, with every
   answer still certified.
@@ -51,6 +53,30 @@ and from the basis the previous day ended on. Dual simplex both times.
 ```bash
 python3 -u bench/plant_memory.py        # all three, writes bench/results/plant_memory.txt
 ```
+
+### A case stack, measured
+
+The base plan and sixty what-if cases around it (`scripts/refinery_cases.py`):
+one crude's price moved by 3% or 6% either way, one crude's supply halved, one
+product's demand moved by 10% either way, or the CDU, the FCC or the
+hydrotreater cut back in one of the first four periods. Each case is solved
+twice on the identical model: cold, and from the base case's basis. Dual
+simplex both times.
+
+| plan | rows | cases | pivots, cold to warm | seconds, cold to warm | answers that differ |
+|---|---|---|---|---|---|
+| 12 periods | 1,380 | 60 | 195,152 to 5,986 (0.031x) | 20.05 to 1.00 (0.050x) | 0 |
+| 24 periods | 2,760 | 60 | 764,471 to 11,794 (0.015x) | 162.81 to 4.42 (0.027x) | 0 |
+
+```bash
+python3 -u bench/case_stack.py          # both, writes bench/results/case_stack.txt
+```
+
+Why the GPU batch comes second: on this model the first-order method takes
+102,400 iterations to reach a relative tolerance of 1e-4 (with presolve), where
+a cold simplex takes about 3,000 pivots and a warm one about 100. For a plan
+this size the GPU earns its place by bounding every case of a large stack at
+once; the cases that decide are finished exactly by the warm simplex.
 
 ## What it does
 
@@ -93,6 +119,9 @@ estimated.
   agreement at machine precision
 - **Plant memory**: re-solving a 30-day refinery family from the previous day's
   basis takes 0.045x the pivots and 0.078x the time, with identical answers
+- **Case stack**: sixty what-if cases of the refinery plan, each started from
+  the base case's basis, take 0.050x the time at 12 periods and 0.027x at 24,
+  with identical answers
 
 Read [docs/RESULTS.md](docs/RESULTS.md) for the full tables and the honest
 assessment of where this sits against a production solver: about **62% of
@@ -131,6 +160,10 @@ build/anukulan milp    data/miplib/flugpl.mps --time-limit=30
 # Plant memory: a family of refinery plans, cold against warm from yesterday
 python3 scripts/refinery_family.py --days 30
 build/anukulan family data/refinery/family/day_*.mps
+
+# A case stack: the base plan and sixty what-ifs, each from the base's basis
+python3 scripts/refinery_cases.py
+build/anukulan family --from-first data/refinery/cases/case_*.mps
 
 # The refinery planning model the problem statement is about
 build/anukulan solve   data/refinery/refinery.mps --presolve
@@ -223,6 +256,7 @@ Every measurement has the command that produces it, in
 | `bench/milp_vs_highs.py` | this solver and HiGHS, same instances, same limit |
 | `bench/ablation.py` | every optional feature on and off |
 | `bench/plant_memory.py` | a refinery plan re-solved day after day, cold and from the previous day's basis |
+| `bench/case_stack.py` | sixty what-if cases of a refinery plan, cold and from the base case's basis |
 
 Instance sets are fetched, not vendored: `scripts/fetch_netlib.py`,
 `scripts/fetch_miplib.py`, `scripts/fetch_lptestset.py`.
