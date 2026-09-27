@@ -8,7 +8,7 @@ modszk1 reported a bounded model unbounded. So the check is the objective.
 """
 import csv, glob, json, os, subprocess, sys
 
-BIN = os.environ.get("SANKHYA", "build/sankhya")
+BIN = os.environ.get("ANUKULAN", "build/anukulan")
 limit = sys.argv[1] if len(sys.argv) > 1 else "45"
 extra = sys.argv[2:]
 

@@ -12,7 +12,7 @@ eight threads would be measuring the machine rather than the code.
 """
 import csv, glob, json, os, re, subprocess, sys, time
 
-ours = os.environ.get("SANKHYA", "build/sankhya")
+ours = os.environ.get("ANUKULAN", "build/anukulan")
 highs = os.environ.get("HIGHS", "highs")
 limit = sys.argv[1] if len(sys.argv) > 1 else "15"
 count = int(sys.argv[2]) if len(sys.argv) > 2 else 999
@@ -55,7 +55,7 @@ def err(name, value):
 files = [f for f in sorted(glob.glob("data/miplib/*.mps"))
          if os.path.basename(f)[:-4] in opt][:count]
 
-print(f"{'instance':<26} {'sankhya':>26} {'HiGHS':>26}")
+print(f"{'instance':<26} {'anukulan':>26} {'HiGHS':>26}")
 rows = []
 for f in files:
     name = os.path.basename(f)[:-4]
@@ -77,8 +77,8 @@ highs_better = sum(1 for r in both if r[4] < r[2] - 1e-9)
 only_ours = [r[0] for r in rows if r[2] is not None and r[4] is None]
 
 print(f"\n{len(rows)} instances at a {limit}s limit, single threaded")
-print(f"  found any solution     sankhya {ours_have:>3}    HiGHS {highs_have:>3}")
-print(f"  proved optimal         sankhya {ours_opt:>3}    HiGHS {highs_opt:>3}")
-print(f"  where both found one   sankhya closer on {ours_better}, HiGHS closer on {highs_better}")
+print(f"  found any solution     anukulan {ours_have:>3}    HiGHS {highs_have:>3}")
+print(f"  proved optimal         anukulan {ours_opt:>3}    HiGHS {highs_opt:>3}")
+print(f"  where both found one   anukulan closer on {ours_better}, HiGHS closer on {highs_better}")
 if only_ours:
-    print("  found only by sankhya: " + ", ".join(only_ours))
+    print("  found only by anukulan: " + ", ".join(only_ours))

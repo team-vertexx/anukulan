@@ -8,7 +8,7 @@ Three baselines are run, not one:
   highs-pdlp     HiGHS running the same first-order algorithm we implement, so
                  that a difference in iteration count is a difference in our
                  implementation and nothing else
-  sankhya        ours
+  anukulan        ours
 
 Every run is scored on achieved accuracy against the published optimum, not just
 on the tolerance it was asked for. Two solvers that both claim 1e-6 can land at
@@ -69,7 +69,7 @@ def run_highs(binary, path, solver, tolerance, time_limit):
     }
 
 
-def run_sankhya(binary, path, tolerance, time_limit, max_iter):
+def run_anukulan(binary, path, tolerance, time_limit, max_iter):
     started = time.perf_counter()
     proc = subprocess.run(
         [
@@ -113,7 +113,7 @@ DEFAULT_SET = [
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--binary", default="build/sankhya")
+    parser.add_argument("--binary", default="build/anukulan")
     parser.add_argument("--highs", default="highs")
     parser.add_argument("--instances", default="data/netlib")
     parser.add_argument("--reference", default="data/reference/netlib.csv")
@@ -123,7 +123,7 @@ def main() -> int:
     parser.add_argument("--max-iter", type=int, default=1000000)
     parser.add_argument("--set", default=",".join(DEFAULT_SET))
     parser.add_argument(
-        "--solvers", default="sankhya,highs-pdlp,highs-simplex",
+        "--solvers", default="anukulan,highs-pdlp,highs-simplex",
     )
     args = parser.parse_args()
 
@@ -146,8 +146,8 @@ def main() -> int:
 
         record = {"instance": name, "published": published}
         for solver in solvers:
-            if solver == "sankhya":
-                r = run_sankhya(args.binary, path, args.tolerance, args.time_limit,
+            if solver == "anukulan":
+                r = run_anukulan(args.binary, path, args.tolerance, args.time_limit,
                                 args.max_iter)
             elif solver == "highs-pdlp":
                 r = run_highs(args.highs, path, "pdlp", args.tolerance,
@@ -183,13 +183,13 @@ def main() -> int:
         "Accuracy is the relative distance from the objective published in the "
         "Netlib index, not the tolerance the solver was asked for.",
         "",
-        "| instance | rows x cols | sankhya iters | HiGHS-PDLP iters | ratio | "
-        "sankhya acc | HiGHS-PDLP acc | HiGHS simplex s | sankhya s |",
+        "| instance | rows x cols | anukulan iters | HiGHS-PDLP iters | ratio | "
+        "anukulan acc | HiGHS-PDLP acc | HiGHS simplex s | anukulan s |",
         "|---|---|---:|---:|---:|---|---|---:|---:|",
     ]
     ratios = []
     for r in rows:
-        ours = r.get("sankhya_iterations")
+        ours = r.get("anukulan_iterations")
         theirs = r.get("highs_pdlp_iterations")
         ratio = ""
         if ours and theirs:
@@ -200,9 +200,9 @@ def main() -> int:
             return spec.format(x) if isinstance(x, float) else "-"
         md.append(
             f"| {r['instance']} | | {ours or '-'} | {theirs or '-'} | {ratio} | "
-            f"{fmt(r.get('sankhya_rel_error'))} | {fmt(r.get('highs_pdlp_rel_error'))} | "
+            f"{fmt(r.get('anukulan_rel_error'))} | {fmt(r.get('highs_pdlp_rel_error'))} | "
             f"{fmt(r.get('highs_simplex_seconds'), '{:.3f}')} | "
-            f"{fmt(r.get('sankhya_seconds'), '{:.3f}')} |"
+            f"{fmt(r.get('anukulan_seconds'), '{:.3f}')} |"
         )
     if ratios:
         geo = 1.0

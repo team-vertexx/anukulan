@@ -15,8 +15,8 @@ extra = sys.argv[2:]
 # so a later run can be diffed against an earlier one instance by instance
 # rather than on the totals - a change that gains two instances and loses two
 # reads as no change on the totals alone.
-binary = os.environ.get("SANKHYA_BIN", "build/sankhya")
-record_to = os.environ.get("SANKHYA_SURVEY_OUT")
+binary = os.environ.get("ANUKULAN_BIN", "build/anukulan")
+record_to = os.environ.get("ANUKULAN_SURVEY_OUT")
 opt = {}
 with open("data/reference/miplib.csv") as fh:
     for row in csv.DictReader(fh):

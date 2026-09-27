@@ -20,7 +20,7 @@ import os
 import subprocess
 import sys
 
-BIN = os.environ.get("SANKHYA", "build/sankhya")
+BIN = os.environ.get("ANUKULAN", "build/anukulan")
 
 
 def solve(path, threads, limit, tol):

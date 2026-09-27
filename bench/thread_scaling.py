@@ -24,7 +24,7 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-BIN = os.path.join(ROOT, "build", "sankhya")
+BIN = os.path.join(ROOT, "build", "anukulan")
 
 
 def load_average():

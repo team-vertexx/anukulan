@@ -10,7 +10,7 @@ Two regimes, because polishing is only meaningful in one of them:
 """
 import csv, json, pathlib, subprocess, sys, time
 
-BINARY = "build/sankhya"
+BINARY = "build/anukulan"
 SET = ["afiro", "sc50a", "adlittle", "blend", "share1b", "stocfor1", "sctap1",
        "scfxm1", "bandm", "degen2", "fit1p", "25fv47", "woodw", "degen3",
        "stocfor2", "greenbea", "pilot87", "maros-r7"]
