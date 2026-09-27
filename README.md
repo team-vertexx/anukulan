@@ -231,9 +231,14 @@ The solver in `src/` is written by Mohit Prajapati
 
 ## Team
 
-| | |
-|---|---|
-| Abhishek Kumar | [@Abhishek-Kumar-2312](https://github.com/Abhishek-Kumar-2312) |
+Team_Vertex_, Indian Institute of Technology Kharagpur:
+
+- Abhishek Kumar
+- Mohit Prajapati
+- Manish Paul
+- Kunjika Tripathi
+- Reeck Mondal
+- Ayush Saha
 
 Built for Smart India Hackathon 2026, problem statement SIH26119.
 
