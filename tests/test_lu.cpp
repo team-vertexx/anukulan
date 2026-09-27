@@ -147,6 +147,37 @@ void test_singular_is_detected() {
   CHECK(!error.empty());
 }
 
+void test_failed_factorisation_keeps_the_previous_one() {
+  // The simplex keeps solving with the factors it had when a refactorisation
+  // fails, so a failure must not touch them. Building in place used to reset
+  // every pivot to -1 before failing, and the next solve then read and wrote
+  // outside its vectors: a heap corruption that aborted two Netlib instances
+  // on Linux. The singular basis here is also a different size, so a failure
+  // that leaked even the dimension would show.
+  const std::vector<std::vector<double>> good = {
+      {4, 1, 2}, {1, 5, 3}, {2, 3, 6}};
+  const std::vector<std::vector<double>> singular = {
+      {1, 0, 1, 0}, {0, 1, 1, 0}, {1, 1, 2, 0}, {0, 0, 0, 1}};
+  LuFactor lu;
+  std::string error;
+  CHECK(lu.factorize(column_store(3, good), {0, 1, 2}, LuOptions{}, &error));
+  CHECK(!lu.factorize(column_store(4, singular), {0, 1, 2, 3}, LuOptions{}, &error));
+  CHECK(!error.empty());
+  CHECK_EQ(lu.size(), 3);
+
+  const std::vector<double> rhs = {1.0, -2.0, 0.5};
+  std::vector<double> x = rhs;
+  lu.ftran(&x);
+  std::vector<double> back;
+  multiply_dense(good, x, &back);
+  for (std::size_t i = 0; i < rhs.size(); ++i) CHECK_NEAR(back[i], rhs[i], 1e-12);
+
+  x = rhs;
+  lu.btran(&x);
+  multiply_transpose_dense(good, x, &back);
+  for (std::size_t i = 0; i < rhs.size(); ++i) CHECK_NEAR(back[i], rhs[i], 1e-12);
+}
+
 void test_ill_conditioned_still_round_trips() {
   // Entries spanning eight orders of magnitude. The threshold rule should keep
   // this stable enough to solve, which is the whole reason it exists.
@@ -233,6 +264,7 @@ int main() {
   test_triangular_needs_no_elimination();
   test_needs_elimination();
   test_singular_is_detected();
+  test_failed_factorisation_keeps_the_previous_one();
   test_ill_conditioned_still_round_trips();
   test_random_sparse_matrices();
   test_fill_stays_reasonable();
