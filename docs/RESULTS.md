@@ -1828,3 +1828,27 @@ The instances that do not finish differ between the two machines (`scsd1` stops
 on a numerical error on the runner and solves on the development machine), which
 is why the counts are reported separately rather than merged. The count that
 matters is the same on both: no wrong answers.
+
+**Two of the six were crashes, and naming them found the cause.** Until the
+harness named every instance that gave no answer, two of the runner's six were
+only counted. Named, they are `cycle` and `wood1p`, and neither stopped: the
+process aborted (exit code -6, "double free or corruption"). AddressSanitizer
+put the fault in `LuFactor::ftran`, reading and writing at index -1.
+
+The cause was a broken promise between two files. `SimplexBasis::refactorize`
+documents that a failed refactorisation leaves everything as it was, and the
+simplex relies on that: when a refactorisation fails it keeps its basis and
+goes on solving with the factors it had, to roll back or to report where it
+stopped. But `LuFactor::factorize` built in place, and its first act was to
+reset every pivot to -1. A failure part-way left factors that indexed outside
+every vector they touched, and the next solve wrote before the start of the
+heap block. Linux's allocator caught it; on the development machine `cycle`
+reported a numerical error and the bad write went unnoticed.
+
+`factorize` now builds into a fresh object and adopts it only on success, and
+`test_lu` checks that a failed factorisation leaves the previous one intact,
+dimension included. Both instances now stop with a visible numerical error
+instead of aborting (on Linux, clean under AddressSanitizer), and every pivot
+count in §11 and §12 is unchanged, because the fix touches only the path where a
+factorisation fails. Neither instance was ever reported optimal with a wrong
+value.
