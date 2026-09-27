@@ -4,19 +4,19 @@
 #include <vector>
 
 #include "check.hpp"
-#include "sankhya/mps_reader.hpp"
-#include "sankhya/standard_form.hpp"
+#include "anukulan/mps_reader.hpp"
+#include "anukulan/standard_form.hpp"
 
-using sankhya::kInf;
-using sankhya::Model;
-using sankhya::StandardFormResult;
-using sankhya::StandardLp;
+using anukulan::kInf;
+using anukulan::Model;
+using anukulan::StandardFormResult;
+using anukulan::StandardLp;
 
 namespace {
 
 Model read_model(const std::string& text) {
   std::istringstream in(text);
-  const sankhya::MpsReadResult r = sankhya::read_mps_stream(in, "<test>");
+  const anukulan::MpsReadResult r = anukulan::read_mps_stream(in, "<test>");
   if (!r.ok) std::fprintf(stderr, "read failed: %s\n", r.error.c_str());
   CHECK(r.ok);
   return r.model;
@@ -49,7 +49,7 @@ const char* kAllRowKinds =
 
 void test_row_splitting() {
   const Model m = read_model(kAllRowKinds);
-  const StandardFormResult r = sankhya::to_standard_form(m);
+  const StandardFormResult r = anukulan::to_standard_form(m);
   CHECK(r.ok);
   if (!r.ok) {
     std::fprintf(stderr, "error: %s\n", r.error.c_str());
@@ -69,14 +69,14 @@ void test_row_splitting() {
   CHECK_NEAR(lp.row_origin[0].sign, 1.0, 0.0);
 
   // Every inequality row is a >= row after the transform.
-  for (sankhya::Int i = lp.num_equalities; i < lp.num_rows(); ++i) {
+  for (anukulan::Int i = lp.num_equalities; i < lp.num_rows(); ++i) {
     const double sign = lp.row_origin[static_cast<std::size_t>(i)].sign;
     CHECK(sign == 1.0 || sign == -1.0);
   }
 
   // The <= row was negated: -6y - 2x >= -20.
   bool found_negated_le = false;
-  for (sankhya::Int i = lp.num_equalities; i < lp.num_rows(); ++i) {
+  for (anukulan::Int i = lp.num_equalities; i < lp.num_rows(); ++i) {
     const std::size_t si = static_cast<std::size_t>(i);
     if (lp.row_origin[si].model_row == 1 && lp.row_origin[si].sign == -1.0) {
       found_negated_le = true;
@@ -102,7 +102,7 @@ void test_free_row_is_dropped() {
   // Make R1 free by hand, which is what presolve will do to redundant rows.
   m.row_lower[0] = -kInf;
   m.row_upper[0] = kInf;
-  const StandardFormResult r = sankhya::to_standard_form(m);
+  const StandardFormResult r = anukulan::to_standard_form(m);
   CHECK(r.ok);
   CHECK_EQ(r.free_rows_dropped, 1);
   CHECK_EQ(r.lp.num_rows(), 0);
@@ -123,7 +123,7 @@ void test_maximize_is_negated_and_recovered() {
       "    RHS       R1        5.0        COST      -2.0\n"
       "ENDATA\n";
   const Model m = read_model(text);
-  const StandardFormResult r = sankhya::to_standard_form(m);
+  const StandardFormResult r = anukulan::to_standard_form(m);
   CHECK(r.ok);
   if (!r.ok) return;
 
@@ -192,7 +192,7 @@ bool standard_feasible(const StandardLp& lp, const std::vector<double>& x,
 int agreement_trials(const char* fixture, int trials, unsigned seed, double lo,
                      double hi) {
   const Model m = read_model(fixture);
-  const StandardFormResult r = sankhya::to_standard_form(m);
+  const StandardFormResult r = anukulan::to_standard_form(m);
   CHECK(r.ok);
   if (!r.ok) {
     std::fprintf(stderr, "error: %s\n", r.error.c_str());
@@ -236,7 +236,7 @@ void test_equality_feasible_point_is_accepted() {
   // Since sampling cannot reach the equality row's feasible set, pin it down by
   // hand. Solving kAllRowKinds gives exactly one feasible point: x = 10, y = 0.
   const Model m = read_model(kAllRowKinds);
-  const StandardFormResult r = sankhya::to_standard_form(m);
+  const StandardFormResult r = anukulan::to_standard_form(m);
   CHECK(r.ok);
   if (!r.ok) return;
 
@@ -255,7 +255,7 @@ void test_equality_feasible_point_is_accepted() {
 
 void test_objective_agrees_with_model() {
   const Model m = read_model(kAllRowKinds);
-  const StandardFormResult r = sankhya::to_standard_form(m);
+  const StandardFormResult r = anukulan::to_standard_form(m);
   CHECK(r.ok);
   if (!r.ok) return;
 
@@ -272,7 +272,7 @@ void test_objective_agrees_with_model() {
 
 void test_primal_residual_matches_definition() {
   const Model m = read_model(kAllRowKinds);
-  const StandardFormResult r = sankhya::to_standard_form(m);
+  const StandardFormResult r = anukulan::to_standard_form(m);
   CHECK(r.ok);
   if (!r.ok) return;
   const StandardLp& lp = r.lp;
@@ -283,7 +283,7 @@ void test_primal_residual_matches_definition() {
 
   double expect_sq = 0.0;
   double expect_inf = 0.0;
-  for (sankhya::Int i = 0; i < lp.num_rows(); ++i) {
+  for (anukulan::Int i = 0; i < lp.num_rows(); ++i) {
     const std::size_t si = static_cast<std::size_t>(i);
     const double v = (i < lp.num_equalities) ? (kx[si] - lp.q[si])
                                              : std::fmin(kx[si] - lp.q[si], 0.0);
@@ -301,7 +301,7 @@ void test_primal_residual_matches_definition() {
 
 void test_transpose_is_consistent() {
   const Model m = read_model(kAllRowKinds);
-  const StandardFormResult r = sankhya::to_standard_form(m);
+  const StandardFormResult r = anukulan::to_standard_form(m);
   CHECK(r.ok);
   if (!r.ok) return;
 
@@ -331,5 +331,5 @@ int main() {
   test_objective_agrees_with_model();
   test_primal_residual_matches_definition();
   test_transpose_is_consistent();
-  return sankhya_test::finish("test_standard_form");
+  return anukulan_test::finish("test_standard_form");
 }

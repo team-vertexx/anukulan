@@ -4,20 +4,20 @@
 #include <vector>
 
 #include "check.hpp"
-#include "sankhya/cuts.hpp"
-#include "sankhya/mps_reader.hpp"
-#include "sankhya/pdhg.hpp"
-#include "sankhya/simplex.hpp"
-#include "sankhya/standard_form.hpp"
+#include "anukulan/cuts.hpp"
+#include "anukulan/mps_reader.hpp"
+#include "anukulan/pdhg.hpp"
+#include "anukulan/simplex.hpp"
+#include "anukulan/standard_form.hpp"
 
-using sankhya::Cut;
-using sankhya::CutOptions;
-using sankhya::Int;
-using sankhya::kInf;
-using sankhya::Model;
-using sankhya::StandardFormResult;
-using sankhya::StandardLp;
-using sankhya::sz;
+using anukulan::Cut;
+using anukulan::CutOptions;
+using anukulan::Int;
+using anukulan::kInf;
+using anukulan::Model;
+using anukulan::StandardFormResult;
+using anukulan::StandardLp;
+using anukulan::sz;
 
 namespace {
 
@@ -30,16 +30,16 @@ namespace {
 
 StandardFormResult build(const std::string& text) {
   std::istringstream in(text);
-  const sankhya::MpsReadResult r = sankhya::read_mps_stream(in, "<test>");
+  const anukulan::MpsReadResult r = anukulan::read_mps_stream(in, "<test>");
   if (!r.ok) std::fprintf(stderr, "read failed: %s\n", r.error.c_str());
   CHECK(r.ok);
-  return sankhya::to_standard_form(r.model);
+  return anukulan::to_standard_form(r.model);
 }
 
 std::vector<bool> integrality(const Model& m) {
   std::vector<bool> flags(sz(m.num_cols()), false);
   for (Int j = 0; j < m.num_cols(); ++j)
-    flags[sz(j)] = m.col_type[sz(j)] != sankhya::VarType::kContinuous;
+    flags[sz(j)] = m.col_type[sz(j)] != anukulan::VarType::kContinuous;
   return flags;
 }
 
@@ -72,7 +72,7 @@ void check_all_cuts_are_valid(const std::string& text, const char* label) {
   CHECK(sf.ok);
   if (!sf.ok) return;
   std::istringstream in(text);
-  const Model model = sankhya::read_mps_stream(in, "<test>").model;
+  const Model model = anukulan::read_mps_stream(in, "<test>").model;
   const std::vector<bool> integral = integrality(model);
 
   std::vector<std::vector<double>> feasible;
@@ -97,7 +97,7 @@ void check_all_cuts_are_valid(const std::string& text, const char* label) {
       const double hi = sf.lp.upper[sz(j)];
       x[sz(j)] = lo + pick(rng) * (hi - lo);
     }
-    const std::vector<Cut> cuts = sankhya::separate_cuts(sf.lp, integral, x);
+    const std::vector<Cut> cuts = anukulan::separate_cuts(sf.lp, integral, x);
     cuts_generated += static_cast<Int>(cuts.size());
 
     for (const Cut& cut : cuts) {
@@ -122,13 +122,13 @@ void check_all_cuts_are_valid(const std::string& text, const char* label) {
   // inside of the box and wrong on a face.
   Int vertex_cuts = 0;
   for (int trial = 0; trial < 40; ++trial) {
-    sankhya::StandardLp lp = sf.lp;
+    anukulan::StandardLp lp = sf.lp;
     for (Int j = 0; j < lp.num_cols(); ++j) lp.c[sz(j)] = pick(rng) * 4.0 - 2.0;
-    sankhya::SimplexOptions so;
+    anukulan::SimplexOptions so;
     so.max_iterations = 20000;
-    const sankhya::SimplexResult r = sankhya::solve_simplex(lp, so);
-    if (r.status != sankhya::SimplexStatus::kOptimal) continue;
-    const std::vector<Cut> cuts = sankhya::separate_cuts(sf.lp, integral, r.x);
+    const anukulan::SimplexResult r = anukulan::solve_simplex(lp, so);
+    if (r.status != anukulan::SimplexStatus::kOptimal) continue;
+    const std::vector<Cut> cuts = anukulan::separate_cuts(sf.lp, integral, r.x);
     vertex_cuts += static_cast<Int>(cuts.size());
     for (const Cut& cut : cuts) {
       for (const std::vector<double>& point : feasible) {
@@ -305,7 +305,7 @@ void test_random_integer_programs() {
     const StandardFormResult sf = build(mps.str());
     if (!sf.ok) continue;
     std::istringstream in(mps.str());
-    const Model model = sankhya::read_mps_stream(in, "<rand>").model;
+    const Model model = anukulan::read_mps_stream(in, "<rand>").model;
     std::vector<std::vector<double>> feasible;
     enumerate(sf.lp, integrality(model), &feasible,
               std::vector<double>(sz(sf.lp.num_cols()), 0.0), 0);
@@ -328,7 +328,7 @@ void test_random_integer_programs() {
                        : (std::isfinite(lo) ? lo + pick(rng) * 4.0 : pick(rng));
       }
       const std::vector<Cut> cuts =
-          sankhya::separate_cuts(sf.lp, integrality(model), x);
+          anukulan::separate_cuts(sf.lp, integrality(model), x);
       total_cuts += static_cast<Int>(cuts.size());
       for (const Cut& cut : cuts) {
         for (const std::vector<double>& point : feasible) {
@@ -379,22 +379,22 @@ void test_cuts_actually_tighten() {
   CHECK(sf.ok);
   if (!sf.ok) return;
   std::istringstream in(text);
-  const Model model = sankhya::read_mps_stream(in, "<test>").model;
+  const Model model = anukulan::read_mps_stream(in, "<test>").model;
 
-  sankhya::PdhgOptions opt;
+  anukulan::PdhgOptions opt;
   opt.tolerance = 1e-9;
-  const sankhya::PdhgResult before = sankhya::solve_pdhg(sf.lp, opt);
-  CHECK(before.status == sankhya::PdhgStatus::kOptimal);
+  const anukulan::PdhgResult before = anukulan::solve_pdhg(sf.lp, opt);
+  CHECK(before.status == anukulan::PdhgStatus::kOptimal);
 
   const std::vector<Cut> cuts =
-      sankhya::separate_cuts(sf.lp, integrality(model), before.x);
+      anukulan::separate_cuts(sf.lp, integrality(model), before.x);
   CHECK(!cuts.empty());
   if (cuts.empty()) return;
 
-  const StandardLp tightened = sankhya::append_cuts(sf.lp, cuts);
+  const StandardLp tightened = anukulan::append_cuts(sf.lp, cuts);
   CHECK_EQ(tightened.num_rows(), sf.lp.num_rows() + static_cast<Int>(cuts.size()));
-  const sankhya::PdhgResult after = sankhya::solve_pdhg(tightened, opt);
-  CHECK(after.status == sankhya::PdhgStatus::kOptimal);
+  const anukulan::PdhgResult after = anukulan::solve_pdhg(tightened, opt);
+  CHECK(after.status == anukulan::PdhgStatus::kOptimal);
 
   // Two of three items fit, so the integer optimum is -20 while the relaxation
   // reaches -23.33. A valid cut moves the bound up toward -20, never past it.
@@ -422,7 +422,7 @@ void check_gomory_cuts_are_valid(const std::string& text, const char* label) {
   CHECK(sf.ok);
   if (!sf.ok) return;
   std::istringstream in(text);
-  const sankhya::Model model = sankhya::read_mps_stream(in, "<test>").model;
+  const anukulan::Model model = anukulan::read_mps_stream(in, "<test>").model;
   const std::vector<bool> integral = integrality(model);
 
   std::vector<std::vector<double>> feasible;
@@ -437,18 +437,18 @@ void check_gomory_cuts_are_valid(const std::string& text, const char* label) {
   Int bases_used = 0;
 
   for (int trial = 0; trial < 60; ++trial) {
-    sankhya::StandardLp lp = sf.lp;
+    anukulan::StandardLp lp = sf.lp;
     if (trial > 0) {
       for (Int j = 0; j < lp.num_cols(); ++j) lp.c[sz(j)] = pick(rng);
     }
-    sankhya::SimplexOptions options;
+    anukulan::SimplexOptions options;
     options.max_iterations = 20000;
-    const sankhya::SimplexResult r = sankhya::solve_simplex(lp, options);
-    if (r.status != sankhya::SimplexStatus::kOptimal) continue;
+    const anukulan::SimplexResult r = anukulan::solve_simplex(lp, options);
+    if (r.status != anukulan::SimplexStatus::kOptimal) continue;
     if (r.final_basic.empty()) continue;
     ++bases_used;
 
-    const std::vector<Cut> cuts = sankhya::separate_gomory_cuts(
+    const std::vector<Cut> cuts = anukulan::separate_gomory_cuts(
         sf.lp, integral, r.final_basic, r.final_status);
     cuts_generated += static_cast<Int>(cuts.size());
 
@@ -483,5 +483,5 @@ int main() {
   test_equality_rows();
   test_random_integer_programs();
   test_cuts_actually_tighten();
-  return sankhya_test::finish("test_cuts");
+  return anukulan_test::finish("test_cuts");
 }

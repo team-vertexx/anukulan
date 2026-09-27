@@ -2,7 +2,7 @@
 // way to know is to multiply back. Every test here builds a quasi-definite K,
 // picks an x, forms b = K x, solves, and compares - never checks a residual the
 // factorisation computed about itself.
-#include "sankhya/ldl.hpp"
+#include "anukulan/ldl.hpp"
 
 #include <cmath>
 #include <random>
@@ -10,11 +10,11 @@
 
 #include "check.hpp"
 
-using sankhya::Int;
-using sankhya::LdlFactor;
-using sankhya::SparseMatrix;
-using sankhya::Triplet;
-using sankhya::sz;
+using anukulan::Int;
+using anukulan::LdlFactor;
+using anukulan::SparseMatrix;
+using anukulan::Triplet;
+using anukulan::sz;
 
 namespace {
 
@@ -130,7 +130,7 @@ void test_random_kkt() {
     std::string error;
     if (!f.analyse(k, 0, &error)) { CHECK(false); continue; }
     if (!f.factorize(k, {}, &error)) {
-      sankhya_test::report(__FILE__, __LINE__, "factorize failed: " + error);
+      anukulan_test::report(__FILE__, __LINE__, "factorize failed: " + error);
       continue;
     }
     // Quasi-definite: exactly n positive pivots and m negative, whatever the
@@ -177,5 +177,5 @@ int main() {
   test_small_kkt_by_hand();
   test_random_kkt();
   test_values_can_change_without_reanalysing();
-  return sankhya_test::finish("ldl");
+  return anukulan_test::finish("ldl");
 }

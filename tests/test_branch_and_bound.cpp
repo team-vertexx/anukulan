@@ -5,19 +5,19 @@
 #include <vector>
 
 #include "check.hpp"
-#include "sankhya/branch_and_bound.hpp"
-#include "sankhya/model.hpp"
-#include "sankhya/mps_reader.hpp"
-#include "sankhya/standard_form.hpp"
+#include "anukulan/branch_and_bound.hpp"
+#include "anukulan/model.hpp"
+#include "anukulan/mps_reader.hpp"
+#include "anukulan/standard_form.hpp"
 
-using sankhya::BranchAndBoundOptions;
-using sankhya::BranchAndBoundResult;
-using sankhya::Int;
-using sankhya::kInf;
-using sankhya::MilpStatus;
-using sankhya::Model;
-using sankhya::ObjSense;
-using sankhya::sz;
+using anukulan::BranchAndBoundOptions;
+using anukulan::BranchAndBoundResult;
+using anukulan::Int;
+using anukulan::kInf;
+using anukulan::MilpStatus;
+using anukulan::Model;
+using anukulan::ObjSense;
+using anukulan::sz;
 
 namespace {
 
@@ -34,7 +34,7 @@ namespace {
 
 Model read(const std::string& text) {
   std::istringstream in(text);
-  const sankhya::MpsReadResult r = sankhya::read_mps_stream(in, "<test>");
+  const anukulan::MpsReadResult r = anukulan::read_mps_stream(in, "<test>");
   if (!r.ok) std::fprintf(stderr, "read failed: %s\n", r.error.c_str());
   CHECK(r.ok);
   return r.model;
@@ -43,7 +43,7 @@ Model read(const std::string& text) {
 // Every integer point inside the bounds that satisfies the rows, and the best
 // objective over them in the model's own sense. Exhaustive, so the fixtures
 // have to stay small - which is the point.
-void enumerate(const sankhya::StandardLp& lp, const std::vector<bool>& integral,
+void enumerate(const anukulan::StandardLp& lp, const std::vector<bool>& integral,
                std::vector<double>* point, std::size_t index, bool* any,
                double* best) {
   if (index == sz(lp.num_cols())) {
@@ -69,11 +69,11 @@ void enumerate(const sankhya::StandardLp& lp, const std::vector<bool>& integral,
 }
 
 double enumerated_optimum(const Model& model, bool* found) {
-  const sankhya::StandardFormResult sf = sankhya::to_standard_form(model);
+  const anukulan::StandardFormResult sf = anukulan::to_standard_form(model);
   CHECK(sf.ok);
   std::vector<bool> integral(sz(model.num_cols()), false);
   for (Int j = 0; j < model.num_cols(); ++j)
-    integral[sz(j)] = model.col_type[sz(j)] != sankhya::VarType::kContinuous;
+    integral[sz(j)] = model.col_type[sz(j)] != anukulan::VarType::kContinuous;
 
   std::vector<double> point(sz(sf.lp.num_cols()), 0.0);
   double best = kInf;
@@ -92,7 +92,7 @@ void agrees_with_enumeration(const std::string& text, const char* label,
   bool feasible = false;
   const double truth = enumerated_optimum(model, &feasible);
 
-  BranchAndBoundResult r = sankhya::solve_milp(model, options);
+  BranchAndBoundResult r = anukulan::solve_milp(model, options);
 
   if (!feasible) {
     // Nothing satisfies the rows, so the only correct answers are "infeasible"
@@ -113,11 +113,11 @@ void agrees_with_enumeration(const std::string& text, const char* label,
     // rest of this function checks.
     if (!require_proof) return;
     std::fprintf(stderr, "%s: did not prove optimality (%s)\n", label,
-                 sankhya::to_string(r.status).c_str());
+                 anukulan::to_string(r.status).c_str());
     CHECK(false);
     return;
   }
-  if (!sankhya_test::close(r.objective, truth, 1e-7)) {
+  if (!anukulan_test::close(r.objective, truth, 1e-7)) {
     std::fprintf(stderr, "%s: proved %.12g, enumeration says %.12g\n", label,
                  r.objective, truth);
     CHECK(false);
@@ -126,7 +126,7 @@ void agrees_with_enumeration(const std::string& text, const char* label,
   // A proved optimum has to come with a point that is actually feasible and
   // actually has that value. The objective alone can be right while the vector
   // is not, and it is the vector that gets handed to whoever asked.
-  const sankhya::StandardFormResult sf = sankhya::to_standard_form(model);
+  const anukulan::StandardFormResult sf = anukulan::to_standard_form(model);
   CHECK(static_cast<Int>(r.x.size()) == sf.lp.num_cols());
   if (static_cast<Int>(r.x.size()) == sf.lp.num_cols()) {
     std::vector<double> scratch;
@@ -134,7 +134,7 @@ void agrees_with_enumeration(const std::string& text, const char* label,
     sf.lp.primal_residual(r.x, &scratch, nullptr, &inf_norm);
     CHECK_NEAR(inf_norm, 0.0, 1e-6);
     for (Int j = 0; j < model.num_cols(); ++j) {
-      if (model.col_type[sz(j)] == sankhya::VarType::kContinuous) continue;
+      if (model.col_type[sz(j)] == anukulan::VarType::kContinuous) continue;
       CHECK_NEAR(r.x[sz(j)] - std::round(r.x[sz(j)]), 0.0, 1e-6);
     }
     CHECK_NEAR(sf.lp.objective_scale * sf.lp.standard_objective(r.x) +
@@ -427,7 +427,7 @@ void reports_nothing_when_it_has_nothing() {
   o.lp_diving = false;
   o.feasibility_pump = false;
 
-  const BranchAndBoundResult r = sankhya::solve_milp(model, o);
+  const BranchAndBoundResult r = anukulan::solve_milp(model, o);
   CHECK(r.status != MilpStatus::kOptimal);
   CHECK(r.status != MilpStatus::kFeasible);
   CHECK(r.x.empty());
@@ -473,5 +473,5 @@ int main() {
   random_programs();
   reports_nothing_when_it_has_nothing();
   heuristics_do_not_poison_the_bound();
-  return sankhya_test::finish("branch_and_bound");
+  return anukulan_test::finish("branch_and_bound");
 }

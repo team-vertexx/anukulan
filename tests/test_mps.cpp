@@ -2,20 +2,20 @@
 #include <string>
 
 #include "check.hpp"
-#include "sankhya/mps_reader.hpp"
+#include "anukulan/mps_reader.hpp"
 
-using sankhya::kInf;
-using sankhya::Model;
-using sankhya::MpsOptions;
-using sankhya::MpsReadResult;
-using sankhya::ObjSense;
-using sankhya::VarType;
+using anukulan::kInf;
+using anukulan::Model;
+using anukulan::MpsOptions;
+using anukulan::MpsReadResult;
+using anukulan::ObjSense;
+using anukulan::VarType;
 
 namespace {
 
 MpsReadResult read(const std::string& text, const MpsOptions& opt = {}) {
   std::istringstream in(text);
-  return sankhya::read_mps_stream(in, "<test>", opt);
+  return anukulan::read_mps_stream(in, "<test>", opt);
 }
 
 int col_of(const Model& m, const std::string& name) {
@@ -580,5 +580,5 @@ int main() {
   test_large_bound_is_infinite();
   test_fixed_format_names_with_spaces();
   test_free_format_is_not_misdetected();
-  return sankhya_test::finish("test_mps");
+  return anukulan_test::finish("test_mps");
 }

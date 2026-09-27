@@ -7,7 +7,7 @@
 #include <cstdlib>
 #include <string>
 
-namespace sankhya_test {
+namespace anukulan_test {
 
 inline int& failures() {
   static int n = 0;
@@ -34,11 +34,11 @@ inline int finish(const char* name) {
   return 1;
 }
 
-}  // namespace sankhya_test
+}  // namespace anukulan_test
 
 #define CHECK(cond)                                                           \
   do {                                                                        \
-    if (!(cond)) sankhya_test::report(__FILE__, __LINE__, "CHECK(" #cond ")"); \
+    if (!(cond)) anukulan_test::report(__FILE__, __LINE__, "CHECK(" #cond ")"); \
   } while (0)
 
 #define CHECK_EQ(a, b)                                                          \
@@ -46,7 +46,7 @@ inline int finish(const char* name) {
     const auto va_ = (a);                                                       \
     const auto vb_ = (b);                                                       \
     if (!(va_ == vb_))                                                          \
-      sankhya_test::report(__FILE__, __LINE__,                                  \
+      anukulan_test::report(__FILE__, __LINE__,                                  \
                            std::string(#a " == " #b " : got ") +                \
                                std::to_string(va_) + " vs " +                   \
                                std::to_string(vb_));                            \
@@ -56,8 +56,8 @@ inline int finish(const char* name) {
   do {                                                                          \
     const double va_ = static_cast<double>(a);                                  \
     const double vb_ = static_cast<double>(b);                                  \
-    if (!sankhya_test::close(va_, vb_, (tol)))                                  \
-      sankhya_test::report(__FILE__, __LINE__,                                  \
+    if (!anukulan_test::close(va_, vb_, (tol)))                                  \
+      anukulan_test::report(__FILE__, __LINE__,                                  \
                            std::string(#a " ~= " #b " : got ") +                \
                                std::to_string(va_) + " vs " +                   \
                                std::to_string(vb_));                            \
@@ -68,7 +68,7 @@ inline int finish(const char* name) {
     const std::string va_ = (a);                                                \
     const std::string vb_ = (b);                                                \
     if (va_ != vb_)                                                             \
-      sankhya_test::report(__FILE__, __LINE__,                                  \
+      anukulan_test::report(__FILE__, __LINE__,                                  \
                            std::string(#a " == " #b " : got \"") + va_ +        \
                                "\" vs \"" + vb_ + "\"");                        \
   } while (0)

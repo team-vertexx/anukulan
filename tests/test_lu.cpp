@@ -3,14 +3,14 @@
 #include <vector>
 
 #include "check.hpp"
-#include "sankhya/lu.hpp"
+#include "anukulan/lu.hpp"
 
-using sankhya::Int;
-using sankhya::LuFactor;
-using sankhya::LuOptions;
-using sankhya::SparseMatrix;
-using sankhya::sz;
-using sankhya::Triplet;
+using anukulan::Int;
+using anukulan::LuFactor;
+using anukulan::LuOptions;
+using anukulan::SparseMatrix;
+using anukulan::sz;
+using anukulan::Triplet;
 
 namespace {
 
@@ -236,5 +236,5 @@ int main() {
   test_ill_conditioned_still_round_trips();
   test_random_sparse_matrices();
   test_fill_stays_reasonable();
-  return sankhya_test::finish("test_lu");
+  return anukulan_test::finish("test_lu");
 }

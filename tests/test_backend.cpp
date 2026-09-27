@@ -8,15 +8,15 @@
 #include <vector>
 
 #include "check.hpp"
-#include "sankhya/backend.hpp"
+#include "anukulan/backend.hpp"
 
-using sankhya::BackendVector;
-using sankhya::Int;
-using sankhya::kInf;
-using sankhya::LinAlgBackend;
-using sankhya::SparseMatrix;
-using sankhya::sz;
-using sankhya::Triplet;
+using anukulan::BackendVector;
+using anukulan::Int;
+using anukulan::kInf;
+using anukulan::LinAlgBackend;
+using anukulan::SparseMatrix;
+using anukulan::sz;
+using anukulan::Triplet;
 
 namespace {
 
@@ -766,7 +766,7 @@ void test_backends_agree(const LinAlgBackend& cpu, const LinAlgBackend& gpu) {
   auto compare = [](const char* what, const std::vector<double>& a,
                     const std::vector<double>& b, double tol) {
     if (a.size() != b.size()) {
-      sankhya_test::report(__FILE__, __LINE__, std::string(what) + ": size mismatch");
+      anukulan_test::report(__FILE__, __LINE__, std::string(what) + ": size mismatch");
       return;
     }
     double worst = 0.0;
@@ -780,7 +780,7 @@ void test_backends_agree(const LinAlgBackend& cpu, const LinAlgBackend& gpu) {
       }
     }
     if (worst > tol) {
-      sankhya_test::report(__FILE__, __LINE__,
+      anukulan_test::report(__FILE__, __LINE__,
                            std::string(what) + ": worst relative difference " +
                                std::to_string(worst) + " at index " +
                                std::to_string(at));
@@ -895,26 +895,26 @@ void test_backends_agree(const LinAlgBackend& cpu, const LinAlgBackend& gpu) {
 }  // namespace
 
 int main() {
-  run_contract(sankhya::cpu_backend());
+  run_contract(anukulan::cpu_backend());
 
-#ifdef SANKHYA_WITH_CUDA
+#ifdef ANUKULAN_WITH_CUDA
   // Built with CUDA but possibly running where there is no device: the same
   // binary has to work on the laptop the kernels are written on and on the box
   // they are benchmarked on. A missing device is a skip; a device that fails
   // the contract is a failure.
   const LinAlgBackend* gpu = nullptr;
   try {
-    gpu = &sankhya::cuda_backend();
+    gpu = &anukulan::cuda_backend();
   } catch (const std::exception& e) {
     std::printf("  skip cuda: %s\n", e.what());
   }
   if (gpu != nullptr) {
     run_contract(*gpu);
-    test_backends_agree(sankhya::cpu_backend(), *gpu);
+    test_backends_agree(anukulan::cpu_backend(), *gpu);
   }
 #else
-  std::printf("  skip cuda: built without SANKHYA_WITH_CUDA\n");
+  std::printf("  skip cuda: built without ANUKULAN_WITH_CUDA\n");
 #endif
 
-  return sankhya_test::finish("test_backend");
+  return anukulan_test::finish("test_backend");
 }

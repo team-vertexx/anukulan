@@ -1,12 +1,12 @@
 #include <vector>
 
 #include "check.hpp"
-#include "sankhya/sparse.hpp"
+#include "anukulan/sparse.hpp"
 
-using sankhya::Int;
-using sankhya::Norm;
-using sankhya::SparseMatrix;
-using sankhya::Triplet;
+using anukulan::Int;
+using anukulan::Norm;
+using anukulan::SparseMatrix;
+using anukulan::Triplet;
 
 namespace {
 
@@ -185,5 +185,5 @@ int main() {
   test_norms();
   test_scaling();
   test_validate_catches_damage();
-  return sankhya_test::finish("test_sparse");
+  return anukulan_test::finish("test_sparse");
 }

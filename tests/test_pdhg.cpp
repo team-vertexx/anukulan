@@ -4,27 +4,27 @@
 #include <vector>
 
 #include "check.hpp"
-#include "sankhya/mps_reader.hpp"
-#include "sankhya/pdhg.hpp"
-#include "sankhya/standard_form.hpp"
+#include "anukulan/mps_reader.hpp"
+#include "anukulan/pdhg.hpp"
+#include "anukulan/standard_form.hpp"
 
-using sankhya::Int;
-using sankhya::kInf;
-using sankhya::PdhgOptions;
-using sankhya::PdhgResult;
-using sankhya::PdhgStatus;
-using sankhya::StandardFormResult;
-using sankhya::StandardLp;
-using sankhya::sz;
+using anukulan::Int;
+using anukulan::kInf;
+using anukulan::PdhgOptions;
+using anukulan::PdhgResult;
+using anukulan::PdhgStatus;
+using anukulan::StandardFormResult;
+using anukulan::StandardLp;
+using anukulan::sz;
 
 namespace {
 
 StandardLp build(const std::string& text) {
   std::istringstream in(text);
-  const sankhya::MpsReadResult r = sankhya::read_mps_stream(in, "<test>");
+  const anukulan::MpsReadResult r = anukulan::read_mps_stream(in, "<test>");
   if (!r.ok) std::fprintf(stderr, "read failed: %s\n", r.error.c_str());
   CHECK(r.ok);
-  const StandardFormResult sf = sankhya::to_standard_form(r.model);
+  const StandardFormResult sf = anukulan::to_standard_form(r.model);
   CHECK(sf.ok);
   return sf.lp;
 }
@@ -32,7 +32,7 @@ StandardLp build(const std::string& text) {
 PdhgResult solve(const std::string& text, PdhgOptions options = {}) {
   options.tolerance = 1e-8;
   options.max_iterations = 200000;
-  return sankhya::solve_pdhg(build(text), options);
+  return anukulan::solve_pdhg(build(text), options);
 }
 
 // max 3x + 5y  s.t. x <= 4, 2y <= 12, 3x + 2y <= 18, x,y >= 0
@@ -191,7 +191,7 @@ void test_residual_is_zero_at_a_known_optimum() {
   const PdhgResult r = solve(kWyndor);
   CHECK(r.status == PdhgStatus::kOptimal);
 
-  const sankhya::PdhgResidual at_solution = sankhya::evaluate_residual(lp, r.x, r.y);
+  const anukulan::PdhgResidual at_solution = anukulan::evaluate_residual(lp, r.x, r.y);
   CHECK(at_solution.relative_primal < 1e-7);
   CHECK(at_solution.relative_dual < 1e-7);
   CHECK(at_solution.relative_gap < 1e-7);
@@ -199,7 +199,7 @@ void test_residual_is_zero_at_a_known_optimum() {
   // A point that is plainly not optimal must not be reported as converged.
   std::vector<double> bad_x(sz(lp.num_cols()), 0.0);
   std::vector<double> bad_y(sz(lp.num_rows()), 0.0);
-  const sankhya::PdhgResidual off = sankhya::evaluate_residual(lp, bad_x, bad_y);
+  const anukulan::PdhgResidual off = anukulan::evaluate_residual(lp, bad_x, bad_y);
   CHECK(!off.converged(1e-6));
 }
 
@@ -219,7 +219,7 @@ void test_matrix_norm_estimate() {
       "    RHS       R1        1.0        R2        1.0\n"
       "ENDATA\n";
   const StandardLp lp = build(text);
-  const double norm = sankhya::estimate_matrix_norm(lp, 500, 1e-12);
+  const double norm = anukulan::estimate_matrix_norm(lp, 500, 1e-12);
   CHECK_NEAR(norm, 4.0, 1e-6);
 }
 
@@ -254,10 +254,10 @@ void test_every_configuration_still_solves() {
       options.scaling.ruiz_iterations = 0;
       options.scaling.pock_chambolle = false;
     }
-    const PdhgResult r = sankhya::solve_pdhg(build(kWyndor), options);
+    const PdhgResult r = anukulan::solve_pdhg(build(kWyndor), options);
     if (r.status != PdhgStatus::kOptimal) {
       std::fprintf(stderr, "config \"%s\" did not solve: %s\n", config.name,
-                   sankhya::to_string(r.status).c_str());
+                   anukulan::to_string(r.status).c_str());
     }
     CHECK(r.status == PdhgStatus::kOptimal);
     CHECK_NEAR(r.objective, 36.0, 1e-4);
@@ -284,7 +284,7 @@ void test_iteration_limit_is_respected() {
   options.tolerance = 1e-14;
   options.max_iterations = 80;
   options.termination_check_frequency = 40;
-  const PdhgResult r = sankhya::solve_pdhg(build(kWyndor), options);
+  const PdhgResult r = anukulan::solve_pdhg(build(kWyndor), options);
   CHECK(r.status == PdhgStatus::kIterationLimit);
   CHECK_EQ(r.iterations, 80);
 }
@@ -326,7 +326,7 @@ void test_feasibility_polishing_preserves_the_answer() {
     options.tolerance = 1e-8;
     options.max_iterations = 200000;
     options.polish_feasibility = polish;
-    const PdhgResult r = sankhya::solve_pdhg(build(kWyndor), options);
+    const PdhgResult r = anukulan::solve_pdhg(build(kWyndor), options);
     CHECK(r.status == PdhgStatus::kOptimal);
     CHECK_NEAR(r.objective, 36.0, 1e-6);
   }
@@ -340,7 +340,7 @@ void test_polishing_buys_feasibility_for_gap() {
   options.tolerance = 1e-8;
   options.gap_tolerance = 1e-2;
   options.max_iterations = 200000;
-  const PdhgResult r = sankhya::solve_pdhg(build(kWyndor), options);
+  const PdhgResult r = anukulan::solve_pdhg(build(kWyndor), options);
   CHECK(r.status == PdhgStatus::kOptimal);
   CHECK(r.residual.relative_primal <= 1e-8);
   CHECK(r.residual.relative_dual <= 1e-8);
@@ -355,7 +355,7 @@ void test_gap_tolerance_defaults_to_the_main_tolerance() {
   PdhgOptions loose;
   loose.tolerance = 1e-8;
   loose.gap_tolerance = 0.0;
-  const PdhgResult r = sankhya::solve_pdhg(build(kWyndor), loose);
+  const PdhgResult r = anukulan::solve_pdhg(build(kWyndor), loose);
   CHECK(r.status == PdhgStatus::kOptimal);
   CHECK(r.residual.relative_gap <= 1e-8);
 }
@@ -368,7 +368,7 @@ void test_a_warm_start_is_actually_used() {
   const StandardLp lp = build(kWyndor);
   PdhgOptions cold;
   cold.tolerance = 1e-8;
-  const PdhgResult reference = sankhya::solve_pdhg(lp, cold);
+  const PdhgResult reference = anukulan::solve_pdhg(lp, cold);
   CHECK(reference.status == PdhgStatus::kOptimal);
 
   // Starting from the answer, one termination check should be enough.
@@ -378,7 +378,7 @@ void test_a_warm_start_is_actually_used() {
   warm.scaling.ruiz_iterations = 0;
   warm.scaling.pock_chambolle = false;
   warm.max_iterations = 200000;
-  const PdhgResult r = sankhya::solve_pdhg(lp, warm);
+  const PdhgResult r = anukulan::solve_pdhg(lp, warm);
   CHECK(r.status == PdhgStatus::kOptimal);
   CHECK(r.iterations < reference.iterations);
 }
@@ -391,7 +391,7 @@ void test_polishing_respects_the_iteration_limit_of_the_main_loop() {
   options.gap_tolerance = 1e-2;
   options.max_iterations = 80;
   options.termination_check_frequency = 40;
-  const PdhgResult r = sankhya::solve_pdhg(build(kWyndor), options);
+  const PdhgResult r = anukulan::solve_pdhg(build(kWyndor), options);
   CHECK_EQ(r.iterations, 80);
 }
 
@@ -415,5 +415,5 @@ int main() {
   test_gap_tolerance_defaults_to_the_main_tolerance();
   test_a_warm_start_is_actually_used();
   test_polishing_respects_the_iteration_limit_of_the_main_loop();
-  return sankhya_test::finish("test_pdhg");
+  return anukulan_test::finish("test_pdhg");
 }
