@@ -1,5 +1,5 @@
 ---
-title: "Sankhya — Honest Assessment"
+title: "Anukulan — Honest Assessment"
 subtitle: "What works, what does not, and what would fix it"
 date: "2 September 2026"
 geometry: margin=2.4cm
@@ -103,7 +103,7 @@ instances identical on objective, iteration count and status.
 
 3.14×–12.07× on the solve, CPU/GPU agreement at or below machine precision, and
 identical iteration counts on every Netlib instance tried. The verification run
-found a real device-only bug (see `Sankhya_GPU_Report.pdf` §4).
+found a real device-only bug (see `Anukulan_GPU_Report.pdf` §4).
 
 ## 2.7 Discipline that is visible in the source
 
@@ -193,7 +193,7 @@ converged without it — `agg2` and `agg3` from 6,400 and 16,960 iterations to t
 
 | | what | why it matters |
 |---|---|---|
-| 1 | **Give the refinery model more integer structure** | Done once — `refinery_milp.mps` now exists at 1,500 rows and 120 integers, and the result is 2.5% behind HiGHS on the objective. More of it would make the MILP leg's home instance harder and more representative |
+| 1 | **Give the refinery model more integer structure** | Started: `scripts/refinery_model.py --milp` adds cargo sizing and unit on/off decisions, and on the four-period version (`small_milp`, RESULTS §6) this solver reaches the optimum HiGHS proves, 7,246,146,141.83, without yet proving it. More of it would make the MILP leg's home instance harder and more representative |
 | 2 | **Report against LPfeas more widely** | Four of eight solved so far; the remaining instances would place this against cuPDLPx and OR-Tools PDLP on the benchmark those codes are actually scored on |
 
 ## 4.2 Short term — the MILP leg, which is where the points are

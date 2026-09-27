@@ -13,7 +13,7 @@ cmake --build build -j8
 ctest --test-dir build --output-on-failure
 ```
 
-Thirteen suites, all should pass. No dependencies beyond a C++17 compiler and
+Fourteen suites, all should pass. No dependencies beyond a C++20 compiler and
 CMake — no Boost, no Eigen, nothing to install. That is deliberate: the problem
 statement asks for an indigenous solver, and a dependency is a thing you have to
 explain.
@@ -21,9 +21,9 @@ explain.
 With CUDA:
 
 ```bash
-cmake -S . -B build-cuda -DCMAKE_BUILD_TYPE=Release -DSANKHYA_ENABLE_CUDA=ON
+cmake -S . -B build-cuda -DCMAKE_BUILD_TYPE=Release -DANUKULAN_ENABLE_CUDA=ON
 cmake --build build-cuda -j8
-build-cuda/sankhya backends      # reports which backends this build has
+build-cuda/anukulan backends      # reports which backends this build has
 ```
 
 On a machine with no GPU you can still type-check the kernels:
@@ -59,14 +59,14 @@ what every correctness claim is checked against.
 One command per entry point:
 
 ```bash
-build/sankhya read      model.mps    # statistics only
-build/sankhya standard  model.mps    # build the standard form, print its shape
-build/sankhya presolve  model.mps    # reduce and report what went
-build/sankhya solve     model.mps    # first-order LP
-build/sankhya simplex   model.mps    # revised simplex (--dual for the dual)
-build/sankhya milp      model.mps    # branch and cut
-build/sankhya qp        model.qps    # convex QP by ADMM
-build/sankhya backends                # which backends this build has
+build/anukulan read      model.mps    # statistics only
+build/anukulan standard  model.mps    # build the standard form, print its shape
+build/anukulan presolve  model.mps    # reduce and report what went
+build/anukulan solve     model.mps    # first-order LP
+build/anukulan simplex   model.mps    # revised simplex (--dual for the dual)
+build/anukulan milp      model.mps    # branch and cut
+build/anukulan qp        model.qps    # convex QP by ADMM
+build/anukulan backends                # which backends this build has
 ```
 
 Useful flags, and the ones you will reach for first:
@@ -96,7 +96,7 @@ test for it, because without it an ablation table means nothing.
 ## 4. Repository layout
 
 ```
-src/sankhya/     the solver. One header per component, and the reasoning
+src/anukulan/     the solver. One header per component, and the reasoning
                  lives in the headers.
 app/             the CLI, one function per command
 tests/           13 suites, no framework — just CHECK macros
@@ -109,10 +109,10 @@ refs/            papers
 
 Where to start reading, in this order:
 
-1. `src/sankhya/standard_form.hpp` — the two forms, and why they differ
-2. `src/sankhya/pdhg.hpp` — the largest component, and the most documented
-3. `src/sankhya/presolve.hpp` — the reductions and the postsolve contract
-4. `src/sankhya/simplex.hpp` — pricing, ratio tests, the basis
+1. `src/anukulan/standard_form.hpp` — the two forms, and why they differ
+2. `src/anukulan/pdhg.hpp` — the largest component, and the most documented
+3. `src/anukulan/presolve.hpp` — the reductions and the postsolve contract
+4. `src/anukulan/simplex.hpp` — pricing, ratio tests, the basis
 5. `docs/ARCHITECTURE.md` — how they compose
 
 ---
@@ -194,7 +194,7 @@ The GPU is rented, not owned — see [KAGGLE.md](KAGGLE.md) for the full loop.
 Short version:
 
 ```bash
-bash scripts/package_for_kaggle.sh   # git archive HEAD -> sankhya-source.zip
+bash scripts/package_for_kaggle.sh   # git archive HEAD -> anukulan-source.zip
 ```
 
 Upload as a **new version** of the existing Kaggle dataset, not a new dataset,

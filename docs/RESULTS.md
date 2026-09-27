@@ -9,8 +9,8 @@ GPU numbers are from a rented **NVIDIA Tesla T4** on Kaggle — see
 
 **Benchmark sets.** Netlib LP (88 instances, `data/netlib/`), published optima in
 `data/reference/netlib.csv`. MIPLIB subset (`data/miplib/`). Maros–Meszaros QP
-(`data/maros/`). The refinery model (`data/refinery/refinery.mps`) is the MRPL
-problem statement's own model.
+(`data/maros/`). The refinery model (`data/refinery/refinery.mps`) is our own planning model,
+built to the shape the MRPL problem statement describes; it is not MRPL data.
 
 ---
 
@@ -27,9 +27,9 @@ of one:
 | First-order LP | ~64 | strongest piece; multithreading is no longer missing, though §10 measures the gain at 1.41x on five threads and shows the memory bus is what caps it. Some cuPDLPx tuning still missing |
 | GPU | ~65 | 3.1×–12.1× measured and now verified on hardware, contract tests included; still not cuPDLP-C level |
 | QP | ~50 | OSQP's core is here; no AMD ordering, thin regularisation strategy |
-| Simplex | ~58 | 78/88 Netlib correct and none wrong, and it now takes a basis from the first-order method. Still no Forrest–Tomlin, no bound-flipping ratio test, no hypersparsity |
+| Simplex | ~58 | 82/88 Netlib correct and none wrong, and it now takes a basis from the first-order method. Still no Forrest–Tomlin, no bound-flipping ratio test, no hypersparsity |
 | Presolve | ~50 | 12 reductions, and every fast explorer PaPILO and PSLP list bar one |
-| Infrastructure | ~78 | good tests, and CI now runs them on every push — build and the twelve suites on Linux and macOS, then all 88 Netlib instances against their published optima, which fails the build on a wrong answer. It found two things on its first two runs: the project had never compiled on Linux, and the fetch script silently undid the reference corrections. No packaging |
+| Infrastructure | ~78 | good tests, and CI now runs them on every push — build and the fourteen suites on Linux and macOS, then all 88 Netlib instances against their published optima, which fails the build on a wrong answer. It found two things on its first two runs: the project had never compiled on Linux, and the fetch script silently undid the reference corrections. No packaging |
 | **MILP** | **~40** | **still the weak leg — see below.** Time limits are now actually enforced, a cut round has to pay for itself before it starts, node selection is best-estimate with plunging rather than depth first, and RINS is in. Missing: conflict analysis, restarts, clique tables, symmetry detection, node presolve, a real cut pool |
 
 Weighted, that is about **62/100** as of 2026-09-01, up from 50. Most of that
@@ -41,8 +41,8 @@ wasting its own budget rather than one that could do anything new.
 **MILP is the honest gap.** What is missing: node presolve, symmetry detection,
 local branching, conflict analysis, restarts, clique tables, and cut management
 with a pool rather than one shared matrix. On the wider MIPLIB set at a fifteen
-second limit, **twenty-three of seventy still end with no feasible solution at
-all**, and several of those never get past the root because the root relaxation
+second limit, **twenty-three to twenty-five of seventy still end with no feasible
+solution at all** (45 to 47 feasible across five runs, §6), and several of those never get past the root because the root relaxation
 itself is too slow — which is the simplex's problem, not the tree's. Real
 refinery scheduling is MILP, so this is both the weakest component and the one
 the problem statement cares most about. Do not let a demo imply otherwise.
@@ -124,7 +124,7 @@ Round trip over all 88 instances, presolved answer against plain, `--tol=1e-6`:
 ```bash
 python3 bench/verify_presolve.py --tol=1e-6 --abs-tol=1e-6 --check-feasibility
 python3 bench/verify_presolve.py --tol=1e-6 --abs-tol=1e-6 --extra=--presolve-no-doubletons
-build/sankhya presolve data/netlib/80bau3b.mps --no-dual-fixing
+build/anukulan presolve data/netlib/80bau3b.mps --no-dual-fixing
 ```
 
 ### Column singletons: what the three rules removed
@@ -149,8 +149,8 @@ python3 bench/presolve_survey.py --set=netlib
 python3 bench/presolve_survey.py --set=refinery
 ```
 
-**The refinery line is the result.** Presolve removed *nothing* from the problem
-statement's own model before this - not one row, not one column, not one
+**The refinery line is the result.** Presolve removed *nothing* from our
+refinery model before this - not one row, not one column, not one
 nonzero. The cause was specific rather than general: its 1,296 equality rows
 leave no slack for a forcing or redundant rule to find, it has no doubleton
 equations at all, and all 1,304 of its column singletons have a finite lower
@@ -264,7 +264,7 @@ size, and **1.37× fewer pivots**. Presolve removed nothing from this model
 before this work, so both halves of that line are new.
 
 ```bash
-build/sankhya simplex data/refinery/refinery.mps --presolve
+build/anukulan simplex data/refinery/refinery.mps --presolve
 ```
 
 ### A check that failed for the wrong reason, and what it taught
@@ -317,7 +317,7 @@ merely not optimal.
 11,266,394 against a published 11,266,400, a relative error of 5e-07. The right
 answer is in the reduced model; the solver stops before it gets there.
 
-The cause is the one already written up in `sankhya_cli.cpp` for rows, now
+The cause is the one already written up in `anukulan_cli.cpp` for rows, now
 reaching through columns. Presolve changes the quantities the *relative*
 convergence test divides by, so the same `--tol` is a weaker requirement on the
 reduced model than on the original - and this work removes 1,390 columns from
@@ -384,7 +384,7 @@ answer*, which is the better problem to have.
 ```bash
 python3 bench/polish_sweep.py polish
 python3 bench/polish_sweep.py strict
-build/sankhya solve data/refinery/refinery.mps --tol=1e-8 --gap-tol=1e-2 --presolve
+build/anukulan solve data/refinery/refinery.mps --tol=1e-8 --gap-tol=1e-2 --presolve
 ```
 
 ### The cuPDLPx additions
@@ -502,10 +502,13 @@ produced `x`, and the CLI repeats that check against the original model after
 postsolve. `cycle`, `modszk1` and `scsd8` now fail visibly rather than quietly.
 
 The same run flagged eight further disagreements that turned out to be errors in
-**our own reference table** — HiGHS returns what this solver returns on all
-eight, and `e226`'s stored value was off by exactly 7.113, that instance's
-objective constant. Those are corrected in `data/reference/netlib.csv` with a
-note saying why.
+**our own reference table**, which had been copied from the Netlib README. HiGHS
+returns what this solver returns on all eight. Seven are errors in the published
+values themselves: our values agree with Koch's exact rational optima (T. Koch,
+"The final NETLIB-LP results", Operations Research Letters 32(2), 2004). The
+eighth, `e226`, differs by exactly 7.113, that instance's objective constant,
+which is a convention rather than an error. All eight are corrected in
+`data/reference/netlib.csv` with a note saying why.
 
 ### Crossover from a first-order point
 
@@ -526,7 +529,7 @@ answer at all now return the right one: `degen3` and `stocfor2` (time limit),
 "unbounded").
 
 ```bash
-build/sankhya simplex data/netlib/degen3.mps --crossover
+build/anukulan simplex data/netlib/degen3.mps --crossover
 python3 -u bench/crossover_sweep.py 1e-4
 ```
 
@@ -561,8 +564,8 @@ transition, and whenever a pivot fails — that last set is the drift control, a
 it is why the iteration counts move at all rather than being identical.
 
 ```bash
-build/sankhya simplex data/netlib/degen3.mps --presolve --no-incremental-pricing
-build/sankhya simplex data/netlib/degen3.mps --presolve
+build/anukulan simplex data/netlib/degen3.mps --presolve --no-incremental-pricing
+build/anukulan simplex data/netlib/degen3.mps --presolve
 ```
 
 ### Hyper-sparsity, surveyed
@@ -665,8 +668,8 @@ converging. The information was right and the greedy decision on it was wrong,
 which is a known property of strong branching and not a defect.
 
 ```bash
-build/sankhya milp data/miplib/gt2.mps --no-reliability
-build/sankhya milp data/miplib/gt2.mps --strong-depth=-1   # the 2,225-node version
+build/anukulan milp data/miplib/gt2.mps --no-reliability
+build/anukulan milp data/miplib/gt2.mps --strong-depth=-1   # the 2,225-node version
 ```
 
 ### Node propagation
@@ -722,8 +725,8 @@ It costs one transpose product per node, which is small against a node solve,
 and it gets stronger as the tree deepens and the gap closes.
 
 ```bash
-build/sankhya milp data/miplib/gt2.mps --no-reduced-cost-fixing
-build/sankhya milp data/miplib/gt2.mps
+build/anukulan milp data/miplib/gt2.mps --no-reduced-cost-fixing
+build/anukulan milp data/miplib/gt2.mps
 ```
 
 ### Cuts, decided per instance
@@ -774,7 +777,7 @@ ways, twice. That first run was doing three sixty-second solves per instance
 back to back, and a measurement taken under load is not a measurement.
 
 ```bash
-build/sankhya milp data/miplib/gt2.mps
+build/anukulan milp data/miplib/gt2.mps
 ```
 
 ### The wider set says something the seven do not
@@ -919,8 +922,8 @@ And on the two that do not finish, where the point is the bound and not the tree
 | gen-ip054 | 2.292% | **1.294%** | 6,765.21 → 6,772.53 |
 
 ```bash
-build/sankhya milp data/miplib/gt2.mps --depth-first
-build/sankhya milp data/miplib/gt2.mps
+build/anukulan milp data/miplib/gt2.mps --depth-first
+build/anukulan milp data/miplib/gt2.mps
 ```
 
 ### RINS — the first heuristic here that improves a solution
@@ -972,8 +975,8 @@ discards the known optimum, no kept cut is invalid, and all five reach the
 published value.
 
 ```bash
-build/sankhya milp data/miplib/fiber.mps --no-objective-integrality --solution=fiber.sol
-build/sankhya milp data/miplib/fiber.mps --debug-solution=fiber.sol
+build/anukulan milp data/miplib/fiber.mps --no-objective-integrality --solution=fiber.sol
+build/anukulan milp data/miplib/fiber.mps --debug-solution=fiber.sol
 ```
 
 ### The refinery MILP, and the wrong answer it caught
@@ -985,7 +988,7 @@ invocation of the same generator:
 
 ```bash
 python3 scripts/refinery_model.py --periods=4 --crudes=4 --milp     --out=data/refinery/small_milp.mps
-build/sankhya milp data/refinery/small_milp.mps --time-limit=60
+build/anukulan milp data/refinery/small_milp.mps --time-limit=60
 ```
 
 276 rows, 760 columns, 24 integer and 8 binary. HiGHS 1.15.1 at a forced 0% gap
@@ -1118,7 +1121,7 @@ Raising the budget puts more instances on the direct path and makes the set
 exactly what gains nothing.
 
 ```bash
-build/sankhya qp data/maros/HS21.QPS
+build/anukulan qp data/maros/HS21.QPS
 ```
 
 ---
@@ -1283,9 +1286,9 @@ Three checks, in increasing breadth.
 four, six and eight threads, each compared against `--backend=cpu`:
 
 ```bash
-build/sankhya solve data/netlib/25fv47.mps --tol=1e-8 --presolve \
+build/anukulan solve data/netlib/25fv47.mps --tol=1e-8 --presolve \
     --backend=cpu --solution=/tmp/serial
-build/sankhya solve data/netlib/25fv47.mps --tol=1e-8 --presolve \
+build/anukulan solve data/netlib/25fv47.mps --tol=1e-8 --presolve \
     --threads=6 --solution=/tmp/threaded
 cmp /tmp/serial /tmp/threaded
 ```
@@ -1318,9 +1321,9 @@ it, and what stops it is a different limit.
 Take the clock out of it and the difference disappears:
 
 ```bash
-build/sankhya simplex data/netlib/d6cube.mps --presolve --crossover \
+build/anukulan simplex data/netlib/d6cube.mps --presolve --crossover \
     --time-limit=600 --threads=1   # iteration limit, 200000, 342.62521929824584
-build/sankhya simplex data/netlib/d6cube.mps --presolve --crossover \
+build/anukulan simplex data/netlib/d6cube.mps --presolve --crossover \
     --time-limit=600 --threads=6   # iteration limit, 200000, 342.62521929824584
 ```
 
@@ -1544,7 +1547,7 @@ A profiled run is slower than a real one by two clock reads per call and its wal
 clock is not a benchmark; the proportions are the point.
 
 ```bash
-build/sankhya solve data/lptestset/datt256_lp.mps --no-polish \
+build/anukulan solve data/lptestset/datt256_lp.mps --no-polish \
     --max-iter=300 --threads=6 --profile
 python3 bench/micro/kernel_scaling.py data/lptestset/datt256_lp.mps 300
 ```
@@ -1722,3 +1725,43 @@ synchronisation points, race-free work stealing against a shared incumbent, and
 per-thread node pools — inside `branch_and_bound.cpp`, which another work stream
 owns. Weeks, not days, and half-doing it produces exactly the solver this
 section exists to avoid: one whose node counts move between runs.
+
+## 11. Plant memory: a refinery plan re-solved day after day
+
+A refinery does not solve its planning model once. It re-solves the same plan
+every day as crude prices, product prices and demands move. The structure stays
+and the data moves, so yesterday's optimal basis is a far better start than the
+all-logical one. This measures exactly that and nothing else.
+
+**The family.** `scripts/refinery_family.py` writes a seeded sequence of days of
+the planning model from `scripts/refinery_model.py`: crude prices take a random
+walk of about 1% a day (held within 8%), product prices about 0.7% a day (within
+6%), and each period's sales ceiling moves within 4%. Same rows, same columns,
+same sparsity every day.
+
+**The measurement.** `anukulan family` solves the days in order, each one twice
+on the identical model with the dual simplex: cold, from the all-logical basis,
+the way every solve starts today; and warm, from the basis the previous day
+ended on. The first day has nothing to start from and is not counted. The warm
+answer is compared with the cold one and checked against the model's own rows,
+so a start can save pivots but not change an answer.
+
+| plan | rows x columns | re-solves | pivots, cold to warm | seconds, cold to warm | answers that differ |
+|---|---|---|---|---|---|
+| 12 periods | 1,380 x 4,368 | 29 | 127,303 to 5,701 (**0.045x**) | 15.23 to 1.19 (**0.078x**) | 0 |
+| 24 periods | 2,760 x 8,736 | 9 | 154,635 to 3,770 (**0.024x**) | 38.16 to 1.88 (**0.049x**) | 0 |
+| 52 periods | 5,980 x 18,928 | 5 | 115,957 to 5,148 (**0.044x**) | 81.10 to 8.07 (**0.100x**) | 0 |
+
+```bash
+python3 -u bench/plant_memory.py      # writes bench/results/plant_memory.txt
+```
+
+Pivot counts are deterministic; the seconds are one run on the machine above
+and move by a few percent between runs.
+
+**What this does and does not show.** It shows that the cheapest possible form
+of memory, keeping the last optimal basis, removes about 95% of the simplex
+work on a model family of this kind, at every size tried, without changing one
+answer. It does not yet show the learned parts: a predictor for MILP decisions
+and heuristics tuned to the plant. Those are measured the same way when they
+exist: on held-out days of the same family, cold against warm.

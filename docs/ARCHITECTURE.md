@@ -5,7 +5,7 @@ as it is, not as it was planned — for the plan, read [PLAN.md](../PLAN.md), an
 for the survey the plan came from, [RESEARCH.md](../RESEARCH.md).
 
 Read this alongside the headers. Most of the reasoning lives in
-`src/sankhya/*.hpp` next to the thing it explains, and this document points at
+`src/anukulan/*.hpp` next to the thing it explains, and this document points at
 those rather than repeating them.
 
 ---
@@ -587,7 +587,7 @@ its Hessian. Presolve switches its column-removing reductions off when a Hessian
 is present, because substituting a column out of a quadratic rewrites Q's
 neighbours as well as c.
 
-The CLI (`app/sankhya_cli.cpp`) is one command per entry point and does the
+The CLI (`app/anukulan_cli.cpp`) is one command per entry point and does the
 mapping back: standard-form row duals fold onto model rows through `row_origin`,
 then presolve's row recovery runs, then the solution file carries
 `# dual <row name> <value>` and a `# duals exact|approximate` marker.

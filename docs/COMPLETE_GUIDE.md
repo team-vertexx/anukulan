@@ -1,5 +1,5 @@
 ---
-title: "Sankhya — the complete account"
+title: "Anukulan — the complete account"
 subtitle: "The complete account — the mathematics with proofs, every method derived, where each idea came from, what was measured, what failed, and where it stands"
 author: "Team Vertex"
 date: "30 August 2026"
@@ -2614,18 +2614,18 @@ Every checking tool in Section 34 exists because something got through.
 
 | file | lines | what |
 |---|---|---|
-| `src/sankhya/simplex.cpp` | 1,283 | primal and dual, basis, pricing, ratio test |
-| `src/sankhya/branch_and_bound.cpp` | ~1,500 | the MILP tree, heuristics, node management |
-| `src/sankhya/presolve.cpp` | ~1,300 | twelve reductions plus postsolve |
-| `src/sankhya/pdhg.cpp` | ~1,200 | the first-order method, restarts, polishing |
-| `src/sankhya/mps_reader.cpp` | 728 | the file format |
-| `src/sankhya/cuda_backend.cu` | ~900 | device kernels |
-| `src/sankhya/qp.cpp` | 608 | ADMM |
-| `src/sankhya/cuts.cpp` | 538 | cover, MIR, Gomory separation |
-| `src/sankhya/lu.cpp` | 318 | Markowitz LU with product-form updates |
-| `src/sankhya/threaded_backend.cpp` | ~330 | the threaded vector layer |
-| `src/sankhya/crossover.cpp` | ~200 | first-order point → simplex basis |
-| `src/sankhya/ldl.cpp` | 144 | sparse $LDL^\top$ for the QP's KKT system |
+| `src/anukulan/simplex.cpp` | 1,283 | primal and dual, basis, pricing, ratio test |
+| `src/anukulan/branch_and_bound.cpp` | ~1,500 | the MILP tree, heuristics, node management |
+| `src/anukulan/presolve.cpp` | ~1,300 | twelve reductions plus postsolve |
+| `src/anukulan/pdhg.cpp` | ~1,200 | the first-order method, restarts, polishing |
+| `src/anukulan/mps_reader.cpp` | 728 | the file format |
+| `src/anukulan/cuda_backend.cu` | ~900 | device kernels |
+| `src/anukulan/qp.cpp` | 608 | ADMM |
+| `src/anukulan/cuts.cpp` | 538 | cover, MIR, Gomory separation |
+| `src/anukulan/lu.cpp` | 318 | Markowitz LU with product-form updates |
+| `src/anukulan/threaded_backend.cpp` | ~330 | the threaded vector layer |
+| `src/anukulan/crossover.cpp` | ~200 | first-order point → simplex basis |
+| `src/anukulan/ldl.cpp` | 144 | sparse $LDL^\top$ for the QP's KKT system |
 
 C++20, no dependency outside the standard library. CUDA is optional and compiles
 out when absent.
@@ -2642,16 +2642,16 @@ python3 scripts/fetch_miplib.py           # 103 MILP instances
 
 ```bash
 # LP through the simplex — exact, with a certificate. Crossover is on by default.
-build/sankhya simplex data/netlib/25fv47.mps --presolve
+build/anukulan simplex data/netlib/25fv47.mps --presolve
 
 # LP through the first-order method — this is the path the GPU accelerates
-build/sankhya solve   data/netlib/25fv47.mps --tol=1e-8 --presolve --threads=5
+build/anukulan solve   data/netlib/25fv47.mps --tol=1e-8 --presolve --threads=5
 
 # MILP
-build/sankhya milp    data/miplib/flugpl.mps --time-limit=30
+build/anukulan milp    data/miplib/flugpl.mps --time-limit=30
 
 # The refinery planning model the problem statement is about
-build/sankhya solve   data/refinery/refinery.mps --presolve
+build/anukulan solve   data/refinery/refinery.mps --presolve
 ```
 
 ## 42. Reproducing any number in this document
