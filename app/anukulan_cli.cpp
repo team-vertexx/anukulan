@@ -39,7 +39,9 @@ void print_usage() {
       "                                        and what is left\n"
       "  anukulan family <a.mps> <b.mps> ...    solve a family of same-shape models\n"
       "                                        in order, each cold and from the\n"
-      "                                        previous one's basis (plant memory)\n"
+      "                                        previous one's basis (plant memory);\n"
+      "                                        --from-first starts every member from\n"
+      "                                        the first one's basis (a case stack)\n"
       "  anukulan backends                      report which backends this build has\n"
       "\n"
       "options:\n"
@@ -689,15 +691,24 @@ int command_simplex(const std::vector<std::string>& args) {
 // that remembers the plant would do. Only the start differs. The two answers
 // are compared with each other, and the warm one is also checked against the
 // model's own rows, so a start can save pivots but never change an answer.
+//
+// --from-first is the other shape the same memory serves: a case stack. Before
+// a crude purchase or a shutdown, a planner solves the base plan and then the
+// what-if cases around it, each of which differs from the base alone. So every
+// member after the first starts from the first member's basis, not from the
+// member before it.
 int command_family(const std::vector<std::string>& args) {
   std::vector<std::string> files;
   bool as_json = false;
+  bool from_first = false;
   anukulan::SimplexOptions options;
   options.algorithm = anukulan::SimplexOptions::Algorithm::kDual;
   for (const std::string& a : args) {
     double v = 0.0;
     if (a == "--format=json") {
       as_json = true;
+    } else if (a == "--from-first") {
+      from_first = true;
     } else if (a == "--primal") {
       options.algorithm = anukulan::SimplexOptions::Algorithm::kPrimal;
     } else if (a == "--dual") {
@@ -779,14 +790,16 @@ int command_family(const std::vector<std::string>& args) {
       warm_seconds += warm.solve_seconds;
     }
 
-    // Remember the basis of whichever start finished at an optimum.
+    // Remember the basis of whichever start finished at an optimum. A case
+    // stack keeps the base's basis once it has one.
     const anukulan::SimplexResult& keep = warm_ok ? warm : cold;
-    if (keep.status == anukulan::SimplexStatus::kOptimal) {
+    const bool keep_base = from_first && !memory_basic.empty();
+    if (!keep_base && keep.status == anukulan::SimplexStatus::kOptimal) {
       memory_basic = keep.final_basic;
       memory_status = keep.final_status;
       memory_rows = sf.lp.num_rows();
       memory_cols = sf.lp.num_cols();
-    } else {
+    } else if (!keep_base) {
       memory_basic.clear();
       memory_status.clear();
     }
@@ -829,7 +842,8 @@ int command_family(const std::vector<std::string>& args) {
   if (as_json) {
     std::ostringstream out;
     out.precision(17);
-    out << "{\"summary\":true,\"members_compared\":" << warm_members
+    out << "{\"summary\":true,\"from_first\":" << (from_first ? "true" : "false")
+        << ",\"members_compared\":" << warm_members
         << ",\"cold_pivots\":" << cold_pivots << ",\"warm_pivots\":" << warm_pivots
         << ",\"pivot_ratio\":" << pivot_ratio << ",\"cold_seconds\":" << cold_seconds
         << ",\"warm_seconds\":" << warm_seconds << ",\"time_ratio\":" << time_ratio
@@ -838,12 +852,13 @@ int command_family(const std::vector<std::string>& args) {
     std::fputs(out.str().c_str(), stdout);
   } else {
     std::printf(
-        "\n%d members started from the previous one's basis\n"
+        "\n%d members started from the %s one's basis\n"
         "pivots   cold %lld   warm %lld   warm/cold %.3f\n"
         "seconds  cold %.3f   warm %.3f   warm/cold %.3f\n"
         "answers that differ: %d   warm starts that failed: %d\n",
-        warm_members, cold_pivots, warm_pivots, pivot_ratio, cold_seconds,
-        warm_seconds, time_ratio, disagreements, warm_failures);
+        warm_members, from_first ? "first" : "previous", cold_pivots, warm_pivots,
+        pivot_ratio, cold_seconds, warm_seconds, time_ratio, disagreements,
+        warm_failures);
   }
   return (disagreements == 0 && warm_failures == 0) ? 0 : 1;
 }
