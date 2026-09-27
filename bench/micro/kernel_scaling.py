@@ -4,7 +4,7 @@ iters = sys.argv[2] if len(sys.argv)>2 else "300"
 counts = [2,3,4,5,6,7,8]
 rows={}
 for t in counts:
-    out = subprocess.run(["build/sankhya","solve",inst,"--quiet","--no-polish",
+    out = subprocess.run(["build/anukulan","solve",inst,"--quiet","--no-polish",
                           f"--max-iter={iters}",f"--threads={t}","--profile"],
                          capture_output=True,text=True).stdout
     for line in out.splitlines():
