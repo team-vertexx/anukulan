@@ -479,6 +479,32 @@ BranchAndBoundResult solve_milp(const Model& model,
       } else if (root_cross.ok && r.started_warm) {
         result.root_crossover_used = true;
       }
+      // The same rule for every other node. A child starts from its parent's
+      // basis, and on a model stated in barrels and rupees that basis can be
+      // one the child cannot refactor cleanly: the dual simplex stops with a
+      // numerical error, and the node used to be pruned without proof. On the
+      // refinery MILP those unfinished nodes were all that stood between a
+      // closed gap and a certified optimum. A node that started warm and did not
+      // finish gets a cold dual solve, and if that also breaks down numerically,
+      // a cold primal one, before it is given up on. Either answer is exactly
+      // as much a proof as the warm one would have been.
+      if (r.started_warm && r.status != SimplexStatus::kOptimal &&
+          r.status != SimplexStatus::kInfeasible && budget_left() > 0.0) {
+        SimplexOptions cold = so;
+        cold.start_basic = nullptr;
+        cold.start_status = nullptr;
+        cold.time_limit_seconds = budget_left();
+        result.simplex_iterations += r.iterations;
+        r = solve_lp(lp, cold);
+        result.cold_retried_nodes++;
+        if (r.status == SimplexStatus::kNumericalError && budget_left() > 0.0) {
+          SimplexOptions primal = cold;
+          primal.algorithm = SimplexOptions::Algorithm::kPrimal;
+          primal.time_limit_seconds = budget_left();
+          result.simplex_iterations += r.iterations;
+          r = solve_lp(lp, primal);
+        }
+      }
       result.simplex_iterations += r.iterations;
       out->warm = r.started_warm;
       if (r.started_warm) result.warm_started_nodes++;

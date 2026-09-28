@@ -1019,6 +1019,35 @@ places of relative error, in 167 nodes. It does not prove optimality inside sixt
 seconds where HiGHS needs 26, so the honest problem is now a slow answer rather
 than a wrong one.
 
+**Proved, September 2026.** The last gap was not the bound: the tree closed it
+(dual bound equal to the incumbent, gap 0) and still could not say optimal,
+because two node relaxations stopped with a numerical error and were pruned
+without proof. Each had started from its parent's basis, and on a model whose
+row activities reach 1e9 that basis can be one the child cannot refactor. A warm
+node that does not finish now gets a cold dual solve, then a cold primal one if
+the dual also breaks down, before it is given up on:
+
+```bash
+build/anukulan milp data/refinery/small_milp.mps --time-limit=60
+```
+
+```
+status        optimal
+objective     7.246146141826e+09
+dual bound    7.246146141826e+09   (gap 0.000e+00)
+nodes         165   max depth 22   relaxations 239   incumbents 3
+pruned        17 proved infeasible   0 unconverged
+time          0.652 s
+```
+
+The same value HiGHS proves, now proved here too, in 165 nodes to HiGHS's 26.
+On the nine MIPLIB instances kept locally (`bell5`, `dcmulti`, `egout`,
+`flugpl`, `gesa2`, `gt2`, `lseu`, `p0548`, `rgn`) at 15 s, every instance
+proved before is proved again with the same objective and node count; `gesa2`,
+which runs out of time either way, stops on a different incumbent because the
+retried nodes are now explored rather than dropped. The 40-instance comparison
+with HiGHS in this document was measured before this change.
+
 Found by the debug-solution tracker in one command: solve once with a prune
 disabled to get a point, hand it back with `--debug-solution`, and every prune
 reports whether it discards it. It printed *"propagation declared the child

@@ -680,6 +680,7 @@ struct BranchAndBoundResult {
   // Nodes whose relaxation started from the parent's basis rather than from
   // nothing. Close to the node count is what this is supposed to look like.
   Int warm_started_nodes = 0;
+  Int cold_retried_nodes = 0;   // warm node solves that stopped unfinished and were re-solved cold
   Int simplex_iterations = 0;
   double root_bound_before_cuts = 0.0;
   double root_bound_after_cuts = 0.0;
