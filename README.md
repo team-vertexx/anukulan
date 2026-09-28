@@ -15,12 +15,13 @@ the first-order method. Built for SIH 2026, problem statement **SIH26119**
 
 Nothing here wraps an existing solver. There is no HiGHS, no OR-Tools and no
 SciPy underneath: the sparse matrix type, the LU factorisation, the simplex, the
-branch and bound tree, the ADMM loop and the CUDA kernels are all in `src/`.
+interior point and its sparse Cholesky, the branch and bound tree, the ADMM loop
+and the CUDA kernels are all in `src/`.
 HiGHS appears in this repository exactly once: as the thing we benchmark
 *against*.
 
 ```
-16,363 lines of solver and CLI     14 test suites, all passing
+19,436 lines of solver and CLI     16 test suites, all passing
 88 Netlib instances verified against published optima: 0 wrong answers
 ```
 
