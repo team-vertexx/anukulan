@@ -1084,6 +1084,16 @@ PdhgResult solve_pdhg(const StandardLp& original, const PdhgOptions& options) {
       adopt_candidate();
       break;
     }
+    // The race between engines (`anukulan lp`) cancels whichever ones lost by
+    // setting this once another has an answer. Reusing kTimeLimit rather than a
+    // new status: to whoever reads the result, a cancelled solve and one that
+    // ran out of clock are the same thing, an answer that did not arrive.
+    if (options.stop != nullptr && options.stop->load(std::memory_order_relaxed)) {
+      status = PdhgStatus::kTimeLimit;
+      ++iteration;
+      adopt_candidate();
+      break;
+    }
 
     if (!options.restarts) continue;
 

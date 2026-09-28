@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <string>
 #include <vector>
 
@@ -361,6 +362,12 @@ struct SimplexOptions {
   // ages. Past this the framework is reset to the current nonbasic set and
   // every weight goes back to one.
   double devex_reset_weight = 1e6;
+
+  // The race between engines (app/anukulan_cli.cpp, `anukulan lp`): when this
+  // reads true the solve stops at the next point the time limit is checked and
+  // reports kTimeLimit, so whichever engine finished first can cancel the
+  // others. Null means no cancellation, which is every caller but the race.
+  const std::atomic<bool>* stop = nullptr;
 };
 
 enum class SimplexStatus {

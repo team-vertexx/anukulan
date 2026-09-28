@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cmath>
 #include <string>
 #include <vector>
@@ -405,6 +406,12 @@ struct PdhgOptions {
 
   bool verbose = false;
   Int log_frequency = 5000;
+
+  // The race between engines (app/anukulan_cli.cpp, `anukulan lp`): when this
+  // reads true the solve stops at the next point the time limit is checked and
+  // reports kTimeLimit, so whichever engine finished first can cancel the
+  // others. Null means no cancellation, which is every caller but the race.
+  const std::atomic<bool>* stop = nullptr;
 };
 
 enum class PdhgStatus {

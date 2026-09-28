@@ -42,6 +42,7 @@ add_library(anukulan
   src/anukulan/threading.cpp
   src/anukulan/threaded_backend.cpp
   src/anukulan/cholesky.cpp
+  src/anukulan/ipm.cpp
 )
 target_include_directories(anukulan PUBLIC src)
 

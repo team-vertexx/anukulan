@@ -1,14 +1,22 @@
 #include "anukulan/sparse.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 
 namespace anukulan {
 
-// Monotonic within the process. Not thread-safe by construction because matrices
-// are built before any parallel section here; make it atomic if that changes.
+// Monotonic within the process. The race between engines (`anukulan lp`) is
+// the parallel section this was waiting for: three engines now build matrices
+// concurrently on their own threads, and a plain `++counter` racing across
+// them could hand two different matrices the same id, which is exactly the
+// identity confusion this counter exists to prevent. Atomic, not because any
+// CPU-only path in this race reads the id (none does; id()-keyed caching is
+// the CUDA and threaded backends' concern, and the race uses neither), but
+// because a data race on a non-atomic variable is undefined behaviour
+// regardless of whether anything currently depends on the result.
 std::uint64_t SparseMatrix::next_id() {
-  static std::uint64_t counter = 0;
+  static std::atomic<std::uint64_t> counter{0};
   return ++counter;
 }
 

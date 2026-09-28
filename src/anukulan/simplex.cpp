@@ -410,6 +410,14 @@ SimplexResult solve_simplex(const StandardLp& lp, const SimplexOptions& options)
       status = SimplexStatus::kTimeLimit;
       break;
     }
+    // The race between engines (`anukulan lp`) cancels whichever ones lost by
+    // setting this once another has an answer. Reusing kTimeLimit rather than a
+    // new status: to whoever reads the result, a cancelled solve and one that
+    // ran out of clock are the same thing, an answer that did not arrive.
+    if (options.stop != nullptr && options.stop->load(std::memory_order_relaxed)) {
+      status = SimplexStatus::kTimeLimit;
+      break;
+    }
     result.worst_update_growth =
         std::fmax(result.worst_update_growth, basis.update_growth());
     if (basis.updates_since_refactorization() >= options.refactorization_frequency) {
@@ -1110,6 +1118,14 @@ SimplexResult solve_dual_simplex(const StandardLp& lp,
   std::vector<double> tau;
   for (; iteration < options.max_iterations; ++iteration) {
     if (elapsed() > options.time_limit_seconds) {
+      status = SimplexStatus::kTimeLimit;
+      break;
+    }
+    // The race between engines (`anukulan lp`) cancels whichever ones lost by
+    // setting this once another has an answer. Reusing kTimeLimit rather than a
+    // new status: to whoever reads the result, a cancelled solve and one that
+    // ran out of clock are the same thing, an answer that did not arrive.
+    if (options.stop != nullptr && options.stop->load(std::memory_order_relaxed)) {
       status = SimplexStatus::kTimeLimit;
       break;
     }
