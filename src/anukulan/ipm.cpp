@@ -1185,6 +1185,19 @@ SimplexResult finish_from_seed(const StandardLp& lp, const std::vector<double>& 
                                const std::vector<double>& seed_y,
                                const CrossoverOptions& crossover_options,
                                const SimplexOptions& base_options) {
+  // base_options.time_limit_seconds is the whole budget left for this call,
+  // warm attempt and cold fallback together - giving the fallback that same
+  // figure again, unreduced by what the warm attempt already spent, is how a
+  // race engine that needs both steps could take twice its allotted share (an
+  // instance where the warm solve runs out the clock, and the cold one then
+  // does too). A small timer local to this call keeps the two honest.
+  const auto start = std::chrono::steady_clock::now();
+  const double budget = base_options.time_limit_seconds;
+  const auto remaining = [&] {
+    return std::fmax(0.0, budget - std::chrono::duration<double>(
+                                        std::chrono::steady_clock::now() - start)
+                                        .count());
+  };
   const CrossoverResult cross = crossover_basis(lp, seed_x, seed_y, crossover_options);
   SimplexResult warm;
   bool have_warm = false;
@@ -1192,11 +1205,14 @@ SimplexResult finish_from_seed(const StandardLp& lp, const std::vector<double>& 
     SimplexOptions warm_options = base_options;
     warm_options.start_basic = &cross.basic;
     warm_options.start_status = &cross.status;
+    warm_options.time_limit_seconds = remaining();
     warm = solve_lp(lp, warm_options);
     have_warm = true;
   }
   if (!have_warm || warm.status != SimplexStatus::kOptimal) {
-    const SimplexResult cold = solve_lp(lp, base_options);
+    SimplexOptions cold_options = base_options;
+    cold_options.time_limit_seconds = remaining();
+    const SimplexResult cold = solve_lp(lp, cold_options);
     if (!have_warm || cold.status == SimplexStatus::kOptimal) return cold;
   }
   return warm;

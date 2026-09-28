@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -17,6 +18,7 @@
 #include "anukulan/presolve.hpp"
 #include "anukulan/qp.hpp"
 #include "anukulan/crossover.hpp"
+#include "anukulan/ipm.hpp"
 #include "anukulan/simplex.hpp"
 #include "anukulan/standard_form.hpp"
 #include "anukulan/threading.hpp"
@@ -35,6 +37,13 @@ void print_usage() {
       "  anukulan milp <file.mps> [options]     solve a MILP by branch and bound\n"
       "  anukulan qp <file.qps> [options]       solve a convex QP by ADMM\n"
       "  anukulan simplex <file.mps> [options]  solve an LP with the primal simplex\n"
+      "  anukulan ipm <file.mps> [options]      solve an LP with the interior point\n"
+      "                                        method, finished by crossover and\n"
+      "                                        the simplex\n"
+      "  anukulan lp <file.mps> [options]       race the dual simplex, the interior\n"
+      "                                        point method and the first-order\n"
+      "                                        method; the first to reach a checked\n"
+      "                                        optimum wins and cancels the rest\n"
       "  anukulan presolve <file.mps> [opts]    reduce a model and report what went\n"
       "                                        and what is left\n"
       "  anukulan family <a.mps> <b.mps> ...    solve a family of same-shape models\n"
@@ -89,7 +98,25 @@ void print_usage() {
       "                       1 (default) is serial; 0 picks a count for this\n"
       "                       machine. The answer is identical at every n.\n"
       "  --solution=<path>    write the primal solution so it can be checked\n"
-      "                       independently\n");
+      "                       independently\n"
+      "\n"
+      "ipm options (interior point method, and its share of the race):\n"
+      "  --tol=<x>            relative tolerance on the residuals and the gap,\n"
+      "                       default 1e-8\n"
+      "  --max-iter=<n>       iteration limit, default 200\n"
+      "  --max-correctors=<n> Gondzio centrality correctors per iteration, default 2\n"
+      "  --time-limit=<s>     wall clock limit in seconds\n"
+      "  --no-crossover       report the interior point iterate itself rather than\n"
+      "                       seeding the simplex basis from it\n"
+      "  --presolve           reduce the model first, then map the answer back\n"
+      "  --verbose            print progress every iteration\n"
+      "\n"
+      "lp options (the race between engines):\n"
+      "  --time-limit=<s>     wall clock limit shared by every engine, default 60\n"
+      "  --engines=<list>     comma-separated subset of simplex,ipm,pdhg\n"
+      "                       (default: all three)\n"
+      "  --presolve           reduce the model first, then map the answer back\n"
+      "  --verbose            print progress from whichever engines support it\n");
 }
 
 // "--tol=1e-6" -> 1e-6. Returns false when the argument is not this option at
@@ -681,6 +708,344 @@ int command_simplex(const std::vector<std::string>& args) {
       r.refactorizations, r.solve_seconds, checked.row_violation,
       checked.bound_violation);
   return r.status == anukulan::SimplexStatus::kOptimal ? 0 : 1;
+}
+
+// The interior point method, finished by crossover and the simplex: the same
+// shape as command_simplex's own --crossover path above, with solve_ipm in
+// place of solve_pdhg as the seed. The output mirrors command_simplex's so the
+// same bench script style can parse either.
+int command_ipm(const std::vector<std::string>& args) {
+  if (args.empty()) {
+    std::fprintf(stderr, "ipm: expected a file name\n");
+    return 2;
+  }
+  bool as_json = false;
+  bool quiet = false;
+  bool use_presolve = false;
+  bool use_crossover = true;
+  anukulan::PresolveOptions presolve_options;
+  anukulan::IpmOptions options;
+  anukulan::CrossoverOptions crossover_options;
+  for (std::size_t i = 1; i < args.size(); ++i) {
+    const std::string& a = args[i];
+    double v = 0.0;
+    if (value_of(a, "--tol=", &v)) {
+      options.tolerance = v;
+    } else if (value_of(a, "--max-iter=", &v)) {
+      options.max_iterations = static_cast<anukulan::Int>(v);
+    } else if (value_of(a, "--max-correctors=", &v)) {
+      options.max_correctors = static_cast<anukulan::Int>(v);
+    } else if (value_of(a, "--time-limit=", &v)) {
+      options.time_limit_seconds = v;
+    } else if (value_of(a, "--crossover-dual-weight=", &v)) {
+      crossover_options.dual_weight = v;
+    } else if (a == "--no-crossover") {
+      use_crossover = false;
+    } else if (a == "--presolve") {
+      use_presolve = true;
+    } else if (a == "--verbose") {
+      options.verbose = true;
+    } else if (a == "--format=json") {
+      as_json = true;
+    } else if (a == "--quiet") {
+      quiet = true;
+    } else if (a != "--format=human") {
+      std::fprintf(stderr, "ipm: unknown option \"%s\"\n", a.c_str());
+      return 2;
+    }
+  }
+
+  const anukulan::MpsReadResult read_result = anukulan::read_mps(args[0]);
+  if (!read_result.ok) {
+    std::fprintf(stderr, "error: %s\n", read_result.error.c_str());
+    return 1;
+  }
+  if (read_result.model.has_integers() && !quiet) {
+    std::fprintf(stderr,
+                 "warning: model has integer variables; solving the continuous "
+                 "relaxation\n");
+  }
+
+  anukulan::PresolveResult pre;
+  anukulan::Model solved_model = read_result.model;
+  if (use_presolve) {
+    pre = anukulan::presolve(read_result.model, presolve_options);
+    if (pre.status != anukulan::PresolveStatus::kReduced) {
+      std::printf("status        %s (proved by presolve, without solving)\n",
+                  anukulan::to_string(pre.status).c_str());
+      return 1;
+    }
+    if (!quiet && !as_json) std::fputs(anukulan::format_presolve(pre).c_str(), stdout);
+    solved_model = pre.reduced;
+  }
+
+  const anukulan::StandardFormResult sf = anukulan::to_standard_form(solved_model);
+  if (!sf.ok) {
+    std::fprintf(stderr, "error: %s\n", sf.error.c_str());
+    return 1;
+  }
+
+  const auto solve_start = std::chrono::steady_clock::now();
+  const anukulan::IpmResult ipm = anukulan::solve_ipm(sf.lp, options);
+
+  // The interior point phase can spend part of the time budget on its own,
+  // and crossover's finishing simplex can then fail to reach an optimum and
+  // fall through to a second, cold-started one; each of those must live
+  // within whatever is left of the command's own "--time-limit" when IT
+  // starts, not a share worked out once before either has run, or the two
+  // together could still add up to twice the requested budget.
+  const auto remaining_seconds = [&] {
+    const double used = std::chrono::duration<double>(std::chrono::steady_clock::now() - solve_start).count();
+    return std::fmax(0.0, options.time_limit_seconds - used);
+  };
+
+  anukulan::CrossoverResult cross;
+  anukulan::SimplexResult r;
+  bool have_r = false;
+  if (use_crossover && ipm.status == anukulan::IpmStatus::kOptimal) {
+    cross = anukulan::crossover_basis(sf.lp, ipm.x, ipm.y, crossover_options);
+    if (cross.ok) {
+      anukulan::SimplexOptions so;
+      so.start_basic = &cross.basic;
+      so.start_status = &cross.status;
+      so.time_limit_seconds = remaining_seconds();
+      r = anukulan::solve_lp(sf.lp, so);
+      have_r = true;
+    }
+  }
+  bool crossover_fell_back = false;
+  if (use_crossover && ipm.status == anukulan::IpmStatus::kOptimal &&
+      (!have_r || r.status != anukulan::SimplexStatus::kOptimal)) {
+    anukulan::SimplexOptions fallback_options;
+    fallback_options.time_limit_seconds = remaining_seconds();
+    const anukulan::SimplexResult again = anukulan::solve_lp(sf.lp, fallback_options);
+    if (!have_r || again.status == anukulan::SimplexStatus::kOptimal) {
+      r = again;
+      crossover_fell_back = have_r;
+      have_r = true;
+    }
+  }
+
+  // Without a usable crossover (either turned off, or the interior point
+  // method itself did not reach an optimum), the interior point iterate is
+  // the answer - not a vertex, but exactly what the method promises, and
+  // reported honestly as such rather than run through a simplex that would
+  // only fail on it.
+  anukulan::ModelViolation checked;
+  if (have_r) {
+    if (use_presolve && !r.x.empty()) r.x = pre.postsolve.apply(r.x);
+    checked = anukulan::measure_violation(read_result.model, r.x);
+    if (r.status == anukulan::SimplexStatus::kOptimal && checked.relative_row_violation > 1e-6) {
+      r.status = anukulan::SimplexStatus::kNumericalError;
+      r.message = "the answer misses the model's own rows by " +
+                  std::to_string(checked.row_violation) +
+                  ", so it is not an optimum of the model that was read";
+    }
+  } else {
+    std::vector<double> x = ipm.x;
+    if (use_presolve && !x.empty()) x = pre.postsolve.apply(x);
+    if (!x.empty()) checked = anukulan::measure_violation(read_result.model, x);
+    r.x = std::move(x);
+    r.y = ipm.y;
+    r.objective = ipm.objective;
+    r.iterations = 0;
+    r.solve_seconds = ipm.solve_seconds;
+    r.status = ipm.status == anukulan::IpmStatus::kOptimal
+                   ? (checked.relative_row_violation <= 1e-6 ? anukulan::SimplexStatus::kOptimal
+                                                             : anukulan::SimplexStatus::kNumericalError)
+               : ipm.status == anukulan::IpmStatus::kPrimalInfeasible ? anukulan::SimplexStatus::kInfeasible
+               : ipm.status == anukulan::IpmStatus::kDualInfeasible  ? anukulan::SimplexStatus::kUnbounded
+               : ipm.status == anukulan::IpmStatus::kTimeLimit       ? anukulan::SimplexStatus::kTimeLimit
+               : ipm.status == anukulan::IpmStatus::kIterationLimit  ? anukulan::SimplexStatus::kIterationLimit
+                                                                     : anukulan::SimplexStatus::kNumericalError;
+    r.message = ipm.message;
+  }
+
+  if (as_json) {
+    std::ostringstream out;
+    out.setf(std::ios::boolalpha);
+    out.precision(17);
+    out << "{\"name\":\"" << read_result.model.name << "\","
+        << "\"status\":\"" << anukulan::to_string(r.status) << "\","
+        << "\"objective\":" << json_number(r.objective) << ","
+        << "\"iterations\":" << r.iterations << ","
+        << "\"seconds\":" << r.solve_seconds << ","
+        << "\"presolved\":" << use_presolve << ","
+        << "\"row_violation\":" << checked.row_violation << ","
+        << "\"bound_violation\":" << checked.bound_violation << ","
+        << "\"crossover\":" << use_crossover << ","
+        << "\"crossover_ok\":" << cross.ok << ","
+        << "\"crossover_fell_back\":" << crossover_fell_back << ","
+        << "\"crossover_message\":\"" << cross.message << "\","
+        << "\"crossover_candidates\":" << cross.candidates << ","
+        << "\"crossover_pushed\":" << cross.pushed << ","
+        << "\"ipm_status\":\"" << anukulan::to_string(ipm.status) << "\","
+        << "\"ipm_iterations\":" << ipm.iterations << ","
+        << "\"ipm_seconds\":" << ipm.solve_seconds << ","
+        << "\"ipm_analyse_seconds\":" << ipm.analyse_seconds << ","
+        << "\"ipm_factor_seconds\":" << ipm.factor_seconds << ","
+        << "\"ipm_factor_nonzeros\":" << ipm.factor_nonzeros << ","
+        << "\"ipm_supernodes\":" << ipm.supernodes << ","
+        << "\"ipm_dense_columns\":" << ipm.dense_columns << ","
+        << "\"ipm_dropped_pivots\":" << ipm.dropped_pivots << ","
+        << "\"ipm_cg_iterations\":" << ipm.cg_iterations << ","
+        << "\"ipm_correctors\":" << ipm.correctors << ","
+        << "\"ipm_final_mu\":" << json_number(ipm.final_mu) << ","
+        << "\"ipm_message\":\"" << ipm.message << "\","
+        << "\"std_rows\":" << sf.lp.num_rows() << ","
+        << "\"std_cols\":" << sf.lp.num_cols() << "}\n";
+    std::fputs(out.str().c_str(), stdout);
+    return r.status == anukulan::SimplexStatus::kOptimal ? 0 : 1;
+  }
+
+  std::printf(
+      "status        %s%s%s\n"
+      "objective     %.12e\n"
+      "iterations    %d\n"
+      "ipm           %s, %d iterations, %.3f s (analyse %.3f s, factor %.3f s)\n"
+      "time          %.3f s\n"
+      "vs original   row %.3e  bound %.3e\n",
+      anukulan::to_string(r.status).c_str(), r.message.empty() ? "" : ": ", r.message.c_str(),
+      r.objective, r.iterations, anukulan::to_string(ipm.status).c_str(), ipm.iterations,
+      ipm.solve_seconds, ipm.analyse_seconds, ipm.factor_seconds, r.solve_seconds,
+      checked.row_violation, checked.bound_violation);
+  return r.status == anukulan::SimplexStatus::kOptimal ? 0 : 1;
+}
+
+// The race between the three engines this codebase has for a general LP: see
+// solve_lp_race in ipm.hpp for the mechanics (each on its own std::thread,
+// finished by crossover and the simplex where that applies, first checked
+// optimum wins and cancels the rest). This command is the thin end of it:
+// parse the file and the flags, build the standard form once, hand it to the
+// race, and print who won.
+int command_lp(const std::vector<std::string>& args) {
+  if (args.empty()) {
+    std::fprintf(stderr, "lp: expected a file name\n");
+    return 2;
+  }
+  bool as_json = false;
+  bool quiet = false;
+  bool use_presolve = false;
+  anukulan::RaceOptions options;
+  for (std::size_t i = 1; i < args.size(); ++i) {
+    const std::string& a = args[i];
+    double v = 0.0;
+    if (value_of(a, "--time-limit=", &v)) {
+      options.time_limit_seconds = v;
+    } else if (a.rfind("--engines=", 0) == 0) {
+      options.use_simplex = false;
+      options.use_ipm = false;
+      options.use_pdhg = false;
+      std::stringstream engines(a.substr(std::string("--engines=").size()));
+      std::string engine;
+      while (std::getline(engines, engine, ',')) {
+        if (engine == "simplex") {
+          options.use_simplex = true;
+        } else if (engine == "ipm") {
+          options.use_ipm = true;
+        } else if (engine == "pdhg") {
+          options.use_pdhg = true;
+        } else if (!engine.empty()) {
+          std::fprintf(stderr, "lp: unknown engine \"%s\"\n", engine.c_str());
+          return 2;
+        }
+      }
+    } else if (a == "--presolve") {
+      use_presolve = true;
+    } else if (a == "--verbose") {
+      options.verbose = true;
+      options.ipm_options.verbose = true;
+      options.pdhg_options.verbose = true;
+      options.simplex_options.verbose = true;
+    } else if (a == "--format=json") {
+      as_json = true;
+    } else if (a == "--quiet") {
+      quiet = true;
+    } else if (a != "--format=human") {
+      std::fprintf(stderr, "lp: unknown option \"%s\"\n", a.c_str());
+      return 2;
+    }
+  }
+  if (!options.use_simplex && !options.use_ipm && !options.use_pdhg) {
+    std::fprintf(stderr, "lp: --engines= selected none of simplex, ipm, pdhg\n");
+    return 2;
+  }
+
+  const anukulan::MpsReadResult read_result = anukulan::read_mps(args[0]);
+  if (!read_result.ok) {
+    std::fprintf(stderr, "error: %s\n", read_result.error.c_str());
+    return 1;
+  }
+  if (read_result.model.has_integers() && !quiet) {
+    std::fprintf(stderr,
+                 "warning: model has integer variables; solving the continuous "
+                 "relaxation\n");
+  }
+
+  anukulan::PresolveResult pre;
+  anukulan::Model solved_model = read_result.model;
+  if (use_presolve) {
+    pre = anukulan::presolve(read_result.model, anukulan::PresolveOptions{});
+    if (pre.status != anukulan::PresolveStatus::kReduced) {
+      std::printf("status        %s (proved by presolve, without solving)\n",
+                  anukulan::to_string(pre.status).c_str());
+      return 1;
+    }
+    if (!quiet && !as_json) std::fputs(anukulan::format_presolve(pre).c_str(), stdout);
+    solved_model = pre.reduced;
+  }
+
+  const anukulan::StandardFormResult sf = anukulan::to_standard_form(solved_model);
+  if (!sf.ok) {
+    std::fprintf(stderr, "error: %s\n", sf.error.c_str());
+    return 1;
+  }
+
+  const anukulan::RaceResult race = anukulan::solve_lp_race(
+      read_result.model, sf.lp, use_presolve ? &pre.postsolve : nullptr, options);
+
+  if (as_json) {
+    std::ostringstream out;
+    out.setf(std::ios::boolalpha);
+    out.precision(17);
+    out << "{\"name\":\"" << read_result.model.name << "\","
+        << "\"status\":\"" << anukulan::to_string(race.status) << "\","
+        << "\"winner\":\"" << race.winner << "\","
+        << "\"objective\":" << json_number(race.objective) << ","
+        << "\"row_violation\":" << race.row_violation << ","
+        << "\"bound_violation\":" << race.bound_violation << ","
+        << "\"presolved\":" << use_presolve << ","
+        << "\"message\":\"" << race.message << "\","
+        << "\"engines\":[";
+    for (std::size_t i = 0; i < race.engines.size(); ++i) {
+      const anukulan::RaceEngineOutcome& e = race.engines[i];
+      if (i > 0) out << ",";
+      out << "{\"name\":\"" << e.name << "\","
+          << "\"won\":" << e.won << ","
+          << "\"status\":\"" << anukulan::to_string(e.status) << "\","
+          << "\"seconds\":" << e.seconds << ","
+          << "\"seed_iterations\":" << e.seed_iterations << ","
+          << "\"simplex_iterations\":" << e.simplex_iterations << "}";
+    }
+    out << "],"
+        << "\"std_rows\":" << sf.lp.num_rows() << ","
+        << "\"std_cols\":" << sf.lp.num_cols() << "}\n";
+    std::fputs(out.str().c_str(), stdout);
+    return race.status == anukulan::SimplexStatus::kOptimal ? 0 : 1;
+  }
+
+  std::printf("status        %s%s%s\n"
+             "winner        %s\n"
+             "objective     %.12e\n"
+             "vs original   row %.3e  bound %.3e\n",
+             anukulan::to_string(race.status).c_str(), race.message.empty() ? "" : ": ",
+             race.message.c_str(), race.winner.empty() ? "(none)" : race.winner.c_str(),
+             race.objective, race.row_violation, race.bound_violation);
+  for (const anukulan::RaceEngineOutcome& e : race.engines) {
+    std::printf("  %-8s %-16s %7.3f s%s\n", e.name.c_str(), anukulan::to_string(e.status).c_str(),
+               e.seconds, e.won ? "  (won)" : "");
+  }
+  return race.status == anukulan::SimplexStatus::kOptimal ? 0 : 1;
 }
 
 // Plant memory, measured. A refinery does not solve one model: it re-solves the
@@ -1732,6 +2097,8 @@ int main(int argc, char** argv) {
   if (command == "standard") return command_standard(rest);
   if (command == "presolve") return command_presolve(rest);
   if (command == "simplex") return command_simplex(rest);
+  if (command == "ipm") return command_ipm(rest);
+  if (command == "lp") return command_lp(rest);
   if (command == "family") return command_family(rest);
   if (command == "solve") return command_solve(rest);
   if (command == "milp") return command_milp(rest);
