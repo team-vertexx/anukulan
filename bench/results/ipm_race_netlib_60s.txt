@@ -1,0 +1,103 @@
+# python3 bench/verify_race.py 60
+# every Netlib instance with a published optimum, race between dual simplex, IPM+crossover, PDHG+crossover, 60s shared budget
+
+89 instances with a published optimum, 60s each
+
+  25fv47       ok      winner pdhg
+  80bau3b      ok      winner ipm
+  adlittle     ok      winner ipm
+  afiro        ok      winner ipm
+  agg          ok      winner ipm
+  agg2         ok      winner ipm
+  agg3         ok      winner ipm
+  bandm        ok      winner ipm
+  beaconfd     ok      winner simplex
+  blend        ok      winner ipm
+  bnl1         ok      winner ipm
+  bnl2         ok      winner pdhg
+  boeing1      ok      winner ipm
+  boeing2      ok      winner ipm
+  bore3d       ok      winner simplex
+  brandy       ok      winner ipm
+  capri        ok      winner ipm
+  cycle        numerical error  (simplex: the starting basis cannot be made dual feasible: column 16 wants a bound it does not have. Use the primal.)
+  czprob       ok      winner ipm
+  d2q06c       ok      winner pdhg
+  d6cube       ok      winner simplex
+  degen2       ok      winner pdhg
+  degen3       time limit  (pdhg: )
+  dfl001       time limit  (simplex: )
+  e226         ok      winner ipm
+  etamacro     ok      winner ipm
+  fffff800     ok      winner ipm
+  finnis       ok      winner ipm
+  fit1d        ok      winner ipm
+  fit1p        ok      winner pdhg
+  fit2d        ok      winner ipm
+  fit2p        ok      winner ipm
+  forplan      ok      winner ipm
+  ganges       ok      winner simplex
+  gfrd-pnc     ok      winner simplex
+  greenbea     ok      winner ipm
+  greenbeb     ok      winner ipm
+  grow15       ok      winner simplex
+  grow22       ok      winner ipm
+  grow7        ok      winner simplex
+  israel       ok      winner pdhg
+  kb2          ok      winner simplex
+  lotfi        ok      winner ipm
+  maros-r7     ok      winner pdhg
+  maros        ok      winner ipm
+  modszk1      ok      winner ipm
+  nesm         ok      winner ipm
+  perold       ok      winner ipm
+  pilot        time limit  (pdhg: )
+  pilot4       ok      winner ipm
+  pilot87      time limit  (pdhg: )
+  pilotnov     ok      winner ipm
+  recipe       ok      winner simplex
+  sc105        ok      winner pdhg
+  sc205        ok      winner ipm
+  sc50a        ok      winner ipm
+  sc50b        ok      winner ipm
+  scagr25      ok      winner ipm
+  scagr7       ok      winner ipm
+  scfxm1       ok      winner ipm
+  scfxm2       ok      winner ipm
+  scfxm3       ok      winner ipm
+  scorpion     ok      winner ipm
+  scrs8        ok      winner ipm
+  scsd1        ok      winner simplex
+  scsd6        ok      winner simplex
+  scsd8        ok      winner pdhg
+  sctap1       ok      winner ipm
+  sctap2       ok      winner ipm
+  sctap3       ok      winner ipm
+  seba         ok      winner simplex
+  share1b      ok      winner ipm
+  share2b      ok      winner ipm
+  shell        ok      winner ipm
+  ship04l      ok      winner ipm
+  ship04s      ok      winner ipm
+  ship08l      ok      winner ipm
+  ship08s      ok      winner ipm
+  ship12l      ok      winner ipm
+  ship12s      ok      winner ipm
+  sierra       ok      winner simplex
+  stair        ok      winner ipm
+  standata     ok      winner simplex
+  standmps     ok      winner simplex
+  stocfor1     ok      winner ipm
+  stocfor2     ok      winner ipm
+  tuff         ok      winner ipm
+  wood1p       time limit  (simplex: )
+  woodw        ok      winner ipm
+
+89 instances: 83 correct, 0 WRONG, 6 did not finish
+winners: {'pdhg': 9, 'ipm': 59, 'simplex': 15}
+  did not finish: cycle (numerical error)
+  did not finish: degen3 (time limit)
+  did not finish: dfl001 (time limit)
+  did not finish: pilot (time limit)
+  did not finish: pilot87 (time limit)
+  did not finish: wood1p (time limit)

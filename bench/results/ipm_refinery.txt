@@ -1,0 +1,47 @@
+# build/anukulan ipm data/refinery/refinery.mps --presolve
+# build/anukulan lp data/refinery/refinery.mps --presolve
+# build/anukulan solve data/refinery/refinery.mps --presolve --format=json   (existing first-order command, cross-check)
+
+# build/anukulan ipm data/refinery/refinery.mps --presolve
+presolve      reduced
+rows          1380 -> 1380
+columns       4368 -> 3072
+nonzeros      10888 -> 9592
+rounds        2
+time          0.0017 s
+removed by    empty row 0, singleton row 0, redundant row 0,
+              forcing row 0, duplicate row 0,
+              fixed column 0, empty column 0, free singleton 0,
+              slack singleton 1296 (0 from an inequality),
+              doubleton equation 0, dual fixing 0
+bounds cut    5138  (4128 were infinite before, largest now 1.500e+06)
+status        optimal
+objective     2.426062266887e+10
+iterations    1028
+ipm           optimal, 20 iterations, 0.024 s (analyse 0.002 s, factor 0.004 s)
+time          0.220 s
+vs original   row 2.384e-07  bound 2.547e-10
+
+# build/anukulan lp data/refinery/refinery.mps --presolve
+presolve      reduced
+rows          1380 -> 1380
+columns       4368 -> 3072
+nonzeros      10888 -> 9592
+rounds        2
+time          0.0016 s
+removed by    empty row 0, singleton row 0, redundant row 0,
+              forcing row 0, duplicate row 0,
+              fixed column 0, empty column 0, free singleton 0,
+              slack singleton 1296 (0 from an inequality),
+              doubleton equation 0, dual fixing 0
+bounds cut    5138  (4128 were infinite before, largest now 1.500e+06)
+status        optimal
+winner        ipm
+objective     2.426062266887e+10
+vs original   row 2.384e-07  bound 2.547e-10
+  ipm      optimal            0.753 s  (won)
+  simplex  time limit         0.760 s
+  pdhg     time limit         0.799 s
+
+# cross-check: build/anukulan solve data/refinery/refinery.mps --presolve --format=json (existing command)
+{"name":"REFINERY","status":"optimal","objective":24260634696.87014,"presolved":true,"original_row_violation":1.461264306679368,"original_row_violation_relative":9.7417555500254203e-07,"dual_exact":false,"original_bound_violation":0.093699124721752014,"iterations":75960,"restarts":20,"polish_attempts":0,"polish_iterations":0,"polished":false,"seconds":2.782932851,"phase_scaling":0.001324993,"phase_matrix_norm":0.0048809209999999999,"phase_setup":0.00047081,"phase_iterating":2.6992646680000014,"phase_checks":0.07650915099999997,"phase_polishing":0,"rel_primal":2.0253119102298271e-07,"rel_dual":0,"rel_gap":2.3642955519036449e-08,"rel_primal_inf":9.7417555500254203e-07,"rel_dual_inf":0,"abs_primal":1.461264306679368,"abs_dual":0,"matrix_norm":0.95748498498501167,"row_spread_before":40400,"row_spread_after":6.3064271793536646,"std_rows":2676,"std_cols":3072}

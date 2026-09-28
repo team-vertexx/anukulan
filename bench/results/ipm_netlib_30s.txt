@@ -1,0 +1,44 @@
+# python3 bench/verify_ipm.py 30
+# every Netlib instance with a published optimum, 30s per call, this build's default tolerance (1e-8)
+
+89 instances with a published optimum
+
+  CROSSOVER cycle        numerical error  
+  CROSSOVER d6cube       time limit  
+  CROSSOVER degen3       time limit  
+  CROSSOVER dfl001       time limit  
+  ALONE     fit1p        numerical error  
+  CROSSOVER fit1p        numerical error  
+  ALONE     fit2p        numerical error  
+  CROSSOVER fit2p        numerical error  
+  ALONE     greenbea     numerical error  
+  CROSSOVER greenbea     numerical error  
+  CROSSOVER pilot        numerical error  
+  ALONE     pilot87      WRONG  got 301.7103482 want 301.7107283
+  CROSSOVER pilot87      time limit  
+  CROSSOVER scsd1        numerical error  
+  CROSSOVER wood1p       numerical error  
+
+IPM alone, tol 1e-8, 30s limit:
+  85 reach the published optimum (1e-6 relative), 1 WRONG, 3 did not finish
+  iterations: min 6, median 13, max 41, mean 15.5
+    fit1p        numerical error  
+    fit2p        numerical error  
+    greenbea     numerical error  
+    pilot87      WRONG  301.7103482380116 (published 301.71072827)
+
+IPM plus crossover and the simplex:
+  78 at the optimum, 0 WRONG, 11 did not finish
+  finishing simplex iterations: min 0, median 220, max 28155, mean 1285.5
+  ipm seed iterations: min 6, median 13, max 36, mean 15.1
+    cycle        numerical error  
+    d6cube       time limit  
+    degen3       time limit  
+    dfl001       time limit  
+    fit1p        numerical error  
+    fit2p        numerical error  
+    greenbea     numerical error  
+    pilot        numerical error  
+    pilot87      time limit  
+    scsd1        numerical error  
+    wood1p       numerical error  
